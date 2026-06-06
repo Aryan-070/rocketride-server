@@ -99,9 +99,9 @@ export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFS
 
 	const text = authenticated
 		? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-			t('addSource.formStep.authenticated' as any)
+			t('addSource.formStep.authenticated' as any, { defaultValue: 'Authenticated' })
 		: // eslint-disable-next-line @typescript-eslint/no-explicit-any
-			t('addSource.formStep.loginWithGoogleButton' as any);
+			t('addSource.formStep.loginWithGoogleButton' as any, { defaultValue: 'Login with Google' });
 
 	// Whenever the selected node's formData changes, publish the latest user token to a global
 	// marker so GoogleDrivePickerWidget can detect when a fresh token is available after OAuth.
@@ -125,7 +125,7 @@ export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFS
 
 	return (
 		<Box sx={{ mt: 1, pl: 6.2, pr: 5.4 }}>
-			<Button startIcon={<GoogleIcon />} onClick={handleHybridSignIn} {...props} sx={{ width: 1 }} color={color} variant="outlined" disabled={authenticated}>
+			<Button startIcon={<GoogleIcon />} onClick={handleHybridSignIn} {...props} sx={{ width: 1, textTransform: 'none' }} color={color} variant="outlined" disabled={authenticated}>
 				{text}
 			</Button>
 		</Box>

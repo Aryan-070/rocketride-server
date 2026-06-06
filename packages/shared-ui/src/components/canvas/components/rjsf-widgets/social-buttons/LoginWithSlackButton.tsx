@@ -83,11 +83,11 @@ export default function LoginWithSlackButton<T = unknown, S extends StrictRJSFSc
 	// Slack uses a single `token` field for authentication (unlike Microsoft's three-field check)
 	const authenticated = formValues?.parameters?.token?.length;
 
-	const text = authenticated ? t('addSource.formStep.authenticated') : t('addSource.formStep.loginWithSlackButton');
+	const text = authenticated ? t('addSource.formStep.authenticated', { defaultValue: 'Authenticated' }) : t('addSource.formStep.loginWithSlackButton', { defaultValue: 'Login with Slack' });
 
 	return (
 		<Box sx={{ mt: 1, pl: 6.2, pr: 5.4 }}>
-			<Button onClick={handleHybridSignIn} {...props} sx={{ width: 1 }} color={color} variant="outlined" disabled={authenticated}>
+			<Button onClick={handleHybridSignIn} {...props} sx={{ width: 1, textTransform: 'none' }} color={color} variant="outlined" disabled={authenticated}>
 				{text}
 			</Button>
 		</Box>
