@@ -83,7 +83,13 @@ export default function LoginWithSlackButton<T = unknown, S extends StrictRJSFSc
 	// Slack uses a single `token` field for authentication (unlike Microsoft's three-field check)
 	const authenticated = formValues?.parameters?.token?.length;
 
-	const text = authenticated ? t('addSource.formStep.authenticated', { defaultValue: 'Authenticated' }) : t('addSource.formStep.loginWithSlackButton', { defaultValue: 'Login with Slack' });
+	// i18n is not initialized in every host (e.g. the VS Code webview); fall back
+	// to a literal when t() echoes the key back so the button never shows a raw key.
+	const label = (key: string, fallback: string): string => {
+		const value = t(key) as string;
+		return value && value !== key ? value : fallback;
+	};
+	const text = authenticated ? label('addSource.formStep.authenticated', 'Authenticated') : label('addSource.formStep.loginWithSlackButton', 'Login with Slack');
 
 	return (
 		<Box sx={{ mt: 1, pl: 6.2, pr: 5.4 }}>

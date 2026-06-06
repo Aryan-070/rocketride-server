@@ -97,11 +97,15 @@ export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFS
 	// Check if user is already authenticated by looking for a userToken in either nested or flat location
 	const authenticated = selectedNode?.data?.formData?.parameters?.google?.userToken?.length || selectedNode?.data?.formData?.parameters?.userToken?.length;
 
-	const text = authenticated
-		? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-			t('addSource.formStep.authenticated' as any, { defaultValue: 'Authenticated' })
-		: // eslint-disable-next-line @typescript-eslint/no-explicit-any
-			t('addSource.formStep.loginWithGoogleButton' as any, { defaultValue: 'Login with Google' });
+	// i18n is not initialized in every host (e.g. the VS Code webview). When a key
+	// doesn't resolve, t() returns the key itself — fall back to a literal so the
+	// button never shows a raw key.
+	const label = (key: string, fallback: string): string => {
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const value = t(key as any) as string;
+		return value && value !== key ? value : fallback;
+	};
+	const text = authenticated ? label('addSource.formStep.authenticated', 'Authenticated') : label('addSource.formStep.loginWithGoogleButton', 'Login with Google');
 
 	// Whenever the selected node's formData changes, publish the latest user token to a global
 	// marker so GoogleDrivePickerWidget can detect when a fresh token is available after OAuth.
