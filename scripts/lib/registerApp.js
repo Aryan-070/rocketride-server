@@ -224,6 +224,10 @@ function registerApp(appRoot) {
 				...(appManifest.public === false ? { public: false } : {}),
 				// Include billing section (plans array) for seed_apps to provision Stripe products
 				...(appManifest.billing ? { billing: appManifest.billing } : {}),
+				// Permission-gated apps — user must hold ALL listed sysPermissions to see the app
+				...(appManifest.requiredPermissions?.length
+					? { requiredPermissions: appManifest.requiredPermissions }
+					: {}),
 			};
 
 			// Upsert into build/apps.json (dev server publicDir)
