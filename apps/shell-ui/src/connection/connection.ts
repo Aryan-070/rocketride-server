@@ -301,6 +301,11 @@ export class ConnectionManager implements IConnectionManager {
 	/** Module-level flag to prevent double bootstrap under React StrictMode. */
 	private bootStarted = false;
 
+	/** One-shot guard: startOAuth always ends in a full-page redirect, so it must
+	 *  never run twice in one page load (double authorize → Zitadel invalidates the
+	 *  first code → PKCE 400 → re-auth loop). */
+	private oauthStarted = false;
+
 	/**
 	 * Redirect the browser to the OAuth provider for authorization.
 	 *
@@ -308,20 +313,34 @@ export class ConnectionManager implements IConnectionManager {
 	 * the legacy PKCE flow if no auth provider is configured.
 	 */
 	public async startOAuth(): Promise<void> {
-		if (this.authProvider) {
-			await this.authProvider.signIn();
-			return;
+		// One-shot: a redirect is coming; never start a second authorize in the
+		// same page load (that invalidates the first code and 400s the exchange).
+		// The guard is released on any path that does NOT actually navigate, so a
+		// failed initiation can still be retried within the same page load.
+		if (this.oauthStarted) return;
+		this.oauthStarted = true;
+		try {
+			if (this.authProvider) {
+				await this.authProvider.signIn();
+				return;
+			}
+			// Legacy fallback — remove once all callers pass authProvider
+			if (!this.zitadelUrl || !this.zitadelClientId) {
+				console.error('[ConnectionManager] Zitadel not configured');
+				this.emit('shell:error', { error: new Error('Zitadel not configured') });
+				this.oauthStarted = false; // no redirect happened — allow a retry
+				return;
+			}
+			const { generatePkce, buildAuthUrl } = await import('../util/pkce');
+			const { challenge } = await generatePkce();
+			const url = buildAuthUrl(this.zitadelUrl, this.zitadelClientId, window.location.origin, challenge);
+			window.location.replace(url);
+		} catch (err) {
+			// Initiation threw before any redirect (signIn rejected, PKCE/crypto
+			// failure, etc.) — release the guard so a later attempt can retry.
+			this.oauthStarted = false;
+			throw err;
 		}
-		// Legacy fallback — remove once all callers pass authProvider
-		if (!this.zitadelUrl || !this.zitadelClientId) {
-			console.error('[ConnectionManager] Zitadel not configured');
-			this.emit('shell:error', { error: new Error('Zitadel not configured') });
-			return;
-		}
-		const { generatePkce, buildAuthUrl } = await import('../util/pkce');
-		const { challenge } = await generatePkce();
-		const url = buildAuthUrl(this.zitadelUrl, this.zitadelClientId, window.location.origin, challenge);
-		window.location.replace(url);
 	}
 
 	/**
