@@ -346,12 +346,12 @@ class CProfileManager:
         Returns:
             Dict with 'tree', 'total_time', and 'total_calls'.
         """
-        # Step 1: Compute total cumtime across all root-level functions for
-        # the min_pct threshold calculation
+        # Step 1: Compute total cumtime across all functions for the min_pct
+        # threshold calculation (sum, not max — max would skew to one hotspot)
         total_time = 0.0
         total_calls = 0
         for _key, (cc, nc, tt, ct, _callers) in stats_data.items():
-            total_time = max(total_time, ct)
+            total_time += ct
             total_calls += nc
 
         # Minimum absolute time threshold (convert percentage to seconds)
@@ -387,15 +387,17 @@ class CProfileManager:
         # all recorded functions may have callers because the calling functions
         # were already on the stack when profiling started.  These "phantom
         # callers" appear in children_map but not in stats_data.
-        if not root_keys:
-            # Promote children of phantom callers to roots — these are the
-            # real entry points of the profiled portion
-            phantom_callers = set(children_map.keys()) - set(stats_data.keys())
+        # Promote children of phantom callers to roots — these are entry
+        # points whose callers were already on the stack when profiling started.
+        # Always promote (not just when root_keys is empty), otherwise
+        # phantom-rooted branches are silently dropped.
+        phantom_callers = set(children_map.keys()) - set(stats_data.keys())
+        if phantom_callers:
             promoted: set = set()
             for pc in phantom_callers:
                 for child_key, _c_cc, _c_nc, _c_tt, _c_ct in children_map[pc]:
                     promoted.add(child_key)
-            root_keys = list(promoted)
+            root_keys = list(set(root_keys) | promoted)
 
         # Last resort fallback — pick the highest-cumtime functions
         if not root_keys:

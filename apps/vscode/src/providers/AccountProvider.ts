@@ -877,7 +877,7 @@ export class AccountProvider {
 		} catch {
 			// Fallback: inform the user to open a pipeline file manually
 			vscode.window.showInformationMessage(
-				'To subscribe, open a .rrpipe file. The pipeline editor includes the checkout flow.'
+				'To subscribe, create or open a pipeline file. The pipeline editor includes the checkout flow.'
 			);
 		}
 	}

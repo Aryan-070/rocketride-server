@@ -246,7 +246,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			if (mountedRef.current) {
 				setIdentity(result);
 				// Auto-transition off waitlist when an admin grants access
-				if (renderPhase === 'waitlisted' && !result.waitlisted) {
+				if (renderPhase === 'waitlisted' && result.waitlisted === false) {
 					setRenderPhase('shell');
 				}
 			}

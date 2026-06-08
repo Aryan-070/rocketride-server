@@ -292,6 +292,9 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 	const statusIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 	const tasksIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+	// Guard against stale async responses when target changes mid-flight
+	const fetchIdRef = useRef<number>(0);
+
 	// =========================================================================
 	// STATUS POLLING
 	// =========================================================================
@@ -370,6 +373,9 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 		const client = getClient();
 		if (!client) return;
 
+		// Increment fetch ID so stale responses from a previous target are ignored
+		const id = ++fetchIdRef.current;
+
 		// Build shared arguments
 		const args: Record<string, unknown> = {};
 		if (target) args.target = target;
@@ -377,9 +383,11 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 		// Fetch text report — always available
 		try {
 			const textResult = await client.call<{ report: string }>('rrext_cprofile_report', args);
+			if (fetchIdRef.current !== id) return; // stale response
 			setReport(textResult.report || 'No report available.');
 		} catch (err) {
 			console.log('[ProfilerView] Text report fetch failed:', err);
+			if (fetchIdRef.current !== id) return;
 			// Clear stale report so the UI doesn't show outdated results
 			setReport('');
 		}
@@ -387,9 +395,11 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 		// Fetch tree data — may not be available on older servers
 		try {
 			const treeResult = await client.call<ProfileTreeResponse>('rrext_cprofile_report_tree', args);
+			if (fetchIdRef.current !== id) return; // stale response
 			setTreeData(treeResult);
 		} catch (err) {
 			console.log('[ProfilerView] Tree report fetch failed:', err);
+			if (fetchIdRef.current !== id) return;
 			// Clear stale tree data so visualisations don't show outdated results
 			setTreeData(null);
 		}
