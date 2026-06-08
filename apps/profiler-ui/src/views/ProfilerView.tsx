@@ -522,6 +522,11 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 				setOriginalRoot(treeResult.tree);
 				setVizRoot(treeResult.tree);
 				setCallStack([treeResult.tree]);
+			} else {
+				// Clear stale roots when tree response is empty
+				setOriginalRoot(null);
+				setVizRoot(null);
+				setCallStack([]);
 			}
 		} catch (err) {
 			console.log('[ProfilerView] Tree report fetch failed:', err);

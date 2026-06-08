@@ -99,6 +99,9 @@ def _relativize_path(path: str) -> str:
             # Strip up to and including the marker
             return './' + normalised[idx + len(marker) :]
 
+    # Final guard: never expose absolute host paths
+    if normalised.startswith('/') or (len(normalised) >= 2 and normalised[1] == ':'):
+        return './<system>'
     return normalised
 
 
@@ -215,8 +218,12 @@ class CProfileManager:
             yappi.clear_stats()
 
             # Set clock type — 'wall' for wall-clock, 'cpu' for CPU time
-            valid_clock = clock_type if clock_type in ('wall', 'cpu') else 'wall'
-            yappi.set_clock_type(valid_clock)
+            if clock_type not in ('wall', 'cpu'):
+                return {
+                    'status': 'error',
+                    'message': f"Invalid clock_type '{clock_type}': must be 'wall' or 'cpu'",
+                }
+            yappi.set_clock_type(clock_type)
 
             # Start profiling all threads (including builtins)
             yappi.start(builtins=True)

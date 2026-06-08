@@ -867,7 +867,7 @@ export class AccountProvider {
 	 *
 	 * @param panel - The webview panel (used to post error messages if needed).
 	 */
-	private async handleSubscribe(panel: vscode.WebviewPanel): Promise<void> {
+	private async handleSubscribe(_panel: vscode.WebviewPanel): Promise<void> {
 		try {
 			// Open or focus the pipeline editor — its webview renders the
 			// embedded Stripe checkout flow for new subscriptions

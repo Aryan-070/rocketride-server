@@ -2345,11 +2345,17 @@ export class RocketRideClient extends DAPClient {
 	 * @param minPct   - Minimum cumtime percentage threshold (default 0.1).
 	 * @returns Object containing the tree root, total_time, and total_calls.
 	 */
-	async cprofileReportTree(target?: string | null, maxDepth?: number, minPct?: number): Promise<CProfileReportTreeResponse> {
+	async cprofileReportTree(
+		target?: string | null,
+		maxDepth?: number,
+		minPct?: number,
+		includeSystem?: boolean,
+	): Promise<CProfileReportTreeResponse> {
 		const args: Record<string, unknown> = {};
 		if (target) args.target = target;
 		if (maxDepth !== undefined) args.max_depth = maxDepth;
 		if (minPct !== undefined) args.min_pct = minPct;
+		if (includeSystem !== undefined) args.include_system = includeSystem;
 		return this.call<CProfileReportTreeResponse>('rrext_cprofile_report_tree', args);
 	}
 

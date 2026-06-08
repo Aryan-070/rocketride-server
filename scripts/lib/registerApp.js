@@ -225,7 +225,9 @@ function registerApp(appRoot) {
 				// Include billing section (plans array) for seed_apps to provision Stripe products
 				...(appManifest.billing ? { billing: appManifest.billing } : {}),
 				// Permission-gated apps — user must hold ALL listed sysPermissions to see the app
-				...(appManifest.requiredPermissions?.length
+				...(Array.isArray(appManifest.requiredPermissions)
+					&& appManifest.requiredPermissions.length
+					&& appManifest.requiredPermissions.every((p) => typeof p === 'string' && p.length > 0)
 					? { requiredPermissions: appManifest.requiredPermissions }
 					: {}),
 			};

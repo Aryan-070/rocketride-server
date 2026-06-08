@@ -157,7 +157,7 @@ export class SettingsProvider {
 
 					case 'openSubscribe':
 						// Open the Account page billing tab to start the subscribe flow
-						vscode.commands.executeCommand('rocketride.page.account.open', 'billing');
+						await vscode.commands.executeCommand('rocketride.page.account.open', 'billing');
 						break;
 
 					default: {
