@@ -1,7 +1,6 @@
 # Copyright (c) 2026 Aparavi Software AG
 
 import inspect
-import time
 from typing import Callable, Optional
 
 from rocketlib import IInstanceBase, invoke_function, warning
@@ -25,7 +24,7 @@ class LLMBase(IInstanceBase):
         chat = self.IGlobal._chat
         # Backward-compat: drivers that still override the legacy chat(self, question)
         # signature (no streaming callbacks) are called the old way. They keep working
-        # unchanged from develop; native reasoning streaming arrives in their own PR.
+        # unchanged from develop.
         try:
             accepts_stream = 'on_chunk' in inspect.signature(chat.chat).parameters
         except (TypeError, ValueError):
@@ -39,68 +38,40 @@ class LLMBase(IInstanceBase):
             on_reasoning_chunk=on_reasoning_chunk,
         )
 
-    def _streamIdentity(self) -> tuple:
-        # (runId, nodeId) per chunk so the client can demux concurrent LLM nodes (#752).
-        run_id = getattr(self.instance, 'pipeId', 0) if self.instance else 0
-        node_id = ''
-        pipe_type = getattr(self.instance, 'pipeType', None) if self.instance else None
-        if isinstance(pipe_type, dict):
-            node_id = pipe_type.get('id', '') or ''
-        return run_id, node_id
-
     def writeQuestions(self, question: Question):
-        # Stream provider tokens as SSE 'chunk'/'reasoning_chunk'; 'chunk_end' carries finishReason (#752).
-        run_id, node_id = self._streamIdentity()
-        seq = 0
-        reasoning_seq = 0
-        reasoning_started = False
+        # Surface the model's reasoning (chain-of-thought) on the chat-ui 'thinking'
+        # lane — the same SSE channel agents already use, rendered by the existing
+        # collapsible Thinking group. The answer is written normally (not streamed),
+        # so the chat-ui behaves exactly as on develop.
+        reasoning_parts: list = []
 
-        def _emit(event: str, **kw) -> None:
-            try:
-                self.instance.sendSSE(event, runId=run_id, nodeId=node_id, ts=int(time.time() * 1000), **kw)
-            except Exception:
-                pass
-
-        def on_chunk(text: str) -> None:
-            nonlocal seq
-            _emit('chunk', text=text, seq=seq)
-            seq += 1
+        def _noop(_text: str) -> None:
+            pass
 
         def on_reasoning_chunk(text: str) -> None:
-            nonlocal reasoning_seq, reasoning_started
-            reasoning_started = True
-            _emit('reasoning_chunk', text=text, seq=reasoning_seq)
-            reasoning_seq += 1
-
-        finish_holder: dict = {'reason': None}
-
-        def on_finish(reason: Optional[str]) -> None:
-            finish_holder['reason'] = reason
+            if text:
+                reasoning_parts.append(text)
 
         try:
             answer = self._question(
                 question,
-                on_chunk=on_chunk,
-                on_finish=on_finish,
+                on_chunk=_noop,
                 on_reasoning_chunk=on_reasoning_chunk,
             )
         except Exception as e:
-            # Surface the error on the chat-ui lane so it isn't rendered as an empty bubble.
             err_msg = f'**LLM error** — {type(e).__name__}: {e}'
             warning(f'writeQuestions: LLM call failed: {type(e).__name__}: {e}')
-            _emit('chunk', text=err_msg, seq=seq)
-            seq += 1
-            if reasoning_started:
-                _emit('reasoning_end', seq=reasoning_seq)
-            _emit('chunk_end', finishReason='error', seq=seq)
             answer = Answer()
             answer.setAnswer(err_msg)
             self.instance.writeAnswers(answer)
             return
 
-        if reasoning_started:
-            _emit('reasoning_end', seq=reasoning_seq)
-        _emit('chunk_end', finishReason=finish_holder['reason'], seq=seq)
+        reasoning = ''.join(reasoning_parts).strip()
+        if reasoning:
+            try:
+                self.instance.sendSSE('thinking', message=reasoning)
+            except Exception:
+                pass
         self.instance.writeAnswers(answer)
 
     @invoke_function
