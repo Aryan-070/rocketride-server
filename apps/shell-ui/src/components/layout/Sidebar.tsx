@@ -32,7 +32,7 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
 import {
-	BxCog, BxPalette, BxUser, BxExport, BxGridAlt, BxHome,
+	BxCog, BxLock, BxPalette, BxUser, BxExport, BxGridAlt, BxHome,
 } from '../../icons/BoxIcon';
 import { ConnectionManager } from '../../connection/connection';
 import type { IconComponent } from '../../icons/BoxIcon';
@@ -71,8 +71,8 @@ export interface SidebarProps {
 	account: ShellAccountConfig;
 	/** When true, the app switcher submenu in the footer is hidden. */
 	hideAppSwitcher?: boolean;
-	/** Callback to open a shell overlay (account, billing, settings). */
-	onOverlay: (overlay: 'account' | 'settings') => void;
+	/** Callback to open a shell overlay (account, settings, environment). */
+	onOverlay: (overlay: 'account' | 'settings' | 'environment') => void;
 }
 
 // =============================================================================
@@ -327,15 +327,16 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 
 	const footerMenuItems: SidebarFooterMenuItem[] = useMemo(() => {
 		const items: SidebarFooterMenuItem[] = [
+			{ id: 'account', label: 'Account', icon: BxUser, onClick: () => onOverlay('account') },
+			{ id: 'environment', label: 'Variables', icon: BxLock, onClick: () => onOverlay('environment') },
+			{ id: 'settings', label: 'Settings', icon: BxCog, onClick: () => onOverlay('settings') },
 			{
-				id: 'theme', label: 'Theme', icon: BxPalette,
+				id: 'theme', label: 'Theme', icon: BxPalette, dividerBefore: true,
 				submenu: themeOptions.map((t) => ({
 					id: t.id, label: t.name, checked: prefs.theme === t.id,
 					onClick: () => handleThemeSelect(t.id),
 				})),
 			},
-			{ id: 'account', label: 'Account', icon: BxUser, onClick: () => onOverlay('account') },
-			{ id: 'settings', label: 'Settings', icon: BxCog, onClick: () => onOverlay('settings') },
 		];
 
 		if (showAppSwitcher) {
@@ -350,7 +351,7 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 			};
 
 			items.push({
-				id: 'apps', label: 'Switch App', icon: BxGridAlt, dividerBefore: true,
+				id: 'apps', label: 'Switch App', icon: BxGridAlt,
 				submenu: appManifest
 					.filter((a) => a.id !== 'rocketride.home' && a.id !== 'rocketride.hello')
 					.filter((a) => isOnDesktop(a.id))
@@ -362,7 +363,7 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 			});
 		}
 
-		items.push({ id: 'logout', label: 'Log out', icon: BxExport, dividerBefore: !showAppSwitcher, onClick: () => account.onLogout?.() });
+		items.push({ id: 'logout', label: 'Log out', icon: BxExport, dividerBefore: true, onClick: () => account.onLogout?.() });
 
 		return items;
 	}, [themeOptions, prefs.theme, showAppSwitcher, appManifest, activeAppId, isOnDesktop, account, handleThemeSelect, onOverlay]);
