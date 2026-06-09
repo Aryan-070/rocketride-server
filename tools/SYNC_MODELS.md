@@ -79,6 +79,7 @@ python tools/src/sync_models.py --provider llm_openai --model-source openrouter 
 | `llm_perplexity`     | `llm_perplexity`     | `ROCKETRIDE_PERPLEXITY_KEY`       |
 | `llm_qwen`           | `llm_qwen`           | `ROCKETRIDE_QWEN_KEY`             |
 | `llm_minimax`        | `llm_minimax`        | `ROCKETRIDE_MINIMAX_KEY`          |
+| `llm_kimi`           | `llm_kimi`           | `ROCKETRIDE_KIMI_KEY`             |
 | `llm_baidu_qianfan`  | `llm_baidu_qianfan`  | `ROCKETRIDE_BAIDU_QIANFAN_KEY`    |
 
 If an API key env var is not set the provider is skipped with a warning (not an error).
@@ -267,7 +268,7 @@ pip install -r tools/requirements.txt
 
 | Package                    | Purpose                                                                  |
 | -------------------------- | ------------------------------------------------------------------------ |
-| `openai`                   | OpenAI, Mistral (OpenAI-compat), DeepSeek, xAI, Perplexity, Qwen clients |
+| `openai`                   | OpenAI, Mistral (OpenAI-compat), DeepSeek, xAI, Perplexity, Qwen, Kimi clients |
 | `anthropic`                | Anthropic client                                                         |
 | `google-genai`             | Gemini client (`from google import genai`)                               |
 | `litellm`                  | Model database for token limit lookup                                    |
