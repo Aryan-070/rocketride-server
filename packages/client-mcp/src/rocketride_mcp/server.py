@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from mcp.server.lowlevel import Server, NotificationOptions
 from mcp.server.models import InitializationOptions
@@ -35,58 +35,32 @@ import mcp.types as types
 from rocketride import RocketRideClient
 
 from .config import load_settings
-from .prompts import list_prompts, get_prompt
 from .resources import list_resources, read_resource
-from .tools import get_tools, format_tools, execute_tool
+from .errors import HardError, normalize_error
+from .registry import TaskRegistry
+from .tooling import ToolRegistry
 
-# Global client instance
+# Global client + framework singletons
 _client: RocketRideClient | None = None
+TOOLS = ToolRegistry()
+_tasks = TaskRegistry()
 
 
-def _format_result_text(name: str, filepath: str, result: Dict[str, Any]) -> str:
-    text_lines: List[str] = []
-    text_lines.append(f'Sent data to pipeline: {name} (filepath: {filepath})')
-    if isinstance(result, dict):
-        texts = result.get('text')
-        appended: str | None = None
-        if isinstance(texts, list):
-            appended = '\n\n'.join([t for t in texts if isinstance(t, str)])
-        elif isinstance(texts, str):
-            appended = texts
-        else:
-            try:
-                appended = json.dumps(result, ensure_ascii=False)
-            except (TypeError, ValueError):
-                appended = None
-        if appended:
-            text_lines.append(appended)
-    return '\n\n'.join(text_lines)
-
-
-async def _dynamic_tools() -> List[Dict[str, Any]]:
+async def _dispatch(name: str, arguments: Dict[str, Any]) -> list[types.TextContent]:
+    """Run a registered tool through the error normalizer and serialize its result."""
+    spec = TOOLS.get(name)
+    if spec is None:
+        raise RuntimeError(f'Unknown tool: {name}')
     if _client is None:
-        raise RuntimeError('Client is not connected')
-    tasks = await get_tools(_client)
-    return format_tools(tasks)
-
-
-async def _handle_call(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-    if _client is None:
-        raise RuntimeError('Client is not connected')
-    filepath = (arguments or {}).get('filepath')
-    exec_resp = await execute_tool(client=_client, filepath=filepath, name=tool_name)
-    status = exec_resp.get('status', 200)
-    is_error = status >= 400
-    result_obj = exec_resp.get('result') if not is_error else None
-    if not is_error:
-        text = _format_result_text(tool_name, str(filepath), result_obj or {})
-    else:
-        text = f'Failed to send data to pipeline: {tool_name} (filepath: {filepath})'
-    return {
-        'isError': is_error,
-        'content': [{'type': 'text', 'text': text}],
-        'structuredContent': {'result': result_obj},
-    }
+        raise HardError('Client is not connected')
+    try:
+        result = await spec.handler(_client, _tasks, arguments or {})
+    except HardError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — normalize every actionable failure
+        result = normalize_error(exc)
+    text = json.dumps(result, ensure_ascii=False, default=str)
+    return [types.TextContent(type='text', text=text)]
 
 
 async def run_server() -> None:
@@ -105,26 +79,16 @@ async def run_server() -> None:
 
     @server.list_tools()  # type: ignore[untyped-decorator,no-untyped-call]
     async def list_tools() -> list[types.Tool]:
-        """Return MCP tool descriptors for all running RocketRide pipelines."""
-        entries = await _dynamic_tools()
-        tools: list[types.Tool] = []
-        for entry in entries:
-            tools.append(
-                types.Tool(
-                    name=entry['name'],
-                    description=entry.get('description', ''),
-                    inputSchema=entry.get('inputSchema', {'type': 'object'}),
-                )
-            )
-        return tools
+        """Return the registered RocketRide MCP tools."""
+        return [types.Tool(name=s.name, description=s.description, inputSchema=s.input_schema) for s in TOOLS.specs()]
 
     @server.call_tool()  # type: ignore[untyped-decorator]
     async def call_tool(name: str, arguments: dict[str, Any] | None) -> list[types.TextContent]:
-        """Execute a pipeline tool by name with the given arguments."""
-        resp = await _handle_call(name, arguments or {})
-        if resp.get('isError'):
-            raise RuntimeError(resp['content'][0]['text'])
-        return [types.TextContent(type='text', text=resp['content'][0]['text'])]
+        """Dispatch a registered tool; hard failures surface as MCP tool errors."""
+        try:
+            return await _dispatch(name, arguments or {})
+        except HardError as e:
+            raise RuntimeError(e.message) from e
 
     # --- Resources -----------------------------------------------------------
 
@@ -137,18 +101,6 @@ async def run_server() -> None:
     async def handle_read_resource(uri: Any) -> str:
         """Fetch the JSON payload for the requested resource URI."""
         return await read_resource(_client, str(uri))
-
-    # --- Prompts -------------------------------------------------------------
-
-    @server.list_prompts()  # type: ignore[untyped-decorator,no-untyped-call]
-    async def handle_list_prompts() -> list[types.Prompt]:
-        """Return all available MCP prompt templates."""
-        return list_prompts()
-
-    @server.get_prompt()  # type: ignore[untyped-decorator]
-    async def handle_get_prompt(name: str, arguments: dict[str, str] | None) -> types.GetPromptResult:
-        """Render a prompt template with the supplied arguments."""
-        return get_prompt(name, arguments)
 
     try:
         async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):

@@ -20,27 +20,44 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
+from __future__ import annotations
 
-"""
-RocketRide MCP (Model Context Protocol) Server Package.
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
 
-This package provides an MCP server implementation that wraps the RocketRide client,
-exposing RocketRide data pipelines as dynamically-discovered MCP tools for AI assistants
-and LLM integrations. The server connects to a RocketRide instance, retrieves available
-pipeline tasks, and allows AI agents to send files through those pipelines for processing.
 
-Primary responsibilities include:
-- Wrapping RocketRideClient to provide MCP-compliant tool discovery and execution
-- Dynamically exposing running RocketRide pipeline tasks as callable MCP tools
-- Managing file upload and processing through RocketRide pipelines
-- Providing built-in convenience tools for common document processing operations
-- Exposing pipeline definitions, node schemas, and server status as MCP Resources
+@dataclass
+class TaskInfo:
+    """Metadata for one active RocketRide task token."""
 
-Public modules:
-- server: Contains run_server() and main() entry points for the MCP stdio server
-- resources: MCP Resource handlers for pipelines, nodes, and server status
-"""
+    token: str
+    pipeline_ref: Optional[str] = None
+    meta: dict = field(default_factory=dict)
 
-from . import resources, server
 
-__all__ = ['resources', 'server']
+class TaskRegistry:
+    """Server-owned registry of active task tokens.
+
+    The client SDK keeps no task registry (open-q #13), so the server tracks
+    live tokens itself to support terminate/monitor/send across tool calls.
+    """
+
+    def __init__(self) -> None:
+        self._tasks: Dict[str, TaskInfo] = {}
+
+    def add(self, token: str, *, pipeline_ref: Optional[str] = None, **meta: object) -> TaskInfo:
+        info = TaskInfo(token=token, pipeline_ref=pipeline_ref, meta=dict(meta))
+        self._tasks[token] = info
+        return info
+
+    def get(self, token: str) -> Optional[TaskInfo]:
+        return self._tasks.get(token)
+
+    def remove(self, token: str) -> None:
+        self._tasks.pop(token, None)
+
+    def tokens(self) -> List[str]:
+        return list(self._tasks)
+
+    def clear(self) -> None:
+        self._tasks.clear()

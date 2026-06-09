@@ -20,27 +20,36 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
+# Tests for rocketride_mcp.registry.
 
-"""
-RocketRide MCP (Model Context Protocol) Server Package.
+from rocketride_mcp.registry import TaskRegistry
 
-This package provides an MCP server implementation that wraps the RocketRide client,
-exposing RocketRide data pipelines as dynamically-discovered MCP tools for AI assistants
-and LLM integrations. The server connects to a RocketRide instance, retrieves available
-pipeline tasks, and allows AI agents to send files through those pipelines for processing.
 
-Primary responsibilities include:
-- Wrapping RocketRideClient to provide MCP-compliant tool discovery and execution
-- Dynamically exposing running RocketRide pipeline tasks as callable MCP tools
-- Managing file upload and processing through RocketRide pipelines
-- Providing built-in convenience tools for common document processing operations
-- Exposing pipeline definitions, node schemas, and server status as MCP Resources
+def test_add_and_get() -> None:
+    reg = TaskRegistry()
+    info = reg.add('tok-1', pipeline_ref='/x/y.pipe', label='ingest')
+    assert info.token == 'tok-1'
+    assert info.pipeline_ref == '/x/y.pipe'
+    assert info.meta['label'] == 'ingest'
+    assert reg.get('tok-1') is info
 
-Public modules:
-- server: Contains run_server() and main() entry points for the MCP stdio server
-- resources: MCP Resource handlers for pipelines, nodes, and server status
-"""
 
-from . import resources, server
+def test_get_unknown_returns_none() -> None:
+    assert TaskRegistry().get('nope') is None
 
-__all__ = ['resources', 'server']
+
+def test_remove_and_tokens() -> None:
+    reg = TaskRegistry()
+    reg.add('a')
+    reg.add('b')
+    assert set(reg.tokens()) == {'a', 'b'}
+    reg.remove('a')
+    assert reg.tokens() == ['b']
+    reg.remove('missing')  # no error
+
+
+def test_clear() -> None:
+    reg = TaskRegistry()
+    reg.add('a')
+    reg.clear()
+    assert reg.tokens() == []

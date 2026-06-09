@@ -20,27 +20,42 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
+# Tests for rocketride_mcp.tooling.
 
-"""
-RocketRide MCP (Model Context Protocol) Server Package.
+from rocketride_mcp.tooling import ToolRegistry
 
-This package provides an MCP server implementation that wraps the RocketRide client,
-exposing RocketRide data pipelines as dynamically-discovered MCP tools for AI assistants
-and LLM integrations. The server connects to a RocketRide instance, retrieves available
-pipeline tasks, and allows AI agents to send files through those pipelines for processing.
 
-Primary responsibilities include:
-- Wrapping RocketRideClient to provide MCP-compliant tool discovery and execution
-- Dynamically exposing running RocketRide pipeline tasks as callable MCP tools
-- Managing file upload and processing through RocketRide pipelines
-- Providing built-in convenience tools for common document processing operations
-- Exposing pipeline definitions, node schemas, and server status as MCP Resources
+def test_register_and_enumerate() -> None:
+    reg = ToolRegistry()
 
-Public modules:
-- server: Contains run_server() and main() entry points for the MCP stdio server
-- resources: MCP Resource handlers for pipelines, nodes, and server status
-"""
+    @reg.register('echo', 'Echo back', {'type': 'object', 'properties': {}})
+    async def _echo(client, tasks, args):  # noqa: ANN001
+        return {'ok': True, 'value': args.get('v')}
 
-from . import resources, server
+    specs = reg.specs()
+    assert len(specs) == 1
+    assert specs[0].name == 'echo'
+    assert specs[0].description == 'Echo back'
+    assert specs[0].input_schema['type'] == 'object'
 
-__all__ = ['resources', 'server']
+
+def test_get_returns_spec_or_none() -> None:
+    reg = ToolRegistry()
+
+    @reg.register('a', 'A', {'type': 'object'})
+    async def _a(client, tasks, args):  # noqa: ANN001
+        return {'ok': True}
+
+    assert reg.get('a').name == 'a'
+    assert reg.get('missing') is None
+
+
+async def test_handler_is_callable() -> None:
+    reg = ToolRegistry()
+
+    @reg.register('echo', 'Echo', {'type': 'object'})
+    async def _echo(client, tasks, args):  # noqa: ANN001
+        return {'ok': True, 'value': args['v']}
+
+    out = await reg.get('echo').handler(None, None, {'v': 42})
+    assert out == {'ok': True, 'value': 42}

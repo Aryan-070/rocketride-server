@@ -20,27 +20,41 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
+from __future__ import annotations
 
-"""
-RocketRide MCP (Model Context Protocol) Server Package.
+from dataclasses import dataclass
+from typing import Awaitable, Callable, Dict, List, Optional
 
-This package provides an MCP server implementation that wraps the RocketRide client,
-exposing RocketRide data pipelines as dynamically-discovered MCP tools for AI assistants
-and LLM integrations. The server connects to a RocketRide instance, retrieves available
-pipeline tasks, and allows AI agents to send files through those pipelines for processing.
+# A tool handler receives the connected client, the task registry, and the
+# parsed arguments, and returns a structured result dict.
+ToolHandler = Callable[..., Awaitable[dict]]
 
-Primary responsibilities include:
-- Wrapping RocketRideClient to provide MCP-compliant tool discovery and execution
-- Dynamically exposing running RocketRide pipeline tasks as callable MCP tools
-- Managing file upload and processing through RocketRide pipelines
-- Providing built-in convenience tools for common document processing operations
-- Exposing pipeline definitions, node schemas, and server status as MCP Resources
 
-Public modules:
-- server: Contains run_server() and main() entry points for the MCP stdio server
-- resources: MCP Resource handlers for pipelines, nodes, and server status
-"""
+@dataclass
+class ToolSpec:
+    name: str
+    description: str
+    input_schema: dict
+    handler: ToolHandler
 
-from . import resources, server
 
-__all__ = ['resources', 'server']
+class ToolRegistry:
+    """Registry of MCP tools, decoupled from the server wiring so tools can be
+    declared in separate modules (Plans 2-4) and registered onto one instance.
+    """
+
+    def __init__(self) -> None:
+        self._tools: Dict[str, ToolSpec] = {}
+
+    def register(self, name: str, description: str, input_schema: dict) -> Callable[[ToolHandler], ToolHandler]:
+        def deco(fn: ToolHandler) -> ToolHandler:
+            self._tools[name] = ToolSpec(name, description, input_schema, fn)
+            return fn
+
+        return deco
+
+    def specs(self) -> List[ToolSpec]:
+        return list(self._tools.values())
+
+    def get(self, name: str) -> Optional[ToolSpec]:
+        return self._tools.get(name)

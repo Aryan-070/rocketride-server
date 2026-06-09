@@ -21,7 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
-"""MCP Resource handlers exposing RocketRide pipeline definitions and node schemas."""
+"""MCP Resource handlers exposing RocketRide pipeline definitions and status."""
 
 from __future__ import annotations
 
@@ -31,12 +31,9 @@ from typing import Any, Dict, List
 import mcp.types as types
 from rocketride import RocketRideClient
 
-from .tools import get_tools
-
 # Canonical resource URIs
 URI_PIPELINES = 'rocketride://pipelines'
 URI_STATUS = 'rocketride://status'
-URI_NODES = 'rocketride://nodes'
 
 _RESOURCES: List[Dict[str, str]] = [
     {
@@ -51,19 +48,13 @@ _RESOURCES: List[Dict[str, str]] = [
         'description': 'Current RocketRide server status and loaded pipelines',
         'mimeType': 'application/json',
     },
-    {
-        'uri': URI_NODES,
-        'name': 'Node Registry',
-        'description': 'Available pipeline node types and their schemas',
-        'mimeType': 'application/json',
-    },
 ]
 
 
 async def list_resources(client: RocketRideClient | None) -> list[types.Resource]:
     """Return the static catalogue of exposed resources.
 
-    The resource list itself is static (three well-known URIs).  The
+    The resource list itself is static (two well-known URIs).  The
     *contents* are dynamic and fetched lazily via ``read_resource``.
     Passing *client* keeps the signature forward-compatible for when
     we want to dynamically discover pipeline-specific resources.
@@ -94,10 +85,24 @@ async def read_resource(client: RocketRideClient | None, uri: str) -> str:
         return await _read_pipelines(client)
     elif uri_str == URI_STATUS:
         return await _read_status(client)
-    elif uri_str == URI_NODES:
-        return await _read_nodes(client)
     else:
         raise ValueError(f'Unknown resource URI: {uri_str}')
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+async def _get_tasks(client: RocketRideClient) -> List[Dict[str, Any]]:
+    """Return the list of available tasks from the connected RocketRide server."""
+    req = client.build_request(command='rrext_get_tasks')
+    resp = await client.request(req)
+    body = (resp or {}).get('body') or {}
+    raw_tasks = body.get('tasks', [])
+    if not isinstance(raw_tasks, list):
+        return []
+    return [t for t in raw_tasks if isinstance(t, dict)]
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +115,7 @@ async def _read_pipelines(client: RocketRideClient | None) -> str:
     if client is None:
         return json.dumps({'pipelines': [], 'error': 'Client is not connected'})
     try:
-        tasks = await get_tools(client)
+        tasks = await _get_tasks(client)
         pipelines: List[Dict[str, Any]] = []
         for task in tasks:
             pipelines.append(
@@ -129,7 +134,7 @@ async def _read_status(client: RocketRideClient | None) -> str:
     if client is None:
         return json.dumps({'connected': False, 'error': 'Client is not connected'})
     try:
-        tasks = await get_tools(client)
+        tasks = await _get_tasks(client)
         return json.dumps(
             {
                 'connected': True,
@@ -140,24 +145,3 @@ async def _read_status(client: RocketRideClient | None) -> str:
         )
     except Exception as exc:
         return json.dumps({'connected': False, 'error': str(exc)})
-
-
-async def _read_nodes(client: RocketRideClient | None) -> str:
-    """Return a JSON object listing available node types.
-
-    RocketRide exposes node information through the ``rrext_get_nodes``
-    command.  If the server doesn't support that command (older versions),
-    we fall back to returning an empty registry.
-    """
-    if client is None:
-        return json.dumps({'nodes': [], 'error': 'Client is not connected'})
-    try:
-        req = client.build_request(command='rrext_get_nodes')
-        resp = await client.request(req)
-        body = (resp or {}).get('body') or {}
-        nodes = body.get('nodes', [])
-        if not isinstance(nodes, list):
-            nodes = []
-        return json.dumps({'nodes': nodes}, ensure_ascii=False)
-    except Exception as exc:
-        return json.dumps({'nodes': [], 'error': str(exc)})

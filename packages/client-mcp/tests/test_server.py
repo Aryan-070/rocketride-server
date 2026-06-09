@@ -1,80 +1,68 @@
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
-# Tests for rocketride_mcp.server helpers.
+# Tests for rocketride_mcp.server dispatch.
 
-from unittest.mock import AsyncMock, MagicMock, patch
+import json
 
 import pytest
 
+from rocketride_mcp.errors import HardError
+from rocketride_mcp.tooling import ToolRegistry
 import rocketride_mcp.server as server_mod
 
 
-def test_format_result_text_basic() -> None:
-    from rocketride_mcp.server import _format_result_text
-
-    text = _format_result_text('ToolName', '/path/to/file', {})
-    assert 'ToolName' in text
-    assert '/path/to/file' in text
-    assert 'Sent data to pipeline' in text
-
-
-def test_format_result_text_with_text_list() -> None:
-    from rocketride_mcp.server import _format_result_text
-
-    text = _format_result_text('T', 'f', {'text': ['a', 'b']})
-    assert 'a' in text and 'b' in text
+@pytest.fixture
+def patched(monkeypatch: pytest.MonkeyPatch) -> ToolRegistry:
+    """Swap the module-level registries for fresh ones and pretend we're connected."""
+    reg = ToolRegistry()
+    monkeypatch.setattr(server_mod, 'TOOLS', reg)
+    monkeypatch.setattr(server_mod, '_client', object())
+    monkeypatch.setattr(server_mod, '_tasks', server_mod.TaskRegistry())
+    return reg
 
 
-def test_format_result_text_with_text_str() -> None:
-    from rocketride_mcp.server import _format_result_text
-
-    text = _format_result_text('T', 'f', {'text': 'single'})
-    assert 'single' in text
+async def test_dispatch_unknown_tool_raises(patched: ToolRegistry) -> None:
+    with pytest.raises(RuntimeError, match='Unknown tool'):
+        await server_mod._dispatch('nope', {})
 
 
-def test_format_result_text_non_dict_result() -> None:
-    from rocketride_mcp.server import _format_result_text
+async def test_dispatch_success_serializes_result(patched: ToolRegistry) -> None:
+    @patched.register('ok', 'ok', {'type': 'object'})
+    async def _ok(client, tasks, args):  # noqa: ANN001
+        return {'ok': True, 'value': args['v']}
 
-    text = _format_result_text('T', 'f', {'text': 123})
-    assert 'Sent data to pipeline' in text
-
-
-async def test_dynamic_tools_raises_when_client_none() -> None:
-    from rocketride_mcp.server import _dynamic_tools
-
-    with patch.object(server_mod, '_client', None):
-        with pytest.raises(RuntimeError, match='Client is not connected'):
-            await _dynamic_tools()
+    out = await server_mod._dispatch('ok', {'v': 7})
+    payload = json.loads(out[0].text)
+    assert payload == {'ok': True, 'value': 7}
 
 
-async def test_handle_call_raises_when_client_none() -> None:
-    from rocketride_mcp.server import _handle_call
+async def test_dispatch_actionable_error_is_structured(patched: ToolRegistry) -> None:
+    @patched.register('boom', 'boom', {'type': 'object'})
+    async def _boom(client, tasks, args):  # noqa: ANN001
+        raise ValueError('missing env key X')
 
-    with patch.object(server_mod, '_client', None):
-        with pytest.raises(RuntimeError, match='Client is not connected'):
-            await _handle_call('ToolName', {})
-
-
-async def test_handle_call_success() -> None:
-    from rocketride_mcp.server import _handle_call
-
-    mock_client = MagicMock()
-    with patch.object(server_mod, '_client', mock_client):
-        with patch('rocketride_mcp.server.execute_tool', new_callable=AsyncMock) as run:
-            run.return_value = {'status': 200, 'result': {'text': 'ok'}}
-            out = await _handle_call('MyTool', {'filepath': '/x/y'})
-    assert out.get('isError') is False
-    assert out['content'][0]['text']
-    assert 'ok' in out['content'][0]['text']
+    out = await server_mod._dispatch('boom', {})
+    payload = json.loads(out[0].text)
+    assert payload['ok'] is False
+    assert payload['error_type'] == 'ValueError'
+    assert 'missing env key X' in payload['message']
 
 
-async def test_handle_call_error_status() -> None:
-    from rocketride_mcp.server import _handle_call
+async def test_dispatch_hard_error_propagates(patched: ToolRegistry) -> None:
+    @patched.register('dead', 'dead', {'type': 'object'})
+    async def _dead(client, tasks, args):  # noqa: ANN001
+        raise ConnectionError('socket closed')
 
-    mock_client = MagicMock()
-    with patch.object(server_mod, '_client', mock_client):
-        with patch('rocketride_mcp.server.execute_tool', new_callable=AsyncMock) as run:
-            run.return_value = {'status': 404, 'result': None}
-            out = await _handle_call('BadTool', {'filepath': '/x'})
-    assert out.get('isError') is True
-    assert 'Failed to send data' in out['content'][0]['text']
+    with pytest.raises(HardError):
+        await server_mod._dispatch('dead', {})
+
+
+async def test_dispatch_requires_client(monkeypatch: pytest.MonkeyPatch, patched: ToolRegistry) -> None:
+    monkeypatch.setattr(server_mod, '_client', None)
+
+    @patched.register('x', 'x', {'type': 'object'})
+    async def _x(client, tasks, args):  # noqa: ANN001
+        return {'ok': True}
+
+    with pytest.raises(HardError, match='not connected'):
+        await server_mod._dispatch('x', {})
