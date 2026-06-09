@@ -1,5 +1,5 @@
-// =============================================================================
 // MIT License
+//
 // Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -9,8 +9,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -19,12 +19,18 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
-// =============================================================================
 
-import { Auth } from './AuthWebview';
-import { mountComponent } from '../../../shared/util/mount';
+/**
+ * Aparavi UI Build Module
+ *
+ * Aparavi AQL Chat — natural-language query interface for Aparavi data.
+ */
+const path = require('path');
+const { createAppModule } = require('../../../scripts/lib/appModule');
 
-// Mount the Auth component
-mountComponent(Auth, 'Auth');
-
-export default Auth;
+module.exports = createAppModule({
+	name: 'aparavi-ui',
+	description: 'Aparavi AQL Chat Application',
+	appRoot: path.join(__dirname, '..'),
+	dev: true,
+});
