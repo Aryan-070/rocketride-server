@@ -172,9 +172,6 @@ def _stream_anthropic_messages_api(
     if client is None:
         raise RuntimeError('ChatAnthropic has no _client for native streaming')
 
-    if on_reasoning_chunk is not None and anthropic_extended_thinking_active(chat):
-        on_reasoning_chunk('_Thinking…_\n\n')
-
     parts: list[str] = []
     finish_reason: Optional[str] = None
     reasoning_deltas = 0

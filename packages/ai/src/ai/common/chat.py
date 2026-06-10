@@ -458,10 +458,6 @@ class ChatBase:
         """
         prompt = validate_prompt(prompt, self._modelTotalTokens, self.getTokens)
 
-        # Prime the Thinking… panel — reasoning models can be silent for >30s.
-        if on_reasoning_chunk is not None:
-            on_reasoning_chunk('_Thinking…_\n\n')
-
         text_parts: list = []
         finish_reason: Optional[str] = None
         try:
@@ -623,10 +619,6 @@ class ChatBase:
                 return ''
 
         _llm = getattr(self, '_llm', None)
-
-        # Prime the Thinking… panel for reasoning profiles (they often pause before any delta).
-        if on_reasoning_chunk_w is not None and getattr(self, '_is_reasoning', False):
-            on_reasoning_chunk_w('_Thinking…_\n\n')
 
         # Call the chat implementation with network retry logic
         # This is where the real communication with the AI provider happens
