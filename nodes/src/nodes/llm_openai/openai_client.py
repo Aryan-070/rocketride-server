@@ -30,6 +30,12 @@ from ai.common.chat import ChatBase
 from ai.common.config import Config
 from langchain_openai import ChatOpenAI
 from openai import OpenAI, APIError, AuthenticationError, RateLimitError, APIConnectionError
+from ai.common.llm_native_stream import gate_model_name
+
+
+def _is_openai_reasoning_model(model: str) -> bool:
+    """OpenAI reasoning models (o-series, gpt-5) use the Responses API."""
+    return gate_model_name(model).startswith(('o1', 'o3', 'o4', 'gpt-5'))
 
 
 class Chat(ChatBase):
@@ -57,9 +63,8 @@ class Chat(ChatBase):
         apikey = config.get('apikey')
         self._apikey = apikey
 
-        # OpenAI deprecated `max_tokens` for reasoning models (o1/o3/o4) and the
-        # gpt-5 family — they require `max_completion_tokens` instead and reject
-        # `max_tokens` with a 400. Same models also refuse `temperature != 1`.
+        # Reasoning models (o-series, gpt-5) need the Responses API + max_completion_tokens.
+        self._is_reasoning = _is_openai_reasoning_model(self._model)
         if self._is_reasoning:
             # Raw client for the Responses API path (reasoning models).
             self._raw_client = OpenAI(api_key=apikey)

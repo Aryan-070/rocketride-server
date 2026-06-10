@@ -77,9 +77,10 @@ class Chat(ChatBase):
             'max_tokens': self._modelOutputTokens,
             'custom_get_token_ids': _estimate_token_ids,
         }
-        kwargs.update(build_anthropic_thinking_kwargs(model_gate, self._modelOutputTokens, self._is_reasoning))
+        kwargs.update(build_anthropic_thinking_kwargs(model_gate, self._modelOutputTokens))
 
         self._extended_thinking = bool(kwargs.get('thinking'))
+        self._is_reasoning = self._extended_thinking
         self._native_stream_provider = 'anthropic'
 
         self._llm = ChatAnthropic(**kwargs)

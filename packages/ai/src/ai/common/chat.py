@@ -156,9 +156,8 @@ class ChatBase:
         debug(f'    Total tokens             : {self._modelTotalTokens}')
         debug(f'    Output tokens            : {self._modelOutputTokens}')
 
-        # Reasoning capability is declared per-model in services.json
-        # (capabilities.reasoning). Read it once here so no driver has to.
-        self._is_reasoning = bool((config.get('capabilities') or {}).get('reasoning'))
+        # Reasoning is derived per provider from the model name (no services.json flag).
+        self._is_reasoning = False
 
     def _ensure_openai_compat_reasoning_stream(self) -> None:
         """Auto-enable reasoning streaming for any OpenAI-compatible driver.
@@ -168,14 +167,13 @@ class ChatBase:
         ``delta.reasoning_content``. ``langchain-openai`` drops that field, so we
         stream through the raw ``openai`` SDK instead. ChatBase builds that client
         here — lazily, because the driver creates ``self._llm`` after
-        ``super().__init__()`` — from the base URL / key already on ``_llm``. No
-        per-provider code: flipping ``capabilities.reasoning`` in services.json is
-        enough. Drivers with a non-OpenAI protocol set ``_native_stream_provider``
-        themselves (Anthropic) or use the Responses API path, and are left as-is.
+        ``super().__init__()`` — from the base URL / key already on ``_llm``.
+        Always attempted for OpenAI-compatible drivers; harmless if the model
+        emits no reasoning. Drivers with a non-OpenAI protocol set
+        ``_native_stream_provider`` themselves (Anthropic) or use the Responses
+        API path, and are left as-is.
         """
         if self._native_stream_provider or self._raw_openai_client is not None:
-            return
-        if not self._is_reasoning:
             return
         llm = getattr(self, '_llm', None)
         base_url = getattr(llm, 'openai_api_base', None)

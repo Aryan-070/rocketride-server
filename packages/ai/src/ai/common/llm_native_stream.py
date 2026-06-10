@@ -47,10 +47,10 @@ def gate_model_name(model: str) -> str:
     return m
 
 
-def build_anthropic_thinking_kwargs(model_gate: str, model_output_tokens: int, enabled: bool) -> Dict[str, Any]:
-    """Return extra ``ChatAnthropic`` kwargs for extended thinking, or ``{}`` if disabled."""
-    if not enabled:
-        return {}
+def build_anthropic_thinking_kwargs(model_gate: str, model_output_tokens: int) -> Dict[str, Any]:
+    """Return ``ChatAnthropic`` thinking kwargs by model name, or ``{}`` if unsupported."""
+    if 'haiku' in model_gate:
+        return {}  # Haiku has no extended thinking — sending it 400s.
     out: Dict[str, Any] = {}
     if model_gate.startswith('claude-opus-4-7') or model_gate.startswith('claude-opus-4-8'):
         out['thinking'] = {'type': 'adaptive', 'display': 'summarized'}
