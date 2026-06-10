@@ -180,16 +180,7 @@ def _inject_source_comments(serialized: str) -> str:
         else:
             result.append(line)
         i += 1
-    text = '\n'.join(result)
-    # Strip trailing commas before a closing `}` (left behind when a `_src_FIELD`
-    # line that was the object's last entry got dropped above). Preserves any
-    # inline `// comment` between the comma and the newline.
-    text = re.sub(
-        r',(\s*//[^\n]*)?(\s*\n\s*\})',
-        lambda m: (m.group(1) or '') + m.group(2),
-        text,
-    )
-    return text
+    return '\n'.join(result)
 
 
 def _serialize_profiles(profiles: Dict[str, Any], indent_level: int = 0) -> str:

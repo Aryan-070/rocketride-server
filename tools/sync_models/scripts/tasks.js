@@ -9,7 +9,6 @@ const path = require('path');
 const { execCommand, PROJECT_ROOT, DIST_ROOT } = require('../../../scripts/lib');
 
 const TOOLS_SRC = path.join(__dirname, '..', 'src', 'sync_models.py');
-const STAMP_REASONING_SRC = path.join(__dirname, '..', 'src', 'stamp_reasoning.py');
 
 // Maps provider key → relative path to its services.json from the repo root.
 // Mirrors _SERVICES_JSON_PATHS in tools/sync_models/src/sync_models.py.
@@ -48,20 +47,7 @@ function makeRunSyncModelsAction(options = {}) {
 			await execCommand(ENGINE, [TOOLS_SRC, ...extraArgs], {
 				task,
 				cwd: PROJECT_ROOT,
-				env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
-			});
-		},
-	};
-}
-
-function makeStampReasoningAction() {
-	return {
-		run: async (_ctx, task) => {
-			task.output = 'Stamping capabilities.reasoning for local providers';
-			await execCommand(ENGINE, [STAMP_REASONING_SRC], {
-				task,
-				cwd: PROJECT_ROOT,
-				env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+				env: { ...process.env },
 			});
 		},
 	};
@@ -114,22 +100,14 @@ module.exports = {
 	actions: [
 		// Internal steps
 		{ name: 'models:run-sync', action: makeRunSyncModelsAction },
-		{ name: 'models:stamp-reasoning', action: makeStampReasoningAction },
 		{ name: 'models:prettier', action: makePrettierAction },
 
-		// Public actions
+		// Public action
 		{
 			name: 'models:update',
 			action: () => ({
 				description: 'Updating models',
 				steps: ['models:run-sync', 'models:prettier'],
-			}),
-		},
-		{
-			name: 'models:stamp-locals',
-			action: () => ({
-				description: 'Stamping reasoning flag for local providers',
-				steps: ['models:stamp-reasoning'],
 			}),
 		},
 	],

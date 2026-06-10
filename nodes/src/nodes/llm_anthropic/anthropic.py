@@ -80,7 +80,6 @@ class Chat(ChatBase):
         kwargs.update(build_anthropic_thinking_kwargs(model_gate, self._modelOutputTokens))
 
         self._extended_thinking = bool(kwargs.get('thinking'))
-        self._is_reasoning = self._extended_thinking
         self._native_stream_provider = 'anthropic'
 
         self._llm = ChatAnthropic(**kwargs)

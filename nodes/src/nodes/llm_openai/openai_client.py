@@ -33,8 +33,8 @@ from openai import OpenAI, APIError, AuthenticationError, RateLimitError, APICon
 from ai.common.llm_native_stream import gate_model_name
 
 
-def _is_openai_reasoning_model(model: str) -> bool:
-    """OpenAI reasoning models (o-series, gpt-5) use the Responses API."""
+def _uses_responses_api(model: str) -> bool:
+    """o-series / gpt-5 stream their reasoning summary via the OpenAI Responses API."""
     return gate_model_name(model).startswith(('o1', 'o3', 'o4', 'gpt-5'))
 
 
@@ -63,9 +63,8 @@ class Chat(ChatBase):
         apikey = config.get('apikey')
         self._apikey = apikey
 
-        # Reasoning models (o-series, gpt-5) need the Responses API + max_completion_tokens.
-        self._is_reasoning = _is_openai_reasoning_model(self._model)
-        if self._is_reasoning:
+        # o-series / gpt-5 stream reasoning via the Responses API + max_completion_tokens.
+        if _uses_responses_api(self._model):
             # Raw client for the Responses API path (reasoning models).
             self._raw_client = OpenAI(api_key=apikey)
             self._llm = ChatOpenAI(

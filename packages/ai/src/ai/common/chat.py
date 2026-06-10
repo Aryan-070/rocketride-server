@@ -100,10 +100,9 @@ class ChatBase:
         _modelTotalTokens (int): Maximum tokens the model can handle in total
     """
 
-    # Opt-in: subclass sets True + sets self._is_reasoning and self._raw_client
-    # to route through the OpenAI Responses API for reasoning-summary streaming.
+    # Opt-in: subclass sets True + sets self._raw_client to route through the
+    # OpenAI Responses API for reasoning-summary streaming.
     SUPPORTS_REASONING_STREAMING: bool = False
-    _is_reasoning: bool = False
     _raw_client = None
 
     # Native token-stream handler key, read by ai.common.llm_native_stream via
@@ -155,9 +154,6 @@ class ChatBase:
         debug(f'    Model                    : {self._model}')
         debug(f'    Total tokens             : {self._modelTotalTokens}')
         debug(f'    Output tokens            : {self._modelOutputTokens}')
-
-        # Reasoning is derived per provider from the model name (no services.json flag).
-        self._is_reasoning = False
 
     def _ensure_openai_compat_reasoning_stream(self) -> None:
         """Auto-enable reasoning streaming for any OpenAI-compatible driver.
@@ -590,7 +586,6 @@ class ChatBase:
             self.SUPPORTS_REASONING_STREAMING
             and self._raw_client is not None
             and hasattr(self._raw_client, 'responses')
-            and self._is_reasoning
         ):
             return self._chat_string_responses(
                 prompt,
