@@ -71,7 +71,6 @@ class Chat(ChatBase):
         super().__init__(provider, connConfig, bag)
 
         # Get the LLM
-        # No `temperature`: removed on Opus 4.7+ (400), aligned with develop (#1195).
         kwargs: Dict[str, Any] = {
             'model': model,
             'api_key': apikey,

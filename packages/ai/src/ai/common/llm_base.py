@@ -22,9 +22,7 @@ class LLMBase(IInstanceBase):
         on_reasoning_chunk: Optional[Callable[[str], None]] = None,
     ) -> Answer:
         chat = self.IGlobal._chat
-        # Backward-compat: drivers that still override the legacy chat(self, question)
-        # signature (no streaming callbacks) are called the old way. They keep working
-        # unchanged from develop.
+        # Legacy drivers override chat(self, question) without streaming callbacks.
         try:
             accepts_stream = 'on_chunk' in inspect.signature(chat.chat).parameters
         except (TypeError, ValueError):
@@ -39,10 +37,7 @@ class LLMBase(IInstanceBase):
         )
 
     def writeQuestions(self, question: Question):
-        # Surface the model's reasoning (chain-of-thought) on the chat-ui 'thinking'
-        # lane — the same SSE channel agents already use, rendered by the existing
-        # collapsible Thinking group. The answer is written normally (not streamed),
-        # so the chat-ui behaves exactly as on develop.
+        # Emit the model's reasoning on the chat-ui 'thinking' lane (same channel as agents).
         reasoning_parts: list = []
 
         def _noop(_text: str) -> None:

@@ -51,8 +51,6 @@ def build_anthropic_thinking_kwargs(model_gate: str, model_output_tokens: int, e
     """Return extra ``ChatAnthropic`` kwargs for extended thinking, or ``{}`` if disabled."""
     if not enabled:
         return {}
-    # No `temperature`: removed on Opus 4.7+ (400) and unneeded elsewhere — extended
-    # thinking already pins the model default. Aligned with develop (#1195).
     out: Dict[str, Any] = {}
     if model_gate.startswith('claude-opus-4-7') or model_gate.startswith('claude-opus-4-8'):
         out['thinking'] = {'type': 'adaptive', 'display': 'summarized'}
