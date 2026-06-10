@@ -66,3 +66,9 @@ async def test_dispatch_requires_client(monkeypatch: pytest.MonkeyPatch, patched
 
     with pytest.raises(HardError, match='not connected'):
         await server_mod._dispatch('x', {})
+
+
+def test_introspection_tools_registered() -> None:
+    # server registers tools at import time via register_all(TOOLS)
+    names = {s.name for s in server_mod.TOOLS.specs()}
+    assert {'list_components', 'describe_component', 'validate_pipeline', 'describe_pipeline'} <= names

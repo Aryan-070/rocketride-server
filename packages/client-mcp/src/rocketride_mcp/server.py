@@ -39,11 +39,13 @@ from .resources import list_resources, read_resource
 from .errors import HardError, normalize_error
 from .registry import TaskRegistry
 from .tooling import ToolRegistry
+from .tools import register_all
 
 # Global client + framework singletons
 _client: RocketRideClient | None = None
 TOOLS = ToolRegistry()
 _tasks = TaskRegistry()
+register_all(TOOLS)
 
 
 async def _dispatch(name: str, arguments: Dict[str, Any]) -> list[types.TextContent]:
