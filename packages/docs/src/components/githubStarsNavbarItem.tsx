@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import clsx from 'clsx';
 import { SiGithub } from 'react-icons/si';
+import { formatStars } from '../lib/format.mjs';
 
 type Props = {
 	href: string;
@@ -11,36 +12,39 @@ type Props = {
 
 const REPO_API = 'https://api.github.com/repos/rocketride-org/rocketride-server';
 const CACHE_KEY = 'rr-github-stars';
-const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6h — keep the count fresh without hammering the API.
+// Successful counts stay fresh for 6h. Failures (rate limit, offline, non-OK)
+// are cached as a null count for a shorter window so we back off rather than
+// refetching on every page load — GitHub's unauthenticated API is 60 req/hr/IP.
+const SUCCESS_TTL_MS = 6 * 60 * 60 * 1000; // 6h
+const FAILURE_TTL_MS = 30 * 60 * 1000; // 30m
+const FETCH_TIMEOUT_MS = 6000;
 
-type CacheEntry = { count: number; at: number };
+// A cached count of null is a remembered failure (negative cache), not a miss.
+type CacheEntry = { count: number | null; at: number };
 
-function readCachedStars(): number | null {
+function readCachedStars(): CacheEntry | null {
 	// localStorage may be unavailable (private mode) and a stale entry may be
 	// malformed JSON — treat any failure as a cache miss rather than throwing.
 	try {
 		const raw = localStorage.getItem(CACHE_KEY);
 		if (!raw) return null;
 		const entry = JSON.parse(raw) as CacheEntry;
-		if (typeof entry?.count !== 'number' || Date.now() - entry.at > CACHE_TTL_MS) return null;
-		return entry.count;
+		if (typeof entry?.at !== 'number') return null;
+		const ttl = typeof entry.count === 'number' ? SUCCESS_TTL_MS : FAILURE_TTL_MS;
+		if (Date.now() - entry.at > ttl) return null;
+		return entry;
 	} catch {
 		return null;
 	}
 }
 
-function writeCachedStars(count: number): void {
+function writeCachedStars(count: number | null): void {
 	// Best-effort cache write; ignore unavailable storage or quota errors.
 	try {
 		localStorage.setItem(CACHE_KEY, JSON.stringify({ count, at: Date.now() } satisfies CacheEntry));
 	} catch {
 		/* no-op */
 	}
-}
-
-function formatStars(count: number): string {
-	if (count < 1000) return String(count);
-	return `${(count / 1000).toFixed(1).replace(/\.0$/, '')}k`;
 }
 
 /**
@@ -62,26 +66,40 @@ export default function GitHubStarsNavbarItem({ href, label = 'GitHub', classNam
 
 		const cached = readCachedStars();
 		if (cached !== null) {
-			setStars(cached);
+			// Fresh entry (a remembered failure has count null → no badge, no refetch).
+			setStars(cached.count);
 			return;
 		}
 
-		fetch(REPO_API)
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+		fetch(REPO_API, { signal: controller.signal, headers: { Accept: 'application/vnd.github+json' } })
 			.then((res) => (res.ok ? res.json() : null))
 			.then((data) => {
-				if (cancelled || typeof data?.stargazers_count !== 'number') return;
-				setStars(data.stargazers_count);
-				writeCachedStars(data.stargazers_count);
+				if (cancelled) return;
+				const count = typeof data?.stargazers_count === 'number' ? data.stargazers_count : null;
+				setStars(count);
+				writeCachedStars(count); // negative-cache failures so we back off
 			})
-			.catch(() => {});
+			.catch(() => {
+				if (!cancelled) writeCachedStars(null);
+			})
+			.finally(() => clearTimeout(timeout));
 
 		return () => {
 			cancelled = true;
+			clearTimeout(timeout);
+			controller.abort();
 		};
 	}, []);
 
+	// The icon is aria-hidden, so fold the count into the accessible name once it
+	// loads — otherwise screen readers announce only "GitHub".
+	const ariaLabel = stars !== null ? `${label}, ${formatStars(stars)} stars` : label;
+
 	return (
-		<a className={clsx('navbar__item', 'navbar__link', 'github-stars', mobile && 'menu__link', className)} href={href} target="_blank" rel="noopener noreferrer" aria-label={label}>
+		<a className={clsx('navbar__item', 'navbar__link', 'github-stars', mobile && 'menu__link', className)} href={href} target="_blank" rel="noopener noreferrer" aria-label={ariaLabel}>
 			<span className="github-stars__count">
 				<SiGithub className="github-stars__icon" aria-hidden="true" />
 				{stars !== null && formatStars(stars)}

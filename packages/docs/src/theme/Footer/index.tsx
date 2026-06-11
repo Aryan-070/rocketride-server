@@ -3,6 +3,7 @@ import Link from '@docusaurus/Link';
 import useBaseUrl from '@docusaurus/useBaseUrl';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import ThemedImage from '@theme/ThemedImage';
+import { isExternal } from '../../lib/format.mjs';
 
 type FooterLink = { label: string; href: string };
 type FooterColumn = { title: string; items: FooterLink[] };
@@ -76,6 +77,7 @@ const SOCIALS: SocialLink[] = [
 	},
 ];
 
+/** Site footer: brand, social links, and the docs navigation spine. */
 export default function Footer(): React.ReactNode {
 	const { siteConfig } = useDocusaurusContext();
 	const logoLight = useBaseUrl('img/rocketride-icon-colored.svg');
@@ -107,9 +109,15 @@ export default function Footer(): React.ReactNode {
 							<ul className="rr-footer__list">
 								{column.items.map((item) => (
 									<li key={item.label}>
-										<Link className="rr-footer__link" to={item.href}>
-											{item.label}
-										</Link>
+										{isExternal(item.href) ? (
+											<a className="rr-footer__link" href={item.href} target="_blank" rel="noopener noreferrer">
+												{item.label}
+											</a>
+										) : (
+											<Link className="rr-footer__link" to={item.href}>
+												{item.label}
+											</Link>
+										)}
 									</li>
 								))}
 							</ul>

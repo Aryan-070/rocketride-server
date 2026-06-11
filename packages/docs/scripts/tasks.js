@@ -3,10 +3,12 @@
  *
  * Co-located documentation site. Discovered by the build orchestrator at
  * packages/docs/scripts/tasks.js; exposes `docs:build` (gather -> index ->
- * compile), `docs:dev`, and `docs:clean`. Bare `builder build` includes
- * docs:build via global-command expansion because it carries a description.
+ * compile), `docs:dev`, `docs:serve`, `docs:test`, and `docs:clean`. Bare
+ * `builder build` includes docs:build via global-command expansion because it
+ * carries a description.
  */
 const path = require('path');
+const { readdir } = require('node:fs/promises');
 const { execCommand, exists, mkdir, rm, setState, parallel, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT } = require('../../../scripts/lib');
 
 // Light, in-tree reference generators that deposit before gather collects them.
@@ -73,6 +75,58 @@ function makeDevStartAction(options = {}) {
 	};
 }
 
+/**
+ * Preview the built static site from SITE_OUT. `docusaurus serve` defaults to
+ * packages/docs/build, but the pipeline emits to SITE_OUT (dist/docs), so point
+ * --dir there. Fails fast with an actionable message when nothing is built yet.
+ *
+ * The `serve` script in package.json mirrors this with a path relative to
+ * packages/docs (`../../dist/docs`), which resolves to the same repo-root
+ * dist/docs as the absolute SITE_OUT here.
+ */
+function makeServeAction() {
+	return {
+		description: 'Serve built docs',
+		run: async (ctx, task) => {
+			if (!(await exists(SITE_OUT))) {
+				throw new Error(`No built docs at ${SITE_OUT}. Run 'builder docs:build' first.`);
+			}
+			await execCommand('pnpm', ['exec', 'docusaurus', 'serve', '--dir', SITE_OUT, '--port', '3000'], { task, cwd: DOCS_DIR, stdio: 'inherit' });
+		}
+	};
+}
+
+/** Recursively collect `*.test.mjs` files under `dir` (absolute paths). */
+async function findTestFiles(dir) {
+	const entries = await readdir(dir, { withFileTypes: true });
+	const files = [];
+	for (const entry of entries) {
+		const full = path.join(dir, entry.name);
+		if (entry.isDirectory()) {
+			files.push(...(await findTestFiles(full)));
+		} else if (entry.name.endsWith('.test.mjs')) {
+			files.push(full);
+		}
+	}
+	return files;
+}
+
+/** Run unit tests for the docs site's pure helpers via Node's test runner. */
+function makeTestAction() {
+	return {
+		description: 'Test docs helpers',
+		run: async (ctx, task) => {
+			const srcDir = path.join(DOCS_DIR, 'src');
+			const testFiles = (await findTestFiles(srcDir)).map((f) => path.relative(DOCS_DIR, f));
+			if (testFiles.length === 0) {
+				task.output = 'No test files found under src/';
+				return;
+			}
+			await execCommand('node', ['--test', '--test-reporter=spec', ...testFiles], { task, cwd: DOCS_DIR });
+		}
+	};
+}
+
 function makeCleanAction() {
 	return {
 		description: 'Clean docs',
@@ -114,6 +168,14 @@ module.exports = {
 				description: 'Start docs dev server',
 				steps: ['docs:gather-dev', 'docs:dev-start']
 			})
+		},
+		{
+			name: 'docs:serve',
+			action: makeServeAction
+		},
+		{
+			name: 'docs:test',
+			action: makeTestAction
 		},
 		{
 			name: 'docs:clean',
