@@ -43,6 +43,8 @@ async def main():
 asyncio.run(main())
 ```
 
+**URI scheme:** the scheme selects the transport. The client normalizes the `uri` to a WebSocket address before connecting: `https://` and `wss://` both resolve to a secure `wss://` connection, while `http://`, `ws://`, and a bare `host:port` resolve to plain `ws://`. For RocketRide Cloud use `https://cloud.rocketride.ai` (or the equivalent `wss://cloud.rocketride.ai`); for a local engine use `ws://localhost:5565`. **Caution:** against a Cloud endpoint always use `https://` or `wss://`, because an `http://` or `ws://` URI (or a bare `host:port`) silently downgrades to an unencrypted `ws://` connection.
+
 Don't have a pipeline yet? Visit [RocketRide on GitHub](https://github.com/rocketride-org/rocketride-server) or download the extension directly in your IDE.
 
 <p align="center">
