@@ -27,7 +27,19 @@ The user just configures **their own** Webhook URL + auth key once, then sends d
 ## What it provides
 
 - **Connection** — Webhook URL + Authorization key (`pk_` public key or private token).
-- **Action — Send to pipeline** — `POST`s the payload to the webhook and returns the pipeline's output.
+- **Actions** — one per pipeline lane; each POSTs with the matching `Content-Type` and returns the pipeline's `answers` synchronously:
+
+  | Action | Lane | Content-Type |
+  | --- | --- | --- |
+  | **Ask a pipeline** | `questions` | `application/rocketride-question` (serialized `Question`) |
+  | **Send text** | `text` | `text/plain` |
+  | **Send file** | `image` / `audio` / `video` / `documents` | the file's MIME type (`image/png`, `audio/mpeg`, `application/pdf`, …) |
+
+  The pipeline must wire the relevant lane to its processing nodes for an answer to come back.
+
+## Example pipeline
+
+`examples/rocketride-webhook.pipe` is a ready-to-run pipeline to test the connector end-to-end: `webhook → LlamaIndex agent → HTTP tool (catfact) → response_answers`. Run it in RocketRide, copy its **Webhook URL** + **`pk_`** into the connection, and call **Send to pipeline** with lane = `Question` — it returns a cat fact in `answer`.
 
 ## Develop & test locally
 

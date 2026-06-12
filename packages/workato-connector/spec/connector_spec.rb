@@ -14,6 +14,11 @@ RSpec.describe 'RocketRide connector' do
     expect(action_names).to include('send_to_pipeline')
   end
 
+  it 'declares the supported lanes' do
+    lanes = connector.source['pick_lists'][:lanes].call(nil).map(&:last)
+    expect(lanes).to include('question', 'text', 'image', 'audio', 'video', 'document')
+  end
+
   it 'declares the connection fields' do
     field_names = connector.source['connection'][:fields].map { |f| f[:name] }
     expect(field_names).to include('webhook_url', 'auth_key')
