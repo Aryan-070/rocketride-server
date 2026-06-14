@@ -23,6 +23,8 @@
 
 import { ChangeEvent, FocusEvent, useState, useEffect, useCallback, useRef, KeyboardEvent } from 'react';
 import TextField, { TextFieldProps } from '@mui/material/TextField';
+import InputAdornment from '@mui/material/InputAdornment';
+import IconButton from '@mui/material/IconButton';
 import { ariaDescribedByIds, BaseInputTemplateProps, examplesId, getInputProps, labelValue, FormContextType, RJSFSchema, StrictRJSFSchema } from '@rjsf/utils';
 
 import { useEnvVarAutocomplete } from '../hooks/useEnvVarAutocomplete';
@@ -125,6 +127,16 @@ export default function BaseInputTemplate<
 		[autocomplete, onEnvVarSelect],
 	);
 
+	// Open the full variable list from the picker button (no `${` typing needed).
+	const handleOpenPicker = useCallback(() => {
+		const el = inputRef.current;
+		if (!el) return;
+		el.focus();
+		autocomplete.openAll(el, el.selectionStart ?? String(controlledValue ?? '').length);
+	}, [autocomplete, controlledValue]);
+
+	const showVarPicker = envKeys.length > 0 && !disabled && !readonly;
+
 	// Sync controlled value when the form re-renders with a new prop value (e.g., reset or external update)
 	useEffect(() => {
 		if (value !== undefined && value !== null) {
@@ -195,6 +207,27 @@ export default function BaseInputTemplate<
 				inputRef={inputRef}
 				InputLabelProps={DisplayInputLabelProps}
 				{...(textFieldProps as TextFieldProps)}
+				InputProps={{
+					...(textFieldProps as TextFieldProps).InputProps,
+					endAdornment: showVarPicker ? (
+						<InputAdornment position="end">
+							<IconButton
+								size="small"
+								edge="end"
+								tabIndex={-1}
+								aria-label="Insert variable"
+								title="Insert variable"
+								onClick={handleOpenPicker}
+								sx={{ fontSize: 13, fontFamily: 'var(--rr-font-family-widget, monospace)', color: 'var(--rr-text-secondary)', px: 0.5 }}
+							>
+								{'${}'}
+							</IconButton>
+							{(textFieldProps as TextFieldProps).InputProps?.endAdornment}
+						</InputAdornment>
+					) : (
+						(textFieldProps as TextFieldProps).InputProps?.endAdornment
+					),
+				}}
 				sx={{
 					...sx,
 					'& input[type="number"]::-webkit-outer-spin-button, & input[type="number"]::-webkit-inner-spin-button': {

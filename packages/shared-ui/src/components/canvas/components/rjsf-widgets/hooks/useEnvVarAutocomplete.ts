@@ -19,6 +19,8 @@ export interface UseEnvVarAutocompleteResult {
 	anchorEl: HTMLElement | null;
 	/** Called on every input change to detect the `${` trigger. Pass the value and cursor position directly from the event target. */
 	handleInputChange: (value: string, cursorPos: number, anchorElement: HTMLElement | null) => void;
+	/** Opens the full list of available keys (no `${` needed), inserting at `cursorPos` on select. Used by the explicit picker button. */
+	openAll: (anchorElement: HTMLElement | null, cursorPos: number) => void;
 	/** Called when the user selects a suggestion. Returns the new field value. */
 	handleSelect: (key: string, currentValue: string, inputEl: HTMLInputElement | HTMLTextAreaElement | null) => string;
 	/** Dismisses the popover. */
@@ -110,6 +112,21 @@ export function useEnvVarAutocomplete(envKeys: string[]): UseEnvVarAutocompleteR
 		[],
 	);
 
+	const openAll = useCallback(
+		(anchorElement: HTMLElement | null, cursorPos: number) => {
+			if (!anchorElement || !envKeys.length) return;
+			// No `${` was typed — insert at the current cursor position. handleSelect
+			// replaces from triggerStart to the cursor, so a zero-width range there
+			// just inserts `${KEY}` without clobbering surrounding text.
+			triggerStartRef.current = cursorPos;
+			setSuggestions(envKeys);
+			setAnchorEl(anchorElement);
+			setHighlightedIndex(0);
+			setIsOpen(true);
+		},
+		[envKeys],
+	);
+
 	const handleDismiss = useCallback(() => {
 		setIsOpen(false);
 	}, []);
@@ -124,5 +141,5 @@ export function useEnvVarAutocomplete(envKeys: string[]): UseEnvVarAutocompleteR
 		[suggestions.length],
 	);
 
-	return { isOpen, suggestions, anchorEl, handleInputChange, handleSelect, handleDismiss, highlightedIndex, moveHighlight };
+	return { isOpen, suggestions, anchorEl, handleInputChange, openAll, handleSelect, handleDismiss, highlightedIndex, moveHighlight };
 }

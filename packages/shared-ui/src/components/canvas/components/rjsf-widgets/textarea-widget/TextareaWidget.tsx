@@ -6,6 +6,8 @@
 
 import { ChangeEvent, FocusEvent, useState, useEffect, useCallback, useRef, KeyboardEvent, FC } from 'react';
 import TextField from '@mui/material/TextField';
+import InputAdornment from '@mui/material/InputAdornment';
+import IconButton from '@mui/material/IconButton';
 import { WidgetProps } from '@rjsf/utils';
 
 import { useEnvVarAutocomplete } from '../hooks/useEnvVarAutocomplete';
@@ -40,6 +42,16 @@ const TextareaWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus
 		},
 		[autocomplete, controlledValue, onChange, options.emptyValue],
 	);
+
+	// Open the full variable list from the picker button (no `${` typing needed).
+	const handleOpenPicker = useCallback(() => {
+		const el = inputRef.current;
+		if (!el) return;
+		el.focus();
+		autocomplete.openAll(el, el.selectionStart ?? String(controlledValue ?? '').length);
+	}, [autocomplete, controlledValue]);
+
+	const showVarPicker = envKeys.length > 0 && !disabled && !readonly;
 
 	const handleKeyDown = useCallback(
 		(e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -90,6 +102,27 @@ const TextareaWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus
 				disabled={disabled || readonly}
 				error={!!rawErrors?.length}
 				variant="outlined"
+				InputProps={
+					showVarPicker
+						? {
+								endAdornment: (
+									<InputAdornment position="end" sx={{ alignItems: 'flex-start', mt: 1 }}>
+										<IconButton
+											size="small"
+											edge="end"
+											tabIndex={-1}
+											aria-label="Insert variable"
+											title="Insert variable"
+											onClick={handleOpenPicker}
+											sx={{ fontSize: 13, fontFamily: 'var(--rr-font-family-widget, monospace)', color: 'var(--rr-text-secondary)', px: 0.5 }}
+										>
+											{'${}'}
+										</IconButton>
+									</InputAdornment>
+								),
+							}
+						: undefined
+				}
 				InputLabelProps={{ shrink: true }}
 				helperText={typeof options?.description === 'string' ? options.description : schema?.description}
 			/>

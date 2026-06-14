@@ -23,7 +23,7 @@
 
 import { useEffect, useRef, useState, useCallback, KeyboardEvent, FC } from 'react';
 import { WidgetProps } from '@rjsf/utils';
-import { InputAdornment, TextField, Tooltip } from '@mui/material';
+import { IconButton, InputAdornment, TextField, Tooltip } from '@mui/material';
 import { Delete } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
 
@@ -110,6 +110,18 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 		[autocomplete, onEnvVarSelect],
 	);
 
+	// Open the full variable list from the picker button (no `${` typing needed).
+	const handleOpenPicker = useCallback(() => {
+		const el = inputRef.current;
+		if (!el) return;
+		el.focus();
+		autocomplete.openAll(el, el.selectionStart ?? String(tempValue ?? '').length);
+	}, [autocomplete, tempValue]);
+
+	// Only offer the picker while the field is editable (an existing key is masked
+	// + read-only; the user clears it via the trash button before entering a new one).
+	const showVarPicker = envKeys.length > 0 && !disabled && !readonly && !maskApiKey;
+
 	// When in masked mode, scroll the input to the end so the visible trailing characters are shown
 	useEffect(() => {
 		if (inputRef.current && maskApiKey) {
@@ -147,7 +159,7 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 				slotProps={{
 					input: {
 						readOnly: maskApiKey || readonly,
-						endAdornment: maskApiKey && !readonly && (
+						endAdornment: maskApiKey && !readonly ? (
 							<InputAdornment position="end">
 								<Tooltip title={t('form.apiKeyRemoveTooltip')}>
 									<Delete
@@ -167,7 +179,21 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 									/>
 								</Tooltip>
 							</InputAdornment>
-						),
+						) : showVarPicker ? (
+							<InputAdornment position="end">
+								<IconButton
+									size="small"
+									edge="end"
+									tabIndex={-1}
+									aria-label="Insert variable"
+									title="Insert variable"
+									onClick={handleOpenPicker}
+									sx={{ fontSize: 13, fontFamily: 'var(--rr-font-family-widget, monospace)', color: 'var(--rr-text-secondary)', px: 0.5 }}
+								>
+									{'${}'}
+								</IconButton>
+							</InputAdornment>
+						) : undefined,
 					},
 				}}
 			/>
