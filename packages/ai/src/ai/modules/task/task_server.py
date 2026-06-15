@@ -91,8 +91,6 @@ from .task_engine import Task
 from .types import LAUNCH_TYPE
 from .pipeline import resolve_implied_source
 
-# todo: feat/deploy2 - enable TaskScheduler
-# from .task_scheduler import TaskScheduler
 from rocketlib import debug
 
 
@@ -219,19 +217,12 @@ class TaskServer(DAPBase):
         self._store_instance: Optional[Store] = None
         self._deployments_instance: Optional[DeploymentStore] = None
 
-        # Scheduler for running deployed pipelines
-        # todo: feat/deploy2 - enable TaskScheduler
-        # self.scheduler = TaskScheduler(self)
-
         # Start background tasks that must be cancelled on shutdown.
         self._bg_tasks: List[asyncio.Task] = [
             # Cleanup for completed tasks
             asyncio.create_task(self._cleanup_tasks()),
             # TTL monitoring
             asyncio.create_task(self._monitor_ttl()),
-            # Run scheduled deployments
-            # todo: feat/deploy2 - enable TaskScheduler
-            # asyncio.create_task(self.scheduler.start()),
         ]
 
         # Store reference to parent server for statistics integration
@@ -384,8 +375,6 @@ class TaskServer(DAPBase):
 
     async def shutdown(self) -> None:
         """Cancel all background tasks."""
-        # todo: feat/deploy2 - enable TaskScheduler
-        # await self.scheduler.stop()
         bg_tasks = getattr(self, '_bg_tasks', [])
         for task in bg_tasks:
             if not task.done():
