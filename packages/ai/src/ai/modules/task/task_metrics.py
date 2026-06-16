@@ -26,11 +26,6 @@ from ai.constants import (
     CONST_METRICS_SAMPLE_INTERVAL,
     CONST_BILLING_REPORT_INTERVAL,
     CONST_METRICS_STOP_TIMEOUT,
-    CONST_RATE_VCPU_HOUR,
-    CONST_RATE_MEMORY_GB_HOUR,
-    CONST_RATE_GPU_GB_HOUR,
-    CONST_RATE_GPU_INFERENCE_SECOND,
-    CONST_CUSTOM_BILLING_RATES,
 )
 
 if TYPE_CHECKING:
@@ -154,6 +149,11 @@ class TaskMetrics:
         self._last_report_tokens_gpu_inference: float = 0.0
         self._last_report_tokens_custom: dict[str, float] = {}
 
+        # Billing gate: when True, billing accumulators and token updates are
+        # suppressed until set_service_up(True) is called. Resource metrics
+        # (peaks, averages) are still tracked so the dashboard shows live usage.
+        self._billing_gated: bool = True
+
         # Subprocess-reported metrics (absolute snapshots from >MET* protocol)
         self._subprocess_counters: dict[str, float] = {}
         self._subprocess_timers: dict[str, float] = {}
@@ -212,6 +212,16 @@ class TaskMetrics:
             self._gpu_available = False
             self._gpu_count = 0
             self._pynvml_available = False
+
+    def set_service_up(self, value: bool) -> None:
+        """Signal that the pipeline is ready (or no longer ready) to accept data.
+
+        When the pipeline signals serviceUp, billing accumulation begins.
+        Resource metrics (peaks, averages) are tracked regardless of this flag.
+        """
+        if value and self._billing_gated:
+            debug('[TaskMetrics] Pipeline ready — billing accumulation started')
+        self._billing_gated = not value
 
     def _sample_cpu_memory(self) -> None:
         """
@@ -349,20 +359,15 @@ class TaskMetrics:
         """
         Accumulate current sample into totals.
 
+        Peaks are always tracked for dashboard visibility. Averages and
+        billing accumulators are suppressed until the pipeline signals
+        serviceUp (via set_service_up), so users are not charged for
+        startup time (model loading, dependency installation).
+
         Args:
             interval: Time elapsed since last sample (seconds)
         """
-        # Update billing accumulators (internal)
-        # Use raw CPU percent (unnormalized) for accurate vCPU-seconds billing
-        self._sample_count += 1
-        self._duration_seconds += interval
-        self._cpu_seconds += self._cpu_percent_raw * interval / 100.0
-        self._memory_mb_seconds += self._status.metrics.cpu_memory_mb * interval
-
-        if self._gpu_available:
-            self._gpu_memory_mb_seconds += self._status.metrics.gpu_memory_mb * interval
-
-        # Track peaks (user-facing)
+        # Track peaks (user-facing — always, regardless of billing gate)
         self._status.metrics.peak_cpu_percent = max(
             self._status.metrics.peak_cpu_percent, self._status.metrics.cpu_percent
         )
@@ -373,7 +378,21 @@ class TaskMetrics:
             self._status.metrics.peak_gpu_memory_mb, self._status.metrics.gpu_memory_mb
         )
 
-        # Calculate averages (user-facing)
+        # Billing accumulators and token updates — only after serviceUp
+        if self._billing_gated:
+            return
+
+        # Update billing accumulators (internal)
+        # Use raw CPU percent (unnormalized) for accurate vCPU-seconds billing
+        self._sample_count += 1
+        self._duration_seconds += interval
+        self._cpu_seconds += self._cpu_percent_raw * interval / 100.0
+        self._memory_mb_seconds += self._status.metrics.cpu_memory_mb * interval
+
+        if self._gpu_available:
+            self._gpu_memory_mb_seconds += self._status.metrics.gpu_memory_mb * interval
+
+        # Calculate averages (user-facing — billing period only)
         if self._duration_seconds > 0:
             self._status.metrics.avg_cpu_percent = (self._cpu_seconds / self._duration_seconds) * 100
             self._status.metrics.avg_cpu_memory_mb = self._memory_mb_seconds / self._duration_seconds
@@ -387,37 +406,58 @@ class TaskMetrics:
         """
         Update cumulative token usage from resource accumulators.
 
+        Rates are loaded from the DB-backed billing rates cache
+        (Account.get_billing_rates) so admins can adjust pricing at
+        runtime. All time-based metrics use milliseconds; memory
+        metrics use GB-seconds.
+
         Calculates tokens from:
-        - OS-level resource usage (CPU-seconds, memory MB-seconds, GPU MB-seconds)
-        - Subprocess-reported GPU inference timing (from >MET* protocol)
-        - Subprocess-reported custom counters (from >MET* protocol)
+        - OS-level resource usage (CPU ms, memory GB-sec, GPU memory GB-sec)
+        - Subprocess-reported GPU inference timing (from >MET* protocol, ms)
+        - Subprocess-reported timers/counters with matching DB rate keys
         """
-        # Convert OS-level accumulators to billable resource-hours
-        vcpu_hours = self._cpu_seconds / 3600
-        memory_gb_hours = self._memory_mb_seconds / 1024 / 3600
-        gpu_gb_hours = self._gpu_memory_mb_seconds / 1024 / 3600
+        from ai.account import account
 
-        # OS-level token charges
-        cpu_tokens = vcpu_hours * CONST_RATE_VCPU_HOUR
-        memory_tokens = memory_gb_hours * CONST_RATE_MEMORY_GB_HOUR
-        gpu_tokens = gpu_gb_hours * CONST_RATE_GPU_GB_HOUR
+        rates = account.get_billing_rates()
 
-        # GPU inference tokens (subprocess-reported, timer in milliseconds)
-        gpu_inference_ms = self._subprocess_timers.get('gpu', 0.0)
-        gpu_inference_seconds = gpu_inference_ms / 1000.0
-        gpu_inference_tokens = gpu_inference_seconds * CONST_RATE_GPU_INFERENCE_SECOND
+        # OS-level: convert accumulators to rate-table units
+        cpu_ms = self._cpu_seconds * 1000.0
+        memory_gb_sec = self._memory_mb_seconds / 1024.0
 
-        # Custom counter tokens (subprocess-reported, rate table lookup)
+        # OS-level token charges (rate is tokens-per-unit from DB)
+        cpu_tokens = cpu_ms * rates.get('cpu_compute', 0.0)
+        memory_tokens = memory_gb_sec * rates.get('cpu_memory', 0.0)
+
+        # GPU inference tokens (subprocess-reported timer in ms)
+        gpu_inference_ms = self._subprocess_timers.get('gpu_compute', 0.0)
+        gpu_inference_tokens = gpu_inference_ms * rates.get('gpu_compute', 0.0)
+
+        # GPU memory tokens — pro-rated by model size during actual inference
+        # only (reported by model server or local-mode wrappers as GB-sec
+        # in the 'gpu_memory' timer). Value is already in GB-sec (not ms).
+        gpu_memory_gb_sec = self._subprocess_timers.get('gpu_memory', 0.0)
+        gpu_memory_tokens = gpu_memory_gb_sec * rates.get('gpu_memory', 0.0)
+
+        # Subprocess-reported timers and counters: apply any matching DB rate
+        # Skip 'gpu_compute' (already handled above) and 'gpu_memory'
+        # (already handled above).
+        _handled_timers = {'gpu_compute', 'gpu_memory'}
         custom_tokens: dict[str, float] = {}
+        for timer_name, timer_ms in self._subprocess_timers.items():
+            if timer_name in _handled_timers:
+                continue
+            rate = rates.get(timer_name, 0.0)
+            if rate > 0:
+                custom_tokens[timer_name] = round(timer_ms * rate, 1)
         for counter_name, counter_value in self._subprocess_counters.items():
-            rate = CONST_CUSTOM_BILLING_RATES.get(counter_name)
-            if rate is not None:
+            rate = rates.get(counter_name, 0.0)
+            if rate > 0:
                 custom_tokens[counter_name] = round(counter_value * rate, 1)
 
         # Update status tokens in-place
         self._status.tokens.cpu_utilization = round(cpu_tokens, 1)
         self._status.tokens.cpu_memory = round(memory_tokens, 1)
-        self._status.tokens.gpu_memory = round(gpu_tokens, 1)
+        self._status.tokens.gpu_memory = round(gpu_memory_tokens, 1)
         self._status.tokens.gpu_inference = round(gpu_inference_tokens, 1)
         self._status.tokens.custom = custom_tokens
         self._status.tokens.total = round(
@@ -647,3 +687,58 @@ class TaskMetrics:
         # Send final billing report on shutdown (captures any remaining incremental usage)
         async with self._metrics_lock:
             await self._report_to_billing_system()
+
+        # Audit the final frozen usage totals for this task
+        await self._audit_task_usage()
+
+    async def _audit_task_usage(self) -> None:
+        """
+        Write a single audit log entry with the final frozen token totals
+        for this task.  Called once at task completion after the last
+        billing UPSERT has been written.
+
+        No-op in OSS (account.audit is a no-op) or when there is no org.
+        """
+        if not self.org_id:
+            return
+
+        tokens = self._status.tokens
+        total = tokens.total
+        if total <= 0:
+            return
+
+        try:
+            from ai.account import account
+
+            # Build per-resource breakdown from the frozen token counters
+            usage = {}
+            if tokens.cpu_utilization > 0:
+                usage['cpu_utilization'] = round(tokens.cpu_utilization, 2)
+            if tokens.cpu_memory > 0:
+                usage['cpu_memory'] = round(tokens.cpu_memory, 2)
+            if tokens.gpu_memory > 0:
+                usage['gpu_memory'] = round(tokens.gpu_memory, 2)
+            if tokens.gpu_inference > 0:
+                usage['gpu_inference'] = round(tokens.gpu_inference, 2)
+            for key, val in (tokens.custom or {}).items():
+                if val > 0:
+                    usage[key] = round(val, 2)
+
+            await account.audit(
+                user_id=self.user_id,
+                source='billing',
+                reason='task_usage',
+                request_data={
+                    'task_id': self.task_id,
+                    'pipeline': self.pipeline_name,
+                    'source': self.source_name,
+                    'duration_seconds': round(self._duration_seconds, 1),
+                },
+                response_data={
+                    'tokens_total': round(total, 2),
+                    'usage': usage,
+                },
+                org_id=self.org_id,
+            )
+        except Exception as e:
+            debug(f'[TaskMetrics] Error writing usage audit: {e}')
