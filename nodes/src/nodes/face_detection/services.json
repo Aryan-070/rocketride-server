@@ -2,7 +2,7 @@
 	"title": "Face Detection",
 	"protocol": "face_detection://",
 	"classType": ["image"],
-	"capabilities": ["experimental"],
+	"capabilities": ["experimental", "debug"],
 	"register": "filter",
 	"node": "python",
 	"path": "nodes.face_detection",

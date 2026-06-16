@@ -2,7 +2,7 @@
 	"title": "Caption",
 	"protocol": "caption://",
 	"classType": ["image"],
-	"capabilities": ["gpu", "experimental"],
+	"capabilities": ["gpu", "experimental", "debug"],
 	"register": "filter",
 	"node": "python",
 	"path": "nodes.caption",
