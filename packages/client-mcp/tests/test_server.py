@@ -77,3 +77,8 @@ def test_introspection_tools_registered() -> None:
 def test_execution_tools_registered() -> None:
     names = {s.name for s in server_mod.TOOLS.specs()}
     assert {'run_pipeline', 'send_data', 'terminate', 'send_files'} <= names
+
+
+def test_capability_tools_registered() -> None:
+    names = {s.name for s in server_mod.TOOLS.specs()}
+    assert {'set_env', 'list_env_keys', 'store_list', 'store_read'} <= names

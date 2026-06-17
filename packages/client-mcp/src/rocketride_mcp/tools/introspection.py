@@ -22,10 +22,10 @@
 # =============================================================================
 from __future__ import annotations
 
-import json
 from typing import Any, Dict, List
 
 from ..tooling import ToolRegistry
+from ._common import load_pipeline
 
 
 def _slim(name: str, defn: Dict[str, Any] | None) -> Dict[str, Any]:
@@ -76,36 +76,10 @@ async def describe_component(client: Any, tasks: Any, args: Dict[str, Any]) -> D
     return {'ok': True, 'name': name, 'component': defn}
 
 
-def _load_pipeline(args: Dict[str, Any]) -> Dict[str, Any]:
-    """Resolve a pipeline config from `pipeline` (inline dict) or `filepath` (JSON/JSON5 file)."""
-    args = args or {}
-    pipeline = args.get('pipeline')
-    if pipeline is None:
-        filepath = args.get('filepath')
-        if not filepath:
-            raise ValueError('Provide either `pipeline` (inline dict) or `filepath`')
-        with open(filepath, 'r', encoding='utf-8') as fh:
-            text = fh.read()
-        try:
-            pipeline = json.loads(text)
-        except json.JSONDecodeError:
-            try:
-                import json5  # optional; .pipe files may use JSON5
-            except ImportError as exc:
-                raise ValueError('File is not valid JSON (install json5 for JSON5 support)') from exc
-            pipeline = json5.loads(text)
-    # the SDK accepts a {'pipeline': {...}} wrapper; unwrap it
-    if isinstance(pipeline, dict) and 'pipeline' in pipeline and 'components' not in pipeline:
-        pipeline = pipeline['pipeline']
-    if not isinstance(pipeline, dict):
-        raise ValueError('Pipeline must be a JSON object')
-    return pipeline
-
-
 async def validate_pipeline(client: Any, tasks: Any, args: Dict[str, Any]) -> Dict[str, Any]:
     """Validate a pipeline against the engine (authoritative). Accepts `pipeline` or `filepath`."""
     try:
-        pipeline = _load_pipeline(args)
+        pipeline = load_pipeline(args)
     except ValueError as exc:
         return {
             'ok': False,
@@ -122,7 +96,7 @@ async def validate_pipeline(client: Any, tasks: Any, args: Dict[str, Any]) -> Di
 async def describe_pipeline(client: Any, tasks: Any, args: Dict[str, Any]) -> Dict[str, Any]:
     """Statically summarize a .pipe: components, providers, source, and per-component category."""
     try:
-        pipeline = _load_pipeline(args)
+        pipeline = load_pipeline(args)
     except ValueError as exc:
         return {
             'ok': False,

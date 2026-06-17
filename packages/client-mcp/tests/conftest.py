@@ -118,6 +118,8 @@ def mock_rocketride_client() -> MagicMock:
             },
         }
     )
+    client.deploy = MagicMock()
+    client.deploy.list = AsyncMock(return_value=[])
     return client
 
 

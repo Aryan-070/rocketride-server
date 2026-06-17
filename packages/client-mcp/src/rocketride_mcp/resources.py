@@ -39,7 +39,7 @@ _RESOURCES: List[Dict[str, str]] = [
     {
         'uri': URI_PIPELINES,
         'name': 'Pipeline List',
-        'description': 'List of all available pipelines on the connected RocketRide server',
+        'description': 'List of registered deployments on the connected RocketRide server',
         'mimeType': 'application/json',
     },
     {
@@ -111,22 +111,14 @@ async def _get_tasks(client: RocketRideClient) -> List[Dict[str, Any]]:
 
 
 async def _read_pipelines(client: RocketRideClient | None) -> str:
-    """Return a JSON array of pipeline descriptors from the connected server."""
+    """Return the user's registered deployments as a JSON string."""
     if client is None:
-        return json.dumps({'pipelines': [], 'error': 'Client is not connected'})
+        return json.dumps({'connected': False, 'error': 'Client is not connected'})
     try:
-        tasks = await _get_tasks(client)
-        pipelines: List[Dict[str, Any]] = []
-        for task in tasks:
-            pipelines.append(
-                {
-                    'name': task.get('name'),
-                    'description': task.get('description'),
-                }
-            )
-        return json.dumps({'pipelines': pipelines}, ensure_ascii=False)
+        deployments = await client.deploy.list()
+        return json.dumps({'deployments': deployments}, ensure_ascii=False, default=str)
     except Exception as exc:
-        return json.dumps({'pipelines': [], 'error': str(exc)})
+        return json.dumps({'connected': False, 'error': str(exc)})
 
 
 async def _read_status(client: RocketRideClient | None) -> str:

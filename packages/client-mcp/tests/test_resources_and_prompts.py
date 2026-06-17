@@ -68,36 +68,22 @@ async def test_list_resources_accepts_client(mock_rocketride_client: MagicMock) 
 # =============================================================================
 
 
-async def test_read_pipelines_when_client_none() -> None:
-    raw = await resources_mod.read_resource(None, URI_PIPELINES)
-    data = json.loads(raw)
-    assert data['pipelines'] == []
-    assert 'error' in data
+async def test_read_pipelines_returns_deployments() -> None:
+    from rocketride_mcp.resources import _read_pipelines
 
-
-async def test_read_pipelines_with_connected_client(mock_rocketride_client: MagicMock) -> None:
-    raw = await resources_mod.read_resource(mock_rocketride_client, URI_PIPELINES)
-    data = json.loads(raw)
-    assert len(data['pipelines']) == 2
-    assert data['pipelines'][0]['name'] == 'Task1'
-    assert data['pipelines'][1]['name'] == 'Task2'
-
-
-async def test_read_pipelines_returns_valid_json(mock_rocketride_client: MagicMock) -> None:
-    raw = await resources_mod.read_resource(mock_rocketride_client, URI_PIPELINES)
-    data = json.loads(raw)
-    assert isinstance(data, dict)
-    assert 'pipelines' in data
-
-
-async def test_read_pipelines_handles_exception() -> None:
     client = MagicMock()
-    client.build_request = MagicMock(return_value={'command': 'rrext_get_tasks'})
-    client.request = AsyncMock(side_effect=RuntimeError('connection lost'))
-    raw = await resources_mod.read_resource(client, URI_PIPELINES)
-    data = json.loads(raw)
-    assert data['pipelines'] == []
-    assert 'connection lost' in data['error']
+    client.deploy = MagicMock()
+    client.deploy.list = AsyncMock(return_value=[{'project_id': 'dep-1'}])
+    out = await _read_pipelines(client)
+    assert 'dep-1' in out
+
+
+async def test_read_pipelines_when_client_none() -> None:
+    from rocketride_mcp.resources import _read_pipelines
+
+    data = json.loads(await _read_pipelines(None))
+    assert data['connected'] is False
+    assert 'error' in data
 
 
 # =============================================================================

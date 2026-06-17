@@ -22,12 +22,33 @@
 # =============================================================================
 from __future__ import annotations
 
-from ..tooling import ToolRegistry
-from . import capability, execution, introspection
+import json
+from typing import Any, Dict
 
 
-def register_all(registry: ToolRegistry) -> None:
-    """Register every tool module onto the given registry."""
-    introspection.register(registry)
-    execution.register(registry)
-    capability.register(registry)
+def load_pipeline(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Resolve a pipeline config from `pipeline` (inline dict) or `filepath` (JSON/JSON5 file).
+
+    Raises ValueError on missing/invalid input (callers convert to a BadRequest result).
+    """
+    args = args or {}
+    pipeline = args.get('pipeline')
+    if pipeline is None:
+        filepath = args.get('filepath')
+        if not filepath:
+            raise ValueError('Provide either `pipeline` (inline dict) or `filepath`')
+        with open(filepath, 'r', encoding='utf-8') as fh:
+            text = fh.read()
+        try:
+            pipeline = json.loads(text)
+        except json.JSONDecodeError:
+            try:
+                import json5  # optional; .pipe files may use JSON5
+            except ImportError as exc:
+                raise ValueError('File is not valid JSON (install json5 for JSON5 support)') from exc
+            pipeline = json5.loads(text)
+    if isinstance(pipeline, dict) and 'pipeline' in pipeline and 'components' not in pipeline:
+        pipeline = pipeline['pipeline']
+    if not isinstance(pipeline, dict):
+        raise ValueError('Pipeline must be a JSON object')
+    return pipeline
