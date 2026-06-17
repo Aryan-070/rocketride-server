@@ -72,3 +72,8 @@ def test_introspection_tools_registered() -> None:
     # server registers tools at import time via register_all(TOOLS)
     names = {s.name for s in server_mod.TOOLS.specs()}
     assert {'list_components', 'describe_component', 'validate_pipeline', 'describe_pipeline'} <= names
+
+
+def test_execution_tools_registered() -> None:
+    names = {s.name for s in server_mod.TOOLS.specs()}
+    assert {'run_pipeline', 'send_data', 'terminate', 'send_files'} <= names

@@ -23,9 +23,10 @@
 from __future__ import annotations
 
 from ..tooling import ToolRegistry
-from . import introspection
+from . import execution, introspection
 
 
 def register_all(registry: ToolRegistry) -> None:
     """Register every tool module onto the given registry."""
     introspection.register(registry)
+    execution.register(registry)
