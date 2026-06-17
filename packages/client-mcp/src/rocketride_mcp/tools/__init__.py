@@ -23,7 +23,7 @@
 from __future__ import annotations
 
 from ..tooling import ToolRegistry
-from . import capability, execution, introspection
+from . import capability, execution, introspection, visibility
 
 
 def register_all(registry: ToolRegistry) -> None:
@@ -31,3 +31,4 @@ def register_all(registry: ToolRegistry) -> None:
     introspection.register(registry)
     execution.register(registry)
     capability.register(registry)
+    visibility.register(registry)
