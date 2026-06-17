@@ -17,7 +17,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 
 import { AccountView, CheckoutModal } from 'shared';
-import type { ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, AccountSection, ProfileUpdate, CheckoutPlan } from 'shared';
+import type { ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, AccountSection, ProfileUpdate, CheckoutPlan, PlanAction } from 'shared';
 import type { ConnectResult } from 'rocketride';
 import { useMessaging } from '../hooks/useMessaging';
 import type { AccountHostToWebview, AccountWebviewToHost } from '../types';
@@ -372,6 +372,19 @@ const AccountWebview: React.FC = () => {
 		});
 	}, []);
 
+	/**
+	 * Opens an action plan's CTA link (e.g. "Contact us") through the extension
+	 * host. The webview sandbox cannot use window.open / window.location — those
+	 * open a blank page and trap the view — so the URL is routed to the host,
+	 * which calls vscode.env.openExternal.
+	 */
+	const handleActionClick = useCallback((_plan: CheckoutPlan, action: PlanAction): void => {
+		const url = action.type === 'mailto'
+			? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}`
+			: action.url;
+		sendMessageRef.current({ type: 'openExternal', url });
+	}, []);
+
 	/** Closes the checkout modal and refreshes billing data on success. */
 	const handleCheckoutSuccess = useCallback((): void => {
 		setShowCheckout(false);
@@ -466,6 +479,7 @@ const AccountWebview: React.FC = () => {
 					onFetchPlans={handleFetchPlans}
 					onCreateCheckout={handleCreateCheckout}
 					onConfirmPending={handleConfirmPending}
+					onActionClick={handleActionClick}
 					onSuccess={handleCheckoutSuccess}
 					onClose={() => setShowCheckout(false)}
 				/>

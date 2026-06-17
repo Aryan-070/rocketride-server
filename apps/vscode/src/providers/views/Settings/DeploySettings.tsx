@@ -17,6 +17,7 @@ import React from 'react';
 import { SettingsData, ConnectionMode, MessageData, EngineVersionItem, settingsStyles as S, SettingsCardHeader } from './SettingsWebview';
 import { ConnectionConfig } from '../components/ConnectionConfig';
 import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
+import type { CheckoutPlan, PlanAction } from 'shared';
 
 // =============================================================================
 // TYPES
@@ -57,6 +58,8 @@ interface DeploySettingsProps {
 	onCreateCheckout?: (priceId: string) => Promise<{ clientSecret: string; subscriptionId: string }>;
 	onConfirmPending?: (subscriptionId: string, priceId: string) => Promise<void>;
 	onCheckoutSuccess?: () => void;
+	/** Routes an action plan's CTA link (e.g. "Contact us") through the host. */
+	onActionClick?: (plan: CheckoutPlan, action: PlanAction) => void;
 	// -- Docker panel props --
 	dockerStatus: DockerStatus;
 	dockerProgress: string | null;
@@ -195,6 +198,7 @@ export const DeploySettings: React.FC<DeploySettingsProps> = (props) => {
 							onCreateCheckout={props.onCreateCheckout}
 							onConfirmPending={props.onConfirmPending}
 							onCheckoutSuccess={props.onCheckoutSuccess}
+							onActionClick={props.onActionClick}
 						/>
 					)}
 				</div>

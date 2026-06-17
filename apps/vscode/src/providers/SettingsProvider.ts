@@ -166,6 +166,15 @@ export class SettingsProvider {
 						await this.clearCredentials(panel.webview);
 						break;
 
+					// External links (e.g. the checkout "Contact us" CTA). Webviews are
+					// sandboxed: window.open / window.location open a blank page and trap
+					// the view, so route the URL through the host instead.
+					case 'openExternal':
+						if (message.url) {
+							await vscode.env.openExternal(vscode.Uri.parse(message.url as string));
+						}
+						break;
+
 					// -- Checkout flow (embedded Stripe Elements) --------------------
 					case 'checkout:fetchPlans': {
 						try {

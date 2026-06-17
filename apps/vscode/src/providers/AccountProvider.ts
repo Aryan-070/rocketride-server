@@ -47,6 +47,7 @@ interface AccountWebviewMessage {
 	newPriceId?: string;
 	orgId?: string;
 	subscriptionId?: string;
+	url?: string;
 }
 
 // =============================================================================
@@ -235,6 +236,15 @@ export class AccountProvider {
 
 			case 'billing:portal':
 				await this.handleOpenPortal();
+				break;
+
+			// -- External links (e.g. "Contact us" CTA) ---------------------------
+			// Webviews are sandboxed: window.open / window.location open a blank
+			// page and trap the view. Open through the host instead.
+			case 'openExternal':
+				if (message.url) {
+					await vscode.env.openExternal(vscode.Uri.parse(message.url));
+				}
 				break;
 
 			case 'billing:purchaseTopup':

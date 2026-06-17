@@ -470,6 +470,16 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 					break;
 				}
 
+				// External links (e.g. the checkout "Contact us" CTA). Webviews are
+				// sandboxed: window.open / window.location open a blank page and trap
+				// the view, so route the URL through the host instead.
+				case 'openExternal': {
+					if (data.url) {
+						await vscode.env.openExternal(vscode.Uri.parse(data.url as string));
+					}
+					break;
+				}
+
 				// Trace messages
 				case 'trace:clear':
 					// No-op on host side

@@ -88,6 +88,16 @@ export interface CheckoutPlan {
  * the component never imports the SDK or any transport layer directly.
  */
 export interface CheckoutModalProps {
+	/**
+	 * Called when the user clicks an action plan's CTA (e.g. "Contact us").
+	 *
+	 * Hosts that run inside a sandboxed webview (the VS Code extension) MUST
+	 * supply this and route the URL through the extension host — the default
+	 * ``window.open`` / ``window.location`` navigation opens a blank page and
+	 * traps the view. Browser hosts may omit it to use the native default.
+	 */
+	onActionClick?: (plan: CheckoutPlan, action: PlanAction) => void;
+
 	/** Display name of the app being subscribed to (e.g. "RocketRide"). */
 	appName: string;
 

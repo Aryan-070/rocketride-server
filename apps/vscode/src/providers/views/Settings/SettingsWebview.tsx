@@ -31,7 +31,7 @@ import { IntegrationSettings } from './IntegrationSettings';
 import { DeploySettings } from './DeploySettings';
 import { MessageDisplay } from './MessageDisplay';
 import { commonStyles } from 'shared/themes/styles';
-import type { CheckoutPlan } from 'shared';
+import type { CheckoutPlan, PlanAction } from 'shared';
 import { TabPanel } from 'shared/components/tab-panel/TabPanel';
 import type { ITabPanelTab, ITabPanelPanel } from 'shared/components/tab-panel/TabPanel';
 import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
@@ -827,6 +827,19 @@ export const Settings: React.FC = () => {
 		setSubscribed(true);
 	}, []);
 
+	/**
+	 * Opens an action plan's CTA link (e.g. "Contact us") through the extension
+	 * host. The webview sandbox cannot use window.open / window.location — those
+	 * open a blank page and trap the view — so the URL is routed to the host,
+	 * which calls vscode.env.openExternal.
+	 */
+	const handleActionClick = useCallback((_plan: CheckoutPlan, action: PlanAction): void => {
+		const url = action.type === 'mailto'
+			? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}`
+			: action.url;
+		sendMessage({ type: 'openExternal', url } as any);
+	}, [sendMessage]);
+
 	const panels: Record<string, ITabPanelPanel> = useMemo(
 		() => ({
 			development: {
@@ -889,6 +902,7 @@ export const Settings: React.FC = () => {
 							onCreateCheckout={handleCreateCheckout}
 							onConfirmPending={handleConfirmPending}
 							onCheckoutSuccess={handleCheckoutSuccess}
+							onActionClick={handleActionClick}
 						/>
 					</div>
 				),
@@ -953,6 +967,7 @@ export const Settings: React.FC = () => {
 							onCreateCheckout={handleCreateCheckout}
 							onConfirmPending={handleConfirmPending}
 							onCheckoutSuccess={handleCheckoutSuccess}
+							onActionClick={handleActionClick}
 						/>
 					</div>
 				),
