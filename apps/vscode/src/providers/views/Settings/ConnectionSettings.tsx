@@ -60,6 +60,8 @@ interface ConnectionSettingsProps {
 	onCreateCheckout?: (priceId: string) => Promise<{ clientSecret: string; subscriptionId: string }>;
 	onConfirmPending?: (subscriptionId: string, priceId: string) => Promise<void>;
 	onCheckoutSuccess?: () => void;
+	/** Called when an action plan's CTA is clicked (e.g. Free tier docs link). */
+	onCheckoutActionClick?: (plan: any, action: any) => void;
 	// -- Docker panel props --
 	dockerStatus: DockerStatus;
 	dockerProgress: string | null;
@@ -192,6 +194,7 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = (props) => 
 						onCreateCheckout={props.onCreateCheckout}
 						onConfirmPending={props.onConfirmPending}
 						onCheckoutSuccess={props.onCheckoutSuccess}
+						onCheckoutActionClick={props.onCheckoutActionClick}
 					/>
 				</div>
 			</div>

@@ -31,7 +31,8 @@ import { IntegrationSettings } from './IntegrationSettings';
 import { DeploySettings } from './DeploySettings';
 import { MessageDisplay } from './MessageDisplay';
 import { commonStyles } from 'shared/themes/styles';
-import type { CheckoutPlan } from 'shared';
+import { actionHref } from 'shared';
+import type { CheckoutPlan, PlanAction } from 'shared';
 import { TabPanel } from 'shared/components/tab-panel/TabPanel';
 import type { ITabPanelTab, ITabPanelPanel } from 'shared/components/tab-panel/TabPanel';
 import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
@@ -827,6 +828,15 @@ export const Settings: React.FC = () => {
 		setSubscribed(true);
 	}, []);
 
+	/**
+	 * Opens an action plan's link/mailto (e.g. the Free tier "Get Started"
+	 * self-hosting docs link) via the extension host. The webview sandbox
+	 * blocks ``window.open``, so it must go through ``vscode.env.openExternal``.
+	 */
+	const handleCheckoutActionClick = useCallback((_plan: CheckoutPlan, action: PlanAction) => {
+		sendMessage({ type: 'openExternal', url: actionHref(action) } as any);
+	}, [sendMessage]);
+
 	const panels: Record<string, ITabPanelPanel> = useMemo(
 		() => ({
 			development: {
@@ -889,6 +899,7 @@ export const Settings: React.FC = () => {
 							onCreateCheckout={handleCreateCheckout}
 							onConfirmPending={handleConfirmPending}
 							onCheckoutSuccess={handleCheckoutSuccess}
+							onCheckoutActionClick={handleCheckoutActionClick}
 						/>
 					</div>
 				),
@@ -953,6 +964,7 @@ export const Settings: React.FC = () => {
 							onCreateCheckout={handleCreateCheckout}
 							onConfirmPending={handleConfirmPending}
 							onCheckoutSuccess={handleCheckoutSuccess}
+							onCheckoutActionClick={handleCheckoutActionClick}
 						/>
 					</div>
 				),

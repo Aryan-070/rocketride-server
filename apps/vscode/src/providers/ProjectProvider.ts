@@ -470,6 +470,15 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 					break;
 				}
 
+				// External links (Free tier docs link, Enterprise mailto, etc.) —
+				// open in the user's browser/mail client via the extension host.
+				case 'openExternal': {
+					if (data.url) {
+						await vscode.env.openExternal(vscode.Uri.parse(data.url as string));
+					}
+					break;
+				}
+
 				// Trace messages
 				case 'trace:clear':
 					// No-op on host side

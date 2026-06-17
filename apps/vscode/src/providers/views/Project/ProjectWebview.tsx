@@ -18,8 +18,8 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 
 import { applyTheme } from 'shared/themes';
 import type { ThemeTokens } from 'shared/themes/tokens';
-import { ProjectView, parseServerEvent, CheckoutModal } from 'shared';
-import type { TaskStatus, TraceEvent, ViewState, CheckoutPlan } from 'shared';
+import { ProjectView, parseServerEvent, CheckoutModal, actionHref } from 'shared';
+import type { TaskStatus, TraceEvent, ViewState, CheckoutPlan, PlanAction } from 'shared';
 import { useMessaging } from '../hooks/useMessaging';
 import type { ProjectHostToWebview, ProjectWebviewToHost } from '../types';
 
@@ -317,6 +317,18 @@ const ProjectWebview: React.FC = () => {
 		setSubscribed(true);
 	}, []);
 
+	/**
+	 * Opens an action plan's link/mailto via the extension host. The webview
+	 * sandbox blocks ``window.open`` / ``window.location``, so the Free tier
+	 * "Get Started" link must be routed through ``vscode.env.openExternal``.
+	 */
+	const handleActionClick = useCallback(
+		(_plan: CheckoutPlan, action: PlanAction) => {
+			sendMessage({ type: 'openExternal', url: actionHref(action) } as any);
+		},
+		[sendMessage]
+	);
+
 	// --- Wait for initial state from host before rendering -------------------
 
 	if (!viewState || !prefs) return null;
@@ -328,7 +340,7 @@ const ProjectWebview: React.FC = () => {
 	return (
 		<>
 			<ProjectView project={project} servicesJson={servicesJson} isConnected={isConnected} isSubscribed={subscribed} statusMap={statusMap} serverHost={serverHost} isDirty={isDirty} isNew={isNew} initialViewState={viewState} initialPrefs={prefs} traceEvents={traceEvents} onContentChanged={handleContentChanged} onValidate={handleValidate} onPipelineAction={handlePipelineAction} onViewStateChange={handleViewStateChange} onPrefsChange={handlePrefsChange} onOpenLink={handleOpenLink} onSave={handleSave} onTraceClear={handleTraceClear} isReadonly={isReadonly} envKeys={envKeys} onMissingEnvVars={handleMissingEnvVars} />
-			{showCheckout && stripeKey && <CheckoutModal appName="RocketRide" appDescription="Visual AI pipeline editor — run and deploy pipelines on RocketRide Cloud." stripePublishableKey={stripeKey} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={handleCheckoutSuccess} onClose={() => setShowCheckout(false)} />}
+			{showCheckout && stripeKey && <CheckoutModal appName="RocketRide" appDescription="Visual AI pipeline editor — run and deploy pipelines on RocketRide Cloud." stripePublishableKey={stripeKey} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={handleCheckoutSuccess} onClose={() => setShowCheckout(false)} onActionClick={handleActionClick} />}
 		</>
 	);
 };

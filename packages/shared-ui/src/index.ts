@@ -82,7 +82,7 @@ export type { EnvironmentViewProps, EnvironmentSlotConfig, EnvironmentScope } fr
 export { CreditsPanel } from './modules/billing';
 
 // --- Checkout module (subscription checkout flow) ----------------------------
-export { CheckoutModal, PlanPicker } from './modules/checkout';
+export { CheckoutModal, PlanPicker, actionHref } from './modules/checkout';
 export type { CheckoutModalProps, CheckoutPlan, PlanAction, PlanPickerProps } from './modules/checkout';
 
 // --- Chat module (conversational chat surface) --------------------------------

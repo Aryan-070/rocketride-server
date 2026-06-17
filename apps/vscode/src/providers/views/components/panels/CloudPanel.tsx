@@ -16,7 +16,7 @@ import cloudLogoLight from '../../../../../rocketride-light-icon.png';
 import { settingsStyles as S } from '../../Settings/SettingsWebview';
 import { useTheme } from '../../hooks/useTheme';
 import { CheckoutModal } from 'shared';
-import type { CheckoutPlan } from 'shared';
+import type { CheckoutPlan, PlanAction } from 'shared';
 
 // =============================================================================
 // TYPES
@@ -55,13 +55,15 @@ export interface CloudPanelProps {
 	onCreateCheckout?: (priceId: string) => Promise<{ clientSecret: string; subscriptionId: string }>;
 	onConfirmPending?: (subscriptionId: string, priceId: string) => Promise<void>;
 	onCheckoutSuccess?: () => void;
+	/** Called when an action plan's CTA is clicked (e.g. Free tier docs link). */
+	onCheckoutActionClick?: (plan: CheckoutPlan, action: PlanAction) => void;
 }
 
 // =============================================================================
 // COMPONENT
 // =============================================================================
 
-export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut, teams, selectedTeamId, onTeamChange, idPrefix, isSaas, onProbeServer, onFetchTeams, isSubscribed, onFetchPlans, onCreateCheckout, onConfirmPending, onCheckoutSuccess }) => {
+export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut, teams, selectedTeamId, onTeamChange, idPrefix, isSaas, onProbeServer, onFetchTeams, isSubscribed, onFetchPlans, onCreateCheckout, onConfirmPending, onCheckoutSuccess, onCheckoutActionClick }) => {
 	const id = (name: string) => `${idPrefix}-${name}`;
 	const theme = useTheme();
 	const [showCheckout, setShowCheckout] = useState(false);
@@ -175,6 +177,7 @@ export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUser
 					onConfirmPending={onConfirmPending}
 					onSuccess={handleCheckoutSuccess}
 					onClose={() => setShowCheckout(false)}
+					onActionClick={onCheckoutActionClick}
 				/>
 			)}
 

@@ -117,4 +117,15 @@ export interface CheckoutModalProps {
 
 	/** Called when the user dismisses the modal without completing checkout. */
 	onClose: () => void;
+
+	/**
+	 * Called when the user clicks an action plan's CTA (e.g. the Free tier
+	 * "Get Started" link, or an Enterprise "Contact us" mailto).
+	 *
+	 * Hosts that run inside a sandboxed webview (the VS Code extension) MUST
+	 * supply this to route the link through the extension host — the webview's
+	 * own ``window.open`` / ``window.location`` are no-ops there. When omitted,
+	 * the plan picker opens the link/mailto natively (browser shell).
+	 */
+	onActionClick?: (plan: CheckoutPlan, action: PlanAction) => void;
 }

@@ -16,8 +16,8 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 
-import { AccountView, CheckoutModal } from 'shared';
-import type { ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, AccountSection, ProfileUpdate, CheckoutPlan } from 'shared';
+import { AccountView, CheckoutModal, actionHref } from 'shared';
+import type { ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, AccountSection, ProfileUpdate, CheckoutPlan, PlanAction } from 'shared';
 import type { ConnectResult } from 'rocketride';
 import { useMessaging } from '../hooks/useMessaging';
 import type { AccountHostToWebview, AccountWebviewToHost } from '../types';
@@ -372,6 +372,17 @@ const AccountWebview: React.FC = () => {
 		});
 	}, []);
 
+	/**
+	 * Opens an action plan's link/mailto via the extension host.
+	 *
+	 * The webview sandbox blocks ``window.open`` / ``window.location``, so the
+	 * Free tier "Get Started" link (and Enterprise mailto) must be routed
+	 * through the host's ``vscode.env.openExternal``.
+	 */
+	const handleActionClick = useCallback((_plan: CheckoutPlan, action: PlanAction): void => {
+		sendMessageRef.current({ type: 'openExternal', url: actionHref(action) } as any);
+	}, []);
+
 	/** Closes the checkout modal and refreshes billing data on success. */
 	const handleCheckoutSuccess = useCallback((): void => {
 		setShowCheckout(false);
@@ -468,6 +479,7 @@ const AccountWebview: React.FC = () => {
 					onConfirmPending={handleConfirmPending}
 					onSuccess={handleCheckoutSuccess}
 					onClose={() => setShowCheckout(false)}
+					onActionClick={handleActionClick}
 				/>
 			)}
 		</>

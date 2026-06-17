@@ -47,6 +47,7 @@ interface AccountWebviewMessage {
 	newPriceId?: string;
 	orgId?: string;
 	subscriptionId?: string;
+	url?: string;
 }
 
 // =============================================================================
@@ -256,6 +257,13 @@ export class AccountProvider {
 
 			case 'checkout:confirmPending':
 				await this.handleCheckoutConfirmPending(panel, message);
+				break;
+
+			// -- External links (Free tier docs, Enterprise mailto, etc.) ---------
+			case 'openExternal':
+				if (message.url) {
+					await vscode.env.openExternal(vscode.Uri.parse(message.url));
+				}
 				break;
 
 			// Environment variables removed — now handled by EnvironmentProvider.

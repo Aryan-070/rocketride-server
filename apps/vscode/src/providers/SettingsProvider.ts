@@ -213,6 +213,13 @@ export class SettingsProvider {
 						break;
 					}
 
+					// -- External links (Free tier docs link, Enterprise mailto) -----
+					case 'openExternal':
+						if (message.url) {
+							await vscode.env.openExternal(vscode.Uri.parse(message.url as string));
+						}
+						break;
+
 					default: {
 						// Delegate connection messages (cloud, docker, service, test, engine versions, sudo)
 						const handled = await this.connHandler.handleMessage(message, panel.webview);
