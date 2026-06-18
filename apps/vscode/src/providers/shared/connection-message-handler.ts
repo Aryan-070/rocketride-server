@@ -24,6 +24,7 @@ import { CloudAuthProvider } from '../../auth/CloudAuthProvider';
 import { setCachedEngineVersions, setCachedDockerTags, getExtensionContext } from '../../extension';
 import { getLogger } from '../../shared/util/output';
 import { icons } from '../../shared/util/icons';
+import { isAllowedExternalUrl } from '../../shared/util/externalUrl';
 
 // =============================================================================
 // TYPES
@@ -132,6 +133,20 @@ export class ConnectionMessageHandler {
 			case 'fetchTeams':
 				await this.fetchCloudTeams(webview, message.hostUrl as string);
 				return true;
+
+			// External links (e.g. the checkout "Contact us" CTA). Webviews are
+			// sandboxed: window.open / window.location open a blank page and trap
+			// the view, so route the URL through the host instead. Gated to an
+			// allowlisted scheme (https/http/mailto) before opening.
+			case 'openExternal': {
+				const url = typeof message.url === 'string' ? message.url : undefined;
+				if (url && isAllowedExternalUrl(url)) {
+					await vscode.env.openExternal(vscode.Uri.parse(url));
+				} else if (url) {
+					getLogger().error(`[ConnectionMessageHandler] Blocked unsupported external URL scheme: ${url}`);
+				}
+				return true;
+			}
 
 			case 'fetchVersions':
 				// Fetch GitHub releases + Docker GHCR tags in parallel.
