@@ -447,6 +447,11 @@ const SettingsPage: React.FC = () => {
 		const groups = new Map<string, { apps: typeof appManifest; defs: AppSettingDefinition[] }>();
 
 		for (const app of appManifest) {
+			// appManifest is the full catalog; only surface settings for apps the user has
+			// actually installed (on their desktop). Without this, an uninstalled app's
+			// settings (e.g. Aparavi AQL) would appear for everyone. Shell "General"
+			// settings above are unaffected and always shown.
+			if (!app.onDesktop) continue;
 			const appSettings = app.settings ?? [];
 			if (appSettings.length === 0) continue;
 			const sig = keySignature(appSettings);
@@ -477,17 +482,18 @@ const SettingsPage: React.FC = () => {
 
 	// Filter sections by search query and sidebar selection
 	const query = search.toLowerCase().trim();
+
+	// The selected settings "page". Defaults to the first section (General) and falls
+	// back to it if a previously-selected app section is no longer present.
+	const effectiveNav = useMemo(() => {
+		if (selectedNav && sections.some((s) => s.id === selectedNav)) return selectedNav;
+		return sections[0]?.id ?? null;
+	}, [selectedNav, sections]);
+
 	const visibleSections = useMemo(() => {
-		let result = sections;
-
-		// Sidebar filter: show General + selected app section
-		if (selectedNav && selectedNav !== 'general') {
-			result = result.filter((s) => s.id === 'general' || s.id === selectedNav);
-		}
-
-		// Search filter
+		// Search spans every section so matches aren't hidden by the current page.
 		if (query) {
-			result = result
+			return sections
 				.map((sec) => ({
 					...sec,
 					defs: sec.defs.filter((d) => matchesSearch(d, query)),
@@ -495,8 +501,9 @@ const SettingsPage: React.FC = () => {
 				.filter((sec) => sec.defs.length > 0);
 		}
 
-		return result;
-	}, [sections, selectedNav, query]);
+		// Otherwise show only the selected section — each nav button is its own page.
+		return sections.filter((sec) => sec.id === effectiveNav);
+	}, [sections, effectiveNav, query]);
 
 	/**
 	 * Returns the current value for any settings key, preferring draft over saved.
@@ -575,8 +582,8 @@ const SettingsPage: React.FC = () => {
 					{sections.map((sec) => (
 						<button
 							key={sec.id}
-							style={styles.navItem(selectedNav === sec.id || (!selectedNav && sec.id === 'general'))}
-							onClick={() => setSelectedNav(selectedNav === sec.id ? null : sec.id)}
+							style={styles.navItem(sec.id === effectiveNav)}
+							onClick={() => setSelectedNav(sec.id)}
 						>
 							{sec.label}
 						</button>
