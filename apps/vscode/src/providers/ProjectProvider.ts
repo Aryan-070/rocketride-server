@@ -25,7 +25,7 @@ import { icons } from '../shared/util/icons';
 import { PipelineFileParser } from '../shared/util/pipelineParser';
 import { isSubscribed } from '../shared/util/subscriptionGate';
 import { handleMissingEnvVars } from '../shared/util/envVarCheck';
-import { isAllowedExternalUrl } from '../shared/util/externalUrl';
+import { openExternalUrl } from '../shared/util/externalUrl';
 
 // =============================================================================
 // CONSTANTS
@@ -475,11 +475,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				// open in the user's browser/mail client via the extension host.
 				case 'openExternal': {
 					const url = data.url as string | undefined;
-					if (url && isAllowedExternalUrl(url)) {
-						await vscode.env.openExternal(vscode.Uri.parse(url));
-					} else if (url) {
-						this.logger.error(`Refused to open external URL with unsupported scheme: ${url}`);
-					}
+					if (url) await openExternalUrl(url, (msg) => this.logger.error(msg));
 					break;
 				}
 

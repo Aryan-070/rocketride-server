@@ -42,7 +42,7 @@ import { ConnectionMessageHandler } from './shared/connection-message-handler';
 import { isSubscribed } from '../shared/util/subscriptionGate';
 import { PIPE_BUILDER_APP_ID } from '../shared/types';
 import { getLogger } from '../shared/util/output';
-import { isAllowedExternalUrl } from '../shared/util/externalUrl';
+import { openExternalUrl } from '../shared/util/externalUrl';
 
 export class SettingsProvider {
 	private disposables: vscode.Disposable[] = [];
@@ -218,11 +218,7 @@ export class SettingsProvider {
 					// -- External links (Free tier docs link, Enterprise mailto) -----
 					case 'openExternal': {
 						const url = message.url as string | undefined;
-						if (url && isAllowedExternalUrl(url)) {
-							await vscode.env.openExternal(vscode.Uri.parse(url));
-						} else if (url) {
-							getLogger().error(`Refused to open external URL with unsupported scheme: ${url}`);
-						}
+						if (url) await openExternalUrl(url, (msg) => getLogger().error(msg));
 						break;
 					}
 

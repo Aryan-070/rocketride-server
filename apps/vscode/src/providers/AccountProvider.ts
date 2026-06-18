@@ -25,7 +25,7 @@ import type { ConnectionStatus } from '../shared/types';
 import type { ConnectResult, TeamDetail } from 'rocketride';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { PIPE_BUILDER_APP_ID } from '../shared/types';
-import { isAllowedExternalUrl } from '../shared/util/externalUrl';
+import { openExternalUrl } from '../shared/util/externalUrl';
 
 // =============================================================================
 // INTERFACES
@@ -262,11 +262,7 @@ export class AccountProvider {
 
 			// -- External links (Free tier docs, Enterprise mailto, etc.) ---------
 			case 'openExternal':
-				if (message.url && isAllowedExternalUrl(message.url)) {
-					await vscode.env.openExternal(vscode.Uri.parse(message.url));
-				} else if (message.url) {
-					this.postError(panel, 'Unsupported external URL.');
-				}
+				if (message.url) await openExternalUrl(message.url, () => this.postError(panel, 'Unsupported external URL.'));
 				break;
 
 			// Environment variables removed — now handled by EnvironmentProvider.
