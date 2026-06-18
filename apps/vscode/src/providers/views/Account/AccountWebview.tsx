@@ -380,7 +380,7 @@ const AccountWebview: React.FC = () => {
 	 * through the host's ``vscode.env.openExternal``.
 	 */
 	const handleActionClick = useCallback((_plan: CheckoutPlan, action: PlanAction): void => {
-		sendMessageRef.current({ type: 'openExternal', url: actionHref(action) } as any);
+		sendMessageRef.current({ type: 'openExternal', url: actionHref(action) });
 	}, []);
 
 	/** Closes the checkout modal and refreshes billing data on success. */

@@ -324,7 +324,7 @@ const ProjectWebview: React.FC = () => {
 	 */
 	const handleActionClick = useCallback(
 		(_plan: CheckoutPlan, action: PlanAction) => {
-			sendMessage({ type: 'openExternal', url: actionHref(action) } as any);
+			sendMessage({ type: 'openExternal', url: actionHref(action) });
 		},
 		[sendMessage]
 	);
