@@ -41,6 +41,7 @@ import { DeployManager } from '../connection/deploy-manager';
 import { ConnectionMessageHandler } from './shared/connection-message-handler';
 import { isSubscribed } from '../shared/util/subscriptionGate';
 import { PIPE_BUILDER_APP_ID } from '../shared/types';
+import { openCheckoutAction } from '../shared/util/checkoutAction';
 
 export class SettingsProvider {
 	private disposables: vscode.Disposable[] = [];
@@ -207,7 +208,12 @@ export class SettingsProvider {
 						break;
 					}
 
-					case 'checkout:confirmPending': {
+					// Checkout action-plan buttons (Free / Enterprise)
+					case 'checkout:action':
+						openCheckoutAction(message.actionType);
+						break;
+
+						case 'checkout:confirmPending': {
 						try {
 							const billingClient = getConnectionManager()?.getClient();
 							if (!billingClient) throw new Error('Not connected');

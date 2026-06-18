@@ -893,6 +893,7 @@ export const Settings: React.FC = () => {
 							onCreateCheckout={handleCreateCheckout}
 							onConfirmPending={handleConfirmPending}
 							onCheckoutSuccess={handleCheckoutSuccess}
+							onCheckoutAction={(actionType) => sendMessage({ type: 'checkout:action', actionType } as any)}
 						/>
 					</div>
 				),
@@ -957,6 +958,7 @@ export const Settings: React.FC = () => {
 							onCreateCheckout={handleCreateCheckout}
 							onConfirmPending={handleConfirmPending}
 							onCheckoutSuccess={handleCheckoutSuccess}
+							onCheckoutAction={(actionType) => sendMessage({ type: 'checkout:action', actionType } as any)}
 						/>
 					</div>
 				),

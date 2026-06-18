@@ -55,13 +55,15 @@ export interface CloudPanelProps {
 	onCreateCheckout?: (priceId: string) => Promise<{ clientSecret: string; subscriptionId: string }>;
 	onConfirmPending?: (subscriptionId: string, priceId: string) => Promise<void>;
 	onCheckoutSuccess?: () => void;
+	/** Delegates checkout action-plan (Free/Enterprise) button clicks to the host. */
+	onCheckoutAction?: (actionType: string) => void;
 }
 
 // =============================================================================
 // COMPONENT
 // =============================================================================
 
-export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut, teams, selectedTeamId, onTeamChange, idPrefix, isSaas, onProbeServer, onFetchTeams, isSubscribed, onFetchPlans, onCreateCheckout, onConfirmPending, onCheckoutSuccess }) => {
+export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut, teams, selectedTeamId, onTeamChange, idPrefix, isSaas, onProbeServer, onFetchTeams, isSubscribed, onFetchPlans, onCreateCheckout, onConfirmPending, onCheckoutSuccess, onCheckoutAction }) => {
 	const id = (name: string) => `${idPrefix}-${name}`;
 	const theme = useTheme();
 	const [showCheckout, setShowCheckout] = useState(false);
@@ -175,6 +177,7 @@ export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUser
 					onConfirmPending={onConfirmPending}
 					onSuccess={handleCheckoutSuccess}
 					onClose={() => setShowCheckout(false)}
+					onActionClick={(_plan, action) => onCheckoutAction?.(action.type)}
 				/>
 			)}
 

@@ -25,6 +25,7 @@ import type { ConnectionStatus } from '../shared/types';
 import type { ConnectResult, TeamDetail } from 'rocketride';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { PIPE_BUILDER_APP_ID } from '../shared/types';
+import { openCheckoutAction } from '../shared/util/checkoutAction';
 
 // =============================================================================
 // INTERFACES
@@ -269,13 +270,7 @@ export class AccountProvider {
 
 			// -- Checkout action-plan buttons (Free / Enterprise) -----------------
 			case 'checkout:action':
-				if (message.actionType === 'mailto') {
-					// Enterprise "Contact us" — open an email draft to sales.
-					vscode.env.openExternal(vscode.Uri.parse('mailto:sales@rocketride.ai'));
-				} else {
-					// Free "Get started" — open Settings on Development Mode, force Local.
-					vscode.commands.executeCommand('rocketride.page.settings.open', 'development', undefined, 'local');
-				}
+				openCheckoutAction(message.actionType);
 				break;
 		}
 	}

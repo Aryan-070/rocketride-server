@@ -60,6 +60,8 @@ interface ConnectionSettingsProps {
 	onCreateCheckout?: (priceId: string) => Promise<{ clientSecret: string; subscriptionId: string }>;
 	onConfirmPending?: (subscriptionId: string, priceId: string) => Promise<void>;
 	onCheckoutSuccess?: () => void;
+	/** Delegates checkout action-plan (Free/Enterprise) button clicks to the host. */
+	onCheckoutAction?: (actionType: string) => void;
 	// -- Docker panel props --
 	dockerStatus: DockerStatus;
 	dockerProgress: string | null;
@@ -192,6 +194,7 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = (props) => 
 						onCreateCheckout={props.onCreateCheckout}
 						onConfirmPending={props.onConfirmPending}
 						onCheckoutSuccess={props.onCheckoutSuccess}
+						onCheckoutAction={props.onCheckoutAction}
 					/>
 				</div>
 			</div>

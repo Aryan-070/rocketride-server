@@ -70,6 +70,8 @@ export interface ConnectionConfigProps {
 	onCreateCheckout?: (priceId: string) => Promise<{ clientSecret: string; subscriptionId: string }>;
 	onConfirmPending?: (subscriptionId: string, priceId: string) => Promise<void>;
 	onCheckoutSuccess?: () => void;
+	/** Delegates checkout action-plan (Free/Enterprise) button clicks to the host. */
+	onCheckoutAction?: (actionType: string) => void;
 
 	// On-prem
 	onClearCredentials: () => void;
@@ -219,7 +221,7 @@ export const ConnectionConfig: React.FC<ConnectionConfigProps> = (props) => {
 
 			{/* Mode-specific panel — hidden when no mode selected or mode has a conflict */}
 			{connectionMode && !modeConflict && <div style={{ ...S.modeConfigBox, marginTop: 8 }}>
-				{connectionMode === 'cloud' && <CloudPanel idPrefix={idPrefix} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={onCloudSignIn} onCloudSignOut={onCloudSignOut} teams={teams} selectedTeamId={groupSettings.teamId} onTeamChange={(id) => changeGroup({ teamId: id })} simplified={simplified} isSaas={props.isSaas} onProbeServer={props.onProbeCloudServer} onFetchTeams={props.onFetchTeams} isSubscribed={props.isSubscribed} onFetchPlans={props.onFetchPlans} onCreateCheckout={props.onCreateCheckout} onConfirmPending={props.onConfirmPending} onCheckoutSuccess={props.onCheckoutSuccess} />}
+				{connectionMode === 'cloud' && <CloudPanel idPrefix={idPrefix} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={onCloudSignIn} onCloudSignOut={onCloudSignOut} teams={teams} selectedTeamId={groupSettings.teamId} onTeamChange={(id) => changeGroup({ teamId: id })} simplified={simplified} isSaas={props.isSaas} onProbeServer={props.onProbeCloudServer} onFetchTeams={props.onFetchTeams} isSubscribed={props.isSubscribed} onFetchPlans={props.onFetchPlans} onCreateCheckout={props.onCreateCheckout} onConfirmPending={props.onConfirmPending} onCheckoutSuccess={props.onCheckoutSuccess} onCheckoutAction={props.onCheckoutAction} />}
 
 				{connectionMode === 'onprem' && <OnPremPanel idPrefix={idPrefix} hostUrl={groupSettings.hostUrl} onHostUrlChange={(url) => changeGroup({ hostUrl: url })} apiKey={groupSettings.apiKey} onApiKeyChange={(key) => changeGroup({ apiKey: key, hasApiKey: key.trim().length > 0 })} onClearApiKey={onClearCredentials} debugOutput={groupSettings.local.debugOutput} onDebugOutputChange={(c) => changeGroup({ local: { debugOutput: c } })} onTestConnection={(hostUrl, apiKey) => onTestConnection('onprem', { hostUrl, apiKey })} testMessage={testMessage} simplified={simplified} />}
 

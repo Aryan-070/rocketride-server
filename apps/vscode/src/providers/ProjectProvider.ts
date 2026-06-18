@@ -25,6 +25,7 @@ import { icons } from '../shared/util/icons';
 import { PipelineFileParser } from '../shared/util/pipelineParser';
 import { isSubscribed } from '../shared/util/subscriptionGate';
 import { handleMissingEnvVars } from '../shared/util/envVarCheck';
+import { openCheckoutAction } from '../shared/util/checkoutAction';
 
 // =============================================================================
 // CONSTANTS
@@ -544,6 +545,11 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 					}
 					break;
 				}
+
+				// Checkout action-plan buttons (Free / Enterprise)
+				case 'checkout:action':
+					openCheckoutAction(data.actionType as string);
+					break;
 			}
 		});
 
