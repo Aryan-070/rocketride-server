@@ -25,6 +25,7 @@ import { icons } from '../shared/util/icons';
 import { PipelineFileParser } from '../shared/util/pipelineParser';
 import { isSubscribed } from '../shared/util/subscriptionGate';
 import { handleMissingEnvVars } from '../shared/util/envVarCheck';
+import { isAllowedExternalUrl } from '../shared/util/externalUrl';
 
 // =============================================================================
 // CONSTANTS
@@ -474,8 +475,11 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				// sandboxed: window.open / window.location open a blank page and trap
 				// the view, so route the URL through the host instead.
 				case 'openExternal': {
-					if (data.url) {
-						await vscode.env.openExternal(vscode.Uri.parse(data.url as string));
+					const url = data.url as string | undefined;
+					if (url && isAllowedExternalUrl(url)) {
+						await vscode.env.openExternal(vscode.Uri.parse(url));
+					} else if (url) {
+						this.logger.error(`[ProjectProvider] Blocked unsupported external URL scheme: ${url}`);
 					}
 					break;
 				}

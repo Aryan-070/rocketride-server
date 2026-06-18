@@ -70,3 +70,28 @@ When enabled, the Copilot and Cursor integrations provide:
 - Pipeline optimization tips.
 
 Enable these in settings under `rocketride.integrations.copilot` and `rocketride.integrations.cursor`.
+
+## Webview Message Protocol
+
+The extension's pages (Project, Account, Settings, Welcome) render as sandboxed
+webviews that talk to the extension host (Node.js) over `postMessage`. The message
+types are defined in `apps/vscode/src/providers/views/types.ts`.
+
+### `openExternal` (webview -> host)
+
+**Purpose**: Open an external link in the user's default browser. Webviews are
+sandboxed, so `window.open` / `window.location` resolve to a blank `about:blank`
+page that traps the view. The webview instead asks the host to open the URL via
+`vscode.env.openExternal`. This backs CTAs such as the checkout **Contact us** link.
+
+**Shape**:
+
+```ts
+{ type: 'openExternal'; url: string }
+```
+
+**Allowlist**: For safety the host validates the URL's scheme before opening it.
+Only `https`, `http`, and `mailto` are permitted (see
+`isAllowedExternalUrl` in `apps/vscode/src/shared/util/externalUrl.ts`). Any other
+scheme (for example `file:` or `vscode:`) is rejected and surfaced through the
+sending page's existing error path rather than opened.
