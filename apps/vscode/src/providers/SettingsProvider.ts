@@ -40,6 +40,7 @@ import { AgentManager } from '../agents/agent-manager';
 import { DeployManager } from '../connection/deploy-manager';
 import { ConnectionMessageHandler } from './shared/connection-message-handler';
 import { isSubscribed } from '../shared/util/subscriptionGate';
+import { isAllowedExternalUrl } from '../shared/util/externalUrl';
 import { PIPE_BUILDER_APP_ID } from '../shared/types';
 
 export class SettingsProvider {
@@ -166,8 +167,18 @@ export class SettingsProvider {
 						await this.clearCredentials(panel.webview);
 						break;
 
-					// External links (e.g. the checkout "Contact us" CTA) are routed
-					// through the shared ConnectionMessageHandler via the default case.
+					// External links (e.g. the checkout "Contact us" CTA). Webviews are
+					// sandboxed: window.open / window.location open a blank page and trap
+					// the view, so route the URL through the host instead.
+					case 'openExternal': {
+						const url = message.url as string | undefined;
+						if (url && isAllowedExternalUrl(url)) {
+							await vscode.env.openExternal(vscode.Uri.parse(url));
+						} else if (url) {
+							this.showMessage(panel.webview, 'error', 'Unsupported external URL.');
+						}
+						break;
+					}
 
 					// -- Checkout flow (embedded Stripe Elements) --------------------
 					case 'checkout:fetchPlans': {
