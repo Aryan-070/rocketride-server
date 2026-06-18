@@ -55,6 +55,35 @@ export function planAmount(plan: CheckoutPlan): string {
 }
 
 /**
+ * Format a plan's price for display in the picker card.
+ *
+ * Mirrors {@link planAmount} exactly, except annual plans
+ * (``interval === 'year'``) are shown as a monthly-equivalent amount
+ * (yearly cents divided by 12).  The actual purchase is unaffected --
+ * checkout still uses the plan's annual ``stripePriceId`` and Stripe
+ * charges the full annual total.  A ``metadata.displayAmount`` override
+ * is returned verbatim, with no division.
+ *
+ * @param plan - The plan to format.
+ * @returns A display price string (e.g. ``$20`` for a ``$240/yr`` plan).
+ */
+export function planDisplayAmount(plan: CheckoutPlan): string {
+	const display = plan.metadata?.displayAmount;
+	if (display) return display;
+	const cents = (plan.amountCents || 0) / (plan.interval === 'year' ? 12 : 1);
+	const amount = cents / 100;
+	const symbol = (plan as any).currency?.toUpperCase() === 'EUR' ? '\u20AC' : '$';
+	return amount === Math.floor(amount) ? `${symbol}${amount}` : `${symbol}${amount.toFixed(2)}`;
+}
+
+/** Label describing the billing cadence for a plan card, or null when none applies. */
+function planIntervalLabel(plan: CheckoutPlan): string | null {
+	if (!plan.interval || plan.interval === 'one_time') return null;
+	if (plan.interval === 'year') return 'per month, billed annually';
+	return 'per month';
+}
+
+/**
  * Builds the href for a plan action (link URL or mailto: URI).
  *
  * @param action - The plan action descriptor.
@@ -243,6 +272,15 @@ export interface PlanPickerProps {
 
 	/** Default interval on first render. Default: ``'month'``. */
 	defaultInterval?: 'month' | 'year';
+
+	/**
+	 * When true, ensures a billable plan is always selected: on mount (and
+	 * whenever the visible plans change) the lowest-order billable plan at the
+	 * current interval is selected if the current selection is absent or not
+	 * visible. Requires ``onSelectPlan``. Default: ``false`` (caller-controlled
+	 * selection, e.g. the upgrade/top-up modals).
+	 */
+	autoSelectDefault?: boolean;
 }
 
 // =============================================================================
@@ -264,6 +302,7 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 	onActionClick = defaultActionClick,
 	footer,
 	defaultInterval = 'month',
+	autoSelectDefault = false,
 }) => {
 	// ── Internal interval state ──────────────────────────────────────────
 	const [interval, setInterval] = useState<'month' | 'year'>(defaultInterval);
@@ -305,6 +344,29 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 		return [...filtered].sort((a, b) => planOrder(a) - planOrder(b));
 	}, [plans, interval, showToggle]);
 
+	// The lowest-order billable plan visible at the current interval -- the
+	// "Starter" default. ``visiblePlans`` is already sorted by order ascending.
+	const defaultPlan = useMemo(
+		() => visiblePlans.find((p) => !planAction(p)) ?? null,
+		[visiblePlans]
+	);
+
+	// ── Default selection ─────────────────────────────────────────────────
+
+	// When ``autoSelectDefault`` is set, guarantee a billable plan is selected
+	// and that it is visible at the current interval. Covers initial mount and
+	// any case where the previous selection is no longer shown (e.g. after an
+	// interval toggle that has no matching tier). Keeps the selection visually
+	// indicated so the user is never charged for an unshown plan.
+	useEffect(() => {
+		if (!autoSelectDefault || !onSelectPlan) return;
+		const stillVisible =
+			selectedPlan && visiblePlans.some((p) => p.stripePriceId === selectedPlan.stripePriceId && !planAction(p));
+		if (!stillVisible && defaultPlan) {
+			onSelectPlan(defaultPlan);
+		}
+	}, [autoSelectDefault, onSelectPlan, selectedPlan, visiblePlans, defaultPlan]);
+
 	// ── Handlers ─────────────────────────────────────────────────────────
 
 	/** Switch interval and try to keep the same tier selected. */
@@ -312,8 +374,11 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 		(newInterval: 'month' | 'year') => {
 			setInterval(newInterval);
 
-			// Try to keep the same tier selected (match by nickname)
-			if (selectedPlan && !planAction(selectedPlan) && onSelectPlan) {
+			if (!onSelectPlan) return;
+
+			// Persist the last selection across the toggle: keep the same tier
+			// (match by nickname) at the new interval when it exists.
+			if (selectedPlan && !planAction(selectedPlan)) {
 				const sameTier = plans.find(
 					(p) => p.nickname === selectedPlan.nickname && p.interval === newInterval && !planAction(p)
 				);
@@ -321,12 +386,19 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 					onSelectPlan(sameTier);
 					return;
 				}
-				// Fall back to first billable plan at new interval
-				const first = plans.find((p) => p.interval === newInterval && !planAction(p));
-				if (first) onSelectPlan(first);
 			}
+
+			// Otherwise, when this picker owns the default selection, fall back to
+			// the lowest-order (Starter) billable plan at the new interval. For
+			// caller-controlled pickers (no auto-default) leave the selection
+			// untouched so an intentional "nothing selected" state is preserved.
+			if (!autoSelectDefault) return;
+			const fallback = plans
+				.filter((p) => p.interval === newInterval && !planAction(p))
+				.sort((a, b) => planOrder(a) - planOrder(b))[0];
+			if (fallback) onSelectPlan(fallback);
 		},
-		[plans, selectedPlan, onSelectPlan]
+		[plans, selectedPlan, onSelectPlan, autoSelectDefault]
 	);
 
 	// ── Render ───────────────────────────────────────────────────────────
@@ -385,11 +457,9 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 							{/* Card header: tier name, price, interval */}
 							<div style={S.cardHead(selected)}>
 								<div style={S.cardTier}>{plan.nickname}</div>
-								<div style={S.cardPrice}>{planAmount(plan)}</div>
-								{plan.interval && plan.interval !== 'one_time' && (
-									<div style={S.cardInterval}>
-										per {plan.interval === 'month' ? 'month' : 'year'}
-									</div>
+								<div style={S.cardPrice}>{planDisplayAmount(plan)}</div>
+								{planIntervalLabel(plan) && (
+									<div style={S.cardInterval}>{planIntervalLabel(plan)}</div>
 								)}
 							</div>
 
