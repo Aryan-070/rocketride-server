@@ -25,7 +25,7 @@ import type { ConnectionStatus } from '../shared/types';
 import type { ConnectResult, TeamDetail } from 'rocketride';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { PIPE_BUILDER_APP_ID } from '../shared/types';
-import { isAllowedExternalUrl } from '../shared/util/externalUrl';
+import { openExternalUrl } from '../shared/util/externalUrl';
 
 // =============================================================================
 // INTERFACES
@@ -243,11 +243,7 @@ export class AccountProvider {
 			// Webviews are sandboxed: window.open / window.location open a blank
 			// page and trap the view. Open through the host instead.
 			case 'openExternal':
-				if (message.url && isAllowedExternalUrl(message.url)) {
-					await vscode.env.openExternal(vscode.Uri.parse(message.url));
-				} else if (message.url) {
-					this.postError(panel, 'Unsupported external URL.');
-				}
+				await openExternalUrl(message.url as string, () => this.postError(panel, 'Unsupported external URL.'));
 				break;
 
 			case 'billing:purchaseTopup':
@@ -1044,11 +1040,7 @@ export class AccountProvider {
 
 		try {
 			const { url } = await client.billing.createPortalSession(orgId, 'https://rocketride.ai');
-			if (url && isAllowedExternalUrl(url)) {
-				await vscode.env.openExternal(vscode.Uri.parse(url));
-			} else if (url) {
-				console.error(`[AccountProvider] Blocked unsupported external URL scheme from portal session: ${url}`);
-			}
+			await openExternalUrl(url, (msg) => console.error(`[AccountProvider] ${msg} (portal session)`));
 		} catch (error) {
 			console.error(`[AccountProvider] Failed to open billing portal: ${error}`);
 		}

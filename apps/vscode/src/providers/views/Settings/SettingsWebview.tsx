@@ -31,6 +31,7 @@ import { IntegrationSettings } from './IntegrationSettings';
 import { DeploySettings } from './DeploySettings';
 import { MessageDisplay } from './MessageDisplay';
 import { commonStyles } from 'shared/themes/styles';
+import { actionHref } from 'shared';
 import type { CheckoutPlan, PlanAction } from 'shared';
 import { TabPanel } from 'shared/components/tab-panel/TabPanel';
 import type { ITabPanelTab, ITabPanelPanel } from 'shared/components/tab-panel/TabPanel';
@@ -834,10 +835,7 @@ export const Settings: React.FC = () => {
 	 * which calls vscode.env.openExternal.
 	 */
 	const handleActionClick = useCallback((_plan: CheckoutPlan, action: PlanAction): void => {
-		const url = action.type === 'mailto'
-			? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}`
-			: action.url;
-		sendMessage({ type: 'openExternal', url } as any);
+		sendMessage({ type: 'openExternal', url: actionHref(action) } as any);
 	}, [sendMessage]);
 
 	const panels: Record<string, ITabPanelPanel> = useMemo(

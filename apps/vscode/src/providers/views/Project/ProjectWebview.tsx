@@ -18,7 +18,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 
 import { applyTheme } from 'shared/themes';
 import type { ThemeTokens } from 'shared/themes/tokens';
-import { ProjectView, parseServerEvent, CheckoutModal } from 'shared';
+import { ProjectView, parseServerEvent, CheckoutModal, actionHref } from 'shared';
 import type { TaskStatus, TraceEvent, ViewState, CheckoutPlan, PlanAction } from 'shared';
 import { useMessaging } from '../hooks/useMessaging';
 import type { ProjectHostToWebview, ProjectWebviewToHost } from '../types';
@@ -320,10 +320,7 @@ const ProjectWebview: React.FC = () => {
 	 */
 	const handleActionClick = useCallback(
 		(_plan: CheckoutPlan, action: PlanAction): void => {
-			const url = action.type === 'mailto'
-				? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}`
-				: action.url;
-			sendMessage({ type: 'openExternal', url });
+			sendMessage({ type: 'openExternal', url: actionHref(action) });
 		},
 		[sendMessage]
 	);

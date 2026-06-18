@@ -60,7 +60,7 @@ export function planAmount(plan: CheckoutPlan): string {
  * @param action - The plan action descriptor.
  * @returns A navigable URL string.
  */
-function actionHref(action: PlanAction): string {
+export function actionHref(action: PlanAction): string {
 	if (action.type === 'mailto') {
 		const subject = action.subject ? `?subject=${encodeURIComponent(action.subject)}` : '';
 		return `mailto:${action.url}${subject}`;

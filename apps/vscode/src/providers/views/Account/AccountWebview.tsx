@@ -16,7 +16,7 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 
-import { AccountView, CheckoutModal } from 'shared';
+import { AccountView, CheckoutModal, actionHref } from 'shared';
 import type { ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, AccountSection, ProfileUpdate, CheckoutPlan, PlanAction } from 'shared';
 import type { ConnectResult } from 'rocketride';
 import { useMessaging } from '../hooks/useMessaging';
@@ -379,10 +379,7 @@ const AccountWebview: React.FC = () => {
 	 * which calls vscode.env.openExternal.
 	 */
 	const handleActionClick = useCallback((_plan: CheckoutPlan, action: PlanAction): void => {
-		const url = action.type === 'mailto'
-			? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}`
-			: action.url;
-		sendMessageRef.current({ type: 'openExternal', url });
+		sendMessageRef.current({ type: 'openExternal', url: actionHref(action) });
 	}, []);
 
 	/** Closes the checkout modal and refreshes billing data on success. */

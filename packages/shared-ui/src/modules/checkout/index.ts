@@ -10,6 +10,6 @@
  */
 
 export { CheckoutModal } from './CheckoutModal';
-export { PlanPicker } from './PlanPicker';
+export { PlanPicker, actionHref } from './PlanPicker';
 export type { PlanPickerProps } from './PlanPicker';
 export type { CheckoutModalProps, CheckoutPlan, PlanAction } from './types';
