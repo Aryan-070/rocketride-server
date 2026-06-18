@@ -40,6 +40,7 @@ interface AccountWebviewMessage {
 	userId?: string;
 	role?: string;
 	section?: string;
+	actionType?: string;
 	params?: Record<string, unknown>;
 	appId?: string;
 	packId?: string;
@@ -264,6 +265,17 @@ export class AccountProvider {
 			case 'account:sectionChange':
 				AccountProvider.currentSection = message.section as string;
 				await this.handleSectionChange(panel, message.section as string);
+				break;
+
+			// -- Checkout action-plan buttons (Free / Enterprise) -----------------
+			case 'checkout:action':
+				if (message.actionType === 'mailto') {
+					// Enterprise "Contact us" — open an email draft to sales.
+					vscode.env.openExternal(vscode.Uri.parse('mailto:sales@rocketride.ai'));
+				} else {
+					// Free "Get started" — open Settings on Development Mode, force Local.
+					vscode.commands.executeCommand('rocketride.page.settings.open', 'development', undefined, 'local');
+				}
 				break;
 		}
 	}

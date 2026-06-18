@@ -71,8 +71,8 @@ export class SettingsProvider {
 	 */
 	private registerCommands(): void {
 		const commands = [
-			vscode.commands.registerCommand('rocketride.page.settings.open', async (focus?: string, authError?: string) => {
-				await this.openSettings(focus, authError);
+			vscode.commands.registerCommand('rocketride.page.settings.open', async (focus?: string, authError?: string, mode?: string) => {
+				await this.openSettings(focus, authError, mode);
 			}),
 
 			vscode.commands.registerCommand('rocketride.page.settings.setupCredentials', async () => {
@@ -107,15 +107,19 @@ export class SettingsProvider {
 	private pendingFocus?: string;
 	/** Pending auth error — shown as a banner when the page opens due to auth failure. */
 	private pendingAuthError?: string;
+	/** Pending connection mode — pre-selects a development connection mode when the page opens. */
+	private pendingMode?: string;
 
 	/**
 	 * Opens the settings page, optionally focused on a single section.
 	 * @param focus - If set ('development' or 'deployment'), shows only that section.
 	 * @param authError - If set, displays an auth-failure banner that clears on successful test.
+	 * @param mode - If set, pre-selects this development connection mode (e.g. 'local').
 	 */
-	public async openSettings(focus?: string, authError?: string): Promise<void> {
+	public async openSettings(focus?: string, authError?: string, mode?: string): Promise<void> {
 		this.pendingFocus = focus;
 		this.pendingAuthError = authError;
+		this.pendingMode = mode;
 		if (this.panel) {
 			this.panel.reveal(vscode.ViewColumn.One);
 			// Panel already open — send focus update directly
@@ -124,6 +128,10 @@ export class SettingsProvider {
 			}
 			if (authError) {
 				this.panel.webview.postMessage({ type: 'authError', message: authError });
+			}
+			if (mode) {
+				this.panel.webview.postMessage({ type: 'setConnectionMode', mode });
+				this.pendingMode = undefined;
 			}
 			return;
 		}
@@ -154,6 +162,10 @@ export class SettingsProvider {
 						if (this.pendingAuthError) {
 							panel.webview.postMessage({ type: 'authError', message: this.pendingAuthError });
 							this.pendingAuthError = undefined;
+						}
+						if (this.pendingMode) {
+							panel.webview.postMessage({ type: 'setConnectionMode', mode: this.pendingMode });
+							this.pendingMode = undefined;
 						}
 						await this.connHandler.startStatusPolling();
 						break;

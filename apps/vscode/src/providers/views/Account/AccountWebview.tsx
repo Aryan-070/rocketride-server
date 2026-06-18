@@ -468,6 +468,7 @@ const AccountWebview: React.FC = () => {
 					onConfirmPending={handleConfirmPending}
 					onSuccess={handleCheckoutSuccess}
 					onClose={() => setShowCheckout(false)}
+					onActionClick={(_plan, action) => sendMessageRef.current({ type: 'checkout:action', actionType: action.type } as any)}
 				/>
 			)}
 		</>

@@ -61,7 +61,8 @@ export type AccountWebviewToHost =
 	| { type: 'account:addTeamMember'; params: { teamId: string; userId: string; permissions: string[] } }
 	| { type: 'account:editPerms'; params: { teamId: string; userId: string; permissions: string[] } }
 	| { type: 'account:removeTeamMember'; params: { teamId: string; userId: string } }
-	| { type: 'account:sectionChange'; section: string };
+	| { type: 'account:sectionChange'; section: string }
+	| { type: 'checkout:action'; actionType: 'link' | 'mailto' };
 
 // =============================================================================
 // ENVIRONMENT PAGE PROTOCOL

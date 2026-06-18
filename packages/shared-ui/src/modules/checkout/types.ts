@@ -117,4 +117,12 @@ export interface CheckoutModalProps {
 
 	/** Called when the user dismisses the modal without completing checkout. */
 	onClose: () => void;
+
+	/**
+	 * Optional override for action-plan (Free/Enterprise) button clicks.
+	 * Defaults to opening the link/mailto natively. Hosts that sandbox
+	 * ``window.open`` (e.g. the VS Code webview) supply this to delegate
+	 * the click to the host instead.
+	 */
+	onActionClick?: (plan: CheckoutPlan, action: PlanAction) => void;
 }

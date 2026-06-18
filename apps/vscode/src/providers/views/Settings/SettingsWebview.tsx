@@ -515,6 +515,10 @@ export const Settings: React.FC = () => {
 					if ((message as any).focus) setActiveTab((message as any).focus);
 					break;
 
+				case 'setConnectionMode' as any:
+					if ((message as any).mode) handleSettingsChange({ development: { connectionMode: (message as any).mode } });
+					break;
+
 				case 'authError' as any:
 					setAuthError((message as any).message || 'Authentication failed');
 					break;
