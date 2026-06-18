@@ -38,6 +38,8 @@ import * as vscode from 'vscode';
 import { ConfigManager } from '../config';
 import { getConnectionManager, getEngineRegistry } from '../extension';
 import { ConnectionMessageHandler } from './shared/connection-message-handler';
+import { getLogger } from '../shared/util/output';
+import { isAllowedExternalUrl } from '../shared/util/externalUrl';
 
 const DISMISSED_KEY = 'welcomeDismissed';
 
@@ -108,11 +110,15 @@ export class WelcomeProvider {
 						vscode.commands.executeCommand('rocketride.page.settings.open');
 						break;
 
-					case 'openExternal':
-						if (message.url) {
-							vscode.env.openExternal(vscode.Uri.parse(message.url));
+					case 'openExternal': {
+						const url = message.url;
+						if (url && isAllowedExternalUrl(url)) {
+							vscode.env.openExternal(vscode.Uri.parse(url));
+						} else if (url) {
+							getLogger().error(`Refused to open external URL with unsupported scheme: ${url}`);
 						}
 						break;
+					}
 
 					default: {
 						// Delegate connection messages (cloud, docker, service, test, engine versions, sudo)

@@ -155,6 +155,10 @@ export type SettingsOutgoingMessage =
 	  }
 	| {
 			type: 'openSubscribe';
+	  }
+	| {
+			type: 'openExternal';
+			url: string;
 	  };
 
 // ============================================================================
@@ -834,7 +838,7 @@ export const Settings: React.FC = () => {
 	 * blocks ``window.open``, so it must go through ``vscode.env.openExternal``.
 	 */
 	const handleCheckoutActionClick = useCallback((_plan: CheckoutPlan, action: PlanAction) => {
-		sendMessage({ type: 'openExternal', url: actionHref(action) } as any);
+		sendMessage({ type: 'openExternal', url: actionHref(action) });
 	}, [sendMessage]);
 
 	const panels: Record<string, ITabPanelPanel> = useMemo(
