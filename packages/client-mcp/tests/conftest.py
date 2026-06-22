@@ -112,8 +112,20 @@ def mock_rocketride_client() -> MagicMock:
         return_value={
             'body': {
                 'tasks': [
-                    {'name': 'Task1', 'description': 'First task'},
-                    {'name': 'Task2', 'description': 'Second task'},
+                    {
+                        'name': 'Task1',
+                        'description': 'First task',
+                        'source': 'dropper_1',
+                        'token': 'tk_aaa',
+                        'status': 'running',
+                    },
+                    {
+                        'name': 'Task2',
+                        'description': 'Second task',
+                        'source': 'chat_1',
+                        'token': 'tk_bbb',
+                        'status': 'running',
+                    },
                 ],
             },
         }

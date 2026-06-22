@@ -107,6 +107,16 @@ async def test_read_status_with_connected_client(mock_rocketride_client: MagicMo
     assert 'Task2' in data['pipelines']
 
 
+async def test_read_status_exposes_task_tokens(mock_rocketride_client: MagicMock) -> None:
+    raw = await resources_mod.read_resource(mock_rocketride_client, URI_STATUS)
+    data = json.loads(raw)
+    # Each running task surfaces its token/source so a caller can watch_flow it.
+    by_token = {t['token']: t for t in data['tasks']}
+    assert by_token['tk_aaa']['source'] == 'dropper_1'
+    assert by_token['tk_aaa']['name'] == 'Task1'
+    assert by_token['tk_bbb']['source'] == 'chat_1'
+
+
 async def test_read_status_handles_exception() -> None:
     client = MagicMock()
     client.build_request = MagicMock(return_value={'command': 'rrext_get_tasks'})

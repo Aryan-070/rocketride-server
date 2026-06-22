@@ -47,15 +47,26 @@ async def run_pipeline(client: Any, tasks: Any, args: Dict[str, Any]) -> Dict[st
         kwargs['filepath'] = filepath
     if pipeline:
         kwargs['pipeline'] = pipeline
-    for key in ('ttl', 'use_existing', 'source', 'threads'):
+    for key in ('ttl', 'use_existing', 'source', 'threads', 'pipelineTraceLevel'):
         if args.get(key) is not None:
             kwargs[key] = args[key]
     res = await client.use(**kwargs)
     token = (res or {}).get('token')
     if not token:
         return _bad('engine did not return a task token', 'verify the pipeline starts; try validate_pipeline')
-    tasks.add(token, pipeline_ref=filepath or '<inline>')
+    info = tasks.add(token, pipeline_ref=filepath or '<inline>', flow_id=(res or {}).get('id'))
     out: Dict[str, Any] = {'ok': True, 'task_token': token}
+    # Subscribe to the per-node trace stream only when tracing is on — flow
+    # events are only emitted with a non-null pipelineTraceLevel. get_flow then
+    # drains the buffer filled by the server's on_event dispatcher.
+    if args.get('pipelineTraceLevel'):
+        try:
+            await client.add_monitor({'token': token}, ['flow'])
+            info.meta['flow_subscribed'] = True
+            out['flow_subscribed'] = True
+        except Exception as exc:  # noqa: BLE001 — pipeline started; subscription is best-effort
+            out['flow_subscribed'] = False
+            out['flow_warning'] = str(exc)
     if args.get('inputs') is not None:
         try:
             out['result'] = await client.send(
@@ -91,6 +102,12 @@ async def terminate(client: Any, tasks: Any, args: Dict[str, Any]) -> Dict[str, 
     token = args.get('task_token')
     if not token:
         return _bad('task_token is required', 'use the token from run_pipeline')
+    info = tasks.get(token)
+    if info is not None and info.meta.get('flow_subscribed'):
+        try:
+            await client.remove_monitor({'token': token}, ['flow'])
+        except Exception:  # noqa: BLE001 — teardown is best-effort
+            pass
     await client.terminate(token)
     tasks.remove(token)
     return {'ok': True, 'terminated': token}
@@ -119,7 +136,7 @@ _PIPE_REF_SCHEMA = {
 _SPECS: List[tuple] = [
     (
         'run_pipeline',
-        'Start a RocketRide pipeline and return its task token. Pass `pipeline` (inline) or `filepath`; optionally `inputs` to send data immediately and return the result, plus `ttl`/`use_existing`.',
+        'Start a RocketRide pipeline and return its task token. Pass `pipeline` (inline) or `filepath`; optionally `inputs` to send data immediately and return the result, plus `ttl`/`use_existing`. Set `pipelineTraceLevel` to "full" to emit per-node trace events that `get_flow` can then stream.',
         {
             'type': 'object',
             'properties': {
@@ -127,6 +144,11 @@ _SPECS: List[tuple] = [
                 'inputs': {'type': 'string', 'description': 'Optional data to send immediately'},
                 'ttl': {'type': 'integer', 'description': 'Idle timeout seconds (0 = no timeout)'},
                 'use_existing': {'type': 'boolean'},
+                'pipelineTraceLevel': {
+                    'type': 'string',
+                    'enum': ['none', 'metadata', 'summary', 'full'],
+                    'description': 'Trace verbosity; use "full" to capture per-node trace events for get_flow',
+                },
             },
         },
         run_pipeline,

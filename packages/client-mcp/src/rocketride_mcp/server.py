@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Dict
+from typing import Any, Awaitable, Callable, Dict
 
 from mcp.server.lowlevel import Server, NotificationOptions
 from mcp.server.models import InitializationOptions
@@ -46,6 +46,38 @@ _client: RocketRideClient | None = None
 TOOLS = ToolRegistry()
 _tasks = TaskRegistry()
 register_all(TOOLS)
+
+
+def make_flow_dispatcher(tasks: TaskRegistry) -> Callable[[Dict[str, Any]], Awaitable[None]]:
+    """Build the client `on_event` callback that buffers per-node trace events.
+
+    The engine pushes ``apaevt_flow`` events for any task we've subscribed to
+    via ``add_monitor({'token': ...}, ['flow'])``. Each delivered event carries
+    the task's short id at ``body.__id`` (injected by the DAP layer), which maps
+    to a registry token. We route the trace payload into that token's ring
+    buffer so the pull-based `get_flow` tool can drain it. Non-flow events and
+    events for unknown tasks are ignored.
+    """
+
+    async def _on_event(message: Dict[str, Any]) -> None:
+        if (message or {}).get('event') != 'apaevt_flow':
+            return
+        body = message.get('body') or {}
+        flow_id = body.get('__id')
+        if flow_id is None:
+            return
+        tasks.record_flow(
+            flow_id,
+            {
+                'pipe': body.get('id'),
+                'op': body.get('op'),
+                'pipes': body.get('pipes'),
+                'trace': body.get('trace'),
+                'source': body.get('source'),
+            },
+        )
+
+    return _on_event
 
 
 async def _dispatch(name: str, arguments: Dict[str, Any]) -> list[types.TextContent]:
@@ -70,8 +102,10 @@ async def run_server() -> None:
     global _client
     settings = load_settings()
 
-    # Connect client once at startup
-    _client = RocketRideClient(uri=settings.uri, auth=settings.apikey)
+    # Connect client once at startup. The on_event callback buffers per-node
+    # apaevt_flow trace events (for tasks subscribed via run_pipeline) so the
+    # get_flow tool can surface the per-node detail the status snapshot omits.
+    _client = RocketRideClient(uri=settings.uri, auth=settings.apikey, on_event=make_flow_dispatcher(_tasks))
     try:
         await _client.connect()
     except Exception as e:

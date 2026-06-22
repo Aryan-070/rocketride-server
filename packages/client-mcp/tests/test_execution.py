@@ -63,6 +63,40 @@ async def test_run_pipeline_requires_pipeline_or_filepath() -> None:
     assert out['error_type'] == 'BadRequest'
 
 
+async def test_run_pipeline_forwards_trace_level_and_subscribes_flow() -> None:
+    tasks = TaskRegistry()
+    client = _client(use={'token': 'tok-1', 'id': 'ctl-1'}, add_monitor=None)
+    out = await execution.run_pipeline(client, tasks, {'pipeline': {'components': []}, 'pipelineTraceLevel': 'full'})
+    assert out['ok'] is True
+    # trace level threaded through to use()
+    assert client.use.await_args.kwargs.get('pipelineTraceLevel') == 'full'
+    # flow_id captured from the use() result
+    assert tasks.get('tok-1').flow_id == 'ctl-1'
+    # subscribed to the flow channel for this token
+    client.add_monitor.assert_awaited_once_with({'token': 'tok-1'}, ['flow'])
+    assert out['flow_subscribed'] is True
+
+
+async def test_run_pipeline_without_trace_level_does_not_subscribe() -> None:
+    tasks = TaskRegistry()
+    client = _client(use={'token': 'tok-1', 'id': 'ctl-1'})
+    out = await execution.run_pipeline(client, tasks, {'pipeline': {'components': []}})
+    assert out['ok'] is True
+    assert 'flow_subscribed' not in out
+    client.add_monitor.assert_not_called()
+
+
+async def test_terminate_unsubscribes_flow_when_subscribed() -> None:
+    tasks = TaskRegistry()
+    info = tasks.add('tok-1', flow_id='ctl-1')
+    info.meta['flow_subscribed'] = True
+    client = _client(terminate=None, remove_monitor=None)
+    out = await execution.terminate(client, tasks, {'task_token': 'tok-1'})
+    assert out['ok'] is True
+    client.remove_monitor.assert_awaited_once_with({'token': 'tok-1'}, ['flow'])
+    client.terminate.assert_awaited_once_with('tok-1')
+
+
 async def test_send_data_sends_to_token() -> None:
     client = _client(send={'text': ['ok']})
     out = await execution.send_data(client, TaskRegistry(), {'task_token': 'tok', 'input': 'hi'})

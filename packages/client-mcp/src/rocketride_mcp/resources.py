@@ -132,6 +132,17 @@ async def _read_status(client: RocketRideClient | None) -> str:
                 'connected': True,
                 'pipeline_count': len(tasks),
                 'pipelines': [t.get('name') for t in tasks],
+                # Expose token/source per task so a caller can watch_flow the
+                # right running task (the engine mints a fresh token per run).
+                'tasks': [
+                    {
+                        'name': t.get('name'),
+                        'source': t.get('source'),
+                        'token': t.get('token'),
+                        'status': t.get('status'),
+                    }
+                    for t in tasks
+                ],
             },
             ensure_ascii=False,
         )
