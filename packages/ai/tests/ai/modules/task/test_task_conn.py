@@ -304,21 +304,21 @@ def test_verify_permission_passes_when_present(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# require_zitadel_auth
+# verify_auth
 # ---------------------------------------------------------------------------
 
 
-def test_require_zitadel_auth_raises_when_unauthenticated():
+def test_verify_auth_raises_when_unauthenticated():
     """Unauthenticated connection raises PermissionError."""
     conn = _make_conn(authenticated=False, account_info=None)
     with pytest.raises(PermissionError, match='Not authenticated'):
-        conn.require_zitadel_auth()
+        conn.verify_auth()
 
 
-def test_require_zitadel_auth_passes_when_authenticated():
+def test_verify_auth_passes_when_authenticated():
     """Authenticated connection with account_info passes silently."""
     conn = _make_conn(authenticated=True, account_info=_make_account_info())
-    conn.require_zitadel_auth()  # must not raise
+    conn.verify_auth()  # must not raise
 
 
 # ---------------------------------------------------------------------------

@@ -227,6 +227,9 @@ export interface TASK_STATUS {
 	/** Source component to execute */
 	source: string;
 
+	/** EVENT_TYPE bitmask indicating the event category that produced this status update */
+	event_type: number;
+
 	/** Task completion flag - true when task has finished execution */
 	completed: boolean;
 

@@ -50,8 +50,10 @@ Architecture:
 """
 
 from typing import TYPE_CHECKING, Dict, Any
+from ai.account.models import RequestContext
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.cprofile_manager import profiler
+from rocketride.types.client import DAPRequest, DAPResponse
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
@@ -104,24 +106,27 @@ class CProfileCommands(DAPConn):
         """Build the owner identifier for this connection."""
         return f'task:{self._connection_id}'
 
-    async def _proxy_to_task(self, request: Dict[str, Any], target: str) -> Dict[str, Any]:
+    async def _proxy_to_task(self, request: Dict[str, Any], target: str, ctx=None) -> Dict[str, Any]:
         """
         Forward a cProfile command to a pipeline's engine subprocess.
 
-        Looks up the task by its token, waits for it to be running, then
-        sends the request via Task._send_data().  The subprocess response
-        body is re-wrapped with the original inbound request's seq so the
-        client can correlate it.
+        Looks up the task by its token, verifies access, waits for it to be
+        running, then sends the request via Task._send_data().  The subprocess
+        response body is re-wrapped with the original inbound request's seq
+        so the client can correlate it.
 
         Args:
             request: The original inbound DAP request from the client.
-            target: The task token identifying which pipeline to profile.
+            target:  The task token identifying which pipeline to profile.
+            ctx:     RequestContext with caller identity for permission check.
 
         Returns:
             DAP response with the subprocess result body.
         """
-        # Look up the task control entry by token
-        control = self._server.get_task_control(target)
+        # Look up the task control entry by token and verify access
+        control = self._server.get_task_control_by_token(target)
+        if ctx and ctx.account_info:
+            self._server.verify_task_access(control, ctx, require='task.control')
         task = control.task
 
         # Wait for the task to reach running state
@@ -137,7 +142,7 @@ class CProfileCommands(DAPConn):
             body=subprocess_response.get('body'),
         )
 
-    async def on_rrext_cprofile_start(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_cprofile_start(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Handle DAP 'rrext_cprofile_start' command to begin profiling.
 
@@ -149,6 +154,7 @@ class CProfileCommands(DAPConn):
             request (Dict[str, Any]): DAP request containing:
                 - arguments.target (str, optional): Task token, or None for local
                 - arguments.session (str, optional): Human-readable session name
+            ctx: RequestContext with account_info, conn_id, and source.
 
         Returns:
             Dict[str, Any]: DAP response with status, session, owner, start_time
@@ -157,20 +163,20 @@ class CProfileCommands(DAPConn):
         - Local: { "command": "rrext_cprofile_start", "arguments": { "session": "test" } }
         - Proxy: { "command": "rrext_cprofile_start", "arguments": { "target": "tk_abc", "session": "test" } }
         """
-        self.verify_permission('task.control')
+        self.verify_permission('task.control', ctx)
         args = request.get('arguments', {})
         target = args.get('target', None)
 
         # Proxy mode — forward to engine subprocess
         if target:
-            return await self._proxy_to_task(request, target)
+            return await self._proxy_to_task(request, target, ctx)
 
         # Direct mode — profile the local process
         session = args.get('session', None)
         result = profiler.start(self._owner_id(), session)
         return self.build_response(request, body=result)
 
-    async def on_rrext_cprofile_stop(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_cprofile_stop(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Handle DAP 'rrext_cprofile_stop' command to end profiling.
 
@@ -181,6 +187,7 @@ class CProfileCommands(DAPConn):
         Args:
             request (Dict[str, Any]): DAP request containing:
                 - arguments.target (str, optional): Task token, or None for local
+            ctx: RequestContext with account_info, conn_id, and source.
 
         Returns:
             Dict[str, Any]: DAP response with status, session, runtime
@@ -188,19 +195,19 @@ class CProfileCommands(DAPConn):
         Usage Example:
         { "command": "rrext_cprofile_stop" }
         """
-        self.verify_permission('task.control')
+        self.verify_permission('task.control', ctx)
         args = request.get('arguments', {})
         target = args.get('target', None)
 
         # Proxy mode
         if target:
-            return await self._proxy_to_task(request, target)
+            return await self._proxy_to_task(request, target, ctx)
 
         # Direct mode
         result = profiler.stop(self._owner_id())
         return self.build_response(request, body=result)
 
-    async def on_rrext_cprofile_status(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_cprofile_status(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Handle DAP 'rrext_cprofile_status' command to query profiling state.
 
@@ -210,6 +217,7 @@ class CProfileCommands(DAPConn):
         Args:
             request (Dict[str, Any]): DAP request containing:
                 - arguments.target (str, optional): Task token, or None for local
+            ctx: RequestContext with account_info, conn_id, and source.
 
         Returns:
             Dict[str, Any]: DAP response with active, owner, session, runtime
@@ -217,19 +225,19 @@ class CProfileCommands(DAPConn):
         Usage Example:
         { "command": "rrext_cprofile_status" }
         """
-        self.verify_permission('task.control')
+        self.verify_permission('task.control', ctx)
         args = request.get('arguments', {})
         target = args.get('target', None)
 
         # Proxy mode
         if target:
-            return await self._proxy_to_task(request, target)
+            return await self._proxy_to_task(request, target, ctx)
 
         # Direct mode
         result = profiler.status()
         return self.build_response(request, body=result)
 
-    async def on_rrext_cprofile_report(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_cprofile_report(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Handle DAP 'rrext_cprofile_report' command to retrieve the full report.
 
@@ -239,6 +247,7 @@ class CProfileCommands(DAPConn):
         Args:
             request (Dict[str, Any]): DAP request containing:
                 - arguments.target (str, optional): Task token, or None for local
+            ctx: RequestContext with account_info, conn_id, and source.
 
         Returns:
             Dict[str, Any]: DAP response with report text
@@ -246,19 +255,19 @@ class CProfileCommands(DAPConn):
         Usage Example:
         { "command": "rrext_cprofile_report" }
         """
-        self.verify_permission('task.control')
+        self.verify_permission('task.control', ctx)
         args = request.get('arguments', {})
         target = args.get('target', None)
 
         # Proxy mode
         if target:
-            return await self._proxy_to_task(request, target)
+            return await self._proxy_to_task(request, target, ctx)
 
         # Direct mode
         result = profiler.report()
         return self.build_response(request, body=result)
 
-    async def on_rrext_cprofile_report_tree(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_cprofile_report_tree(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Handle DAP 'rrext_cprofile_report_tree' command to retrieve a structured call tree.
 
@@ -271,6 +280,7 @@ class CProfileCommands(DAPConn):
                 - arguments.target (str, optional): Task token, or None for local
                 - arguments.max_depth (int, optional): Max tree depth (default 50)
                 - arguments.min_pct (float, optional): Min cumtime % threshold (default 0.1)
+            ctx: RequestContext with account_info, conn_id, and source.
 
         Returns:
             Dict[str, Any]: DAP response with tree, total_time, total_calls
@@ -278,13 +288,13 @@ class CProfileCommands(DAPConn):
         Usage Example:
         { "command": "rrext_cprofile_report_tree", "arguments": { "max_depth": 30, "min_pct": 0.5 } }
         """
-        self.verify_permission('task.control')
+        self.verify_permission('task.control', ctx)
         args = request.get('arguments', {})
         target = args.get('target', None)
 
         # Proxy mode — forward to engine subprocess
         if target:
-            return await self._proxy_to_task(request, target)
+            return await self._proxy_to_task(request, target, ctx)
 
         # Direct mode — build the tree from the local profiler's stored stats
         max_depth = args.get('max_depth', 50)

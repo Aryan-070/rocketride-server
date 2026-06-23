@@ -55,8 +55,9 @@ hub that respects access permissions and client preferences.
 import time
 from typing import TYPE_CHECKING, Dict, Any, List
 from ai.common.dap import DAPConn, TransportBase
-from ai.account.models import resolve_task_permissions
+from ai.account.models import RequestContext, resolve_task_permissions
 from rocketride import EVENT_TYPE, TASK_STATE, TASK_STATUS
+from rocketride.types.client import DAPRequest, DAPResponse
 
 
 # Only import for type checking to avoid circular import errors
@@ -119,6 +120,10 @@ class MonitorCommands(DAPConn):
         """
         Send a server-level event if this connection is subscribed via the '*' wildcard.
 
+        This is an event DELIVERY method called by TaskServer.broadcast_server_event
+        on each connection — not a command handler.  Uses connection-level
+        ``self._account_info`` for scoping (OSS: one user per connection).
+
         Filtering order (each check short-circuits if it fails):
         1. Connection must have '*' in its monitor subscriptions
         2. The event_type bitmask must match the subscription
@@ -127,9 +132,9 @@ class MonitorCommands(DAPConn):
 
         Args:
             event_type: Event type bitmask (e.g. EVENT_TYPE.DASHBOARD, EVENT_TYPE.BILLING).
-            event: DAP event payload with 'event' and 'body' keys.
-            user_id: Optional user scope -- only deliver to this user.
-            org_id: Optional org scope -- only deliver to connections in this org.
+            event:      DAP event payload with 'event' and 'body' keys.
+            user_id:    Optional user scope — only deliver to this user.
+            org_id:     Optional org scope — only deliver to connections in this org.
         """
         # Step 1: must be subscribed to wildcard
         if '*' not in self._monitors:
@@ -205,17 +210,32 @@ class MonitorCommands(DAPConn):
             )
 
         # Get the task by token
-        control = self._server.get_task_control(token)
+        control = self._server.get_task_control_by_token(token)
 
-        # Verify we are allowed to receive events for this task - for SSE events, it requires data
-        # access, for all others, it's monitor access
-        if event_type == EVENT_TYPE.SSE:
-            self.verify_permission('task.data')
-        else:
-            self.verify_permission('task.monitor')
+        # Verify we are allowed to receive events for this task.
+        # Uses self._account_info (connection-level) because this is event
+        # delivery called by TaskServer.broadcast_task_event, not a command handler.
+        info = self._account_info
+        if not info:
+            return
 
-        # Verify the caller has access to this task's team
-        if not resolve_task_permissions(self._account_info, control.teamId):
+        # For SSE events, requires data access; for all others, monitor access.
+        # Internal and sys.admin credentials get full permissions from
+        # resolve_task_permissions — no special bypass needed.
+        perms = resolve_task_permissions(info, control.teamId)
+        if not perms:
+            return
+        if event_type == EVENT_TYPE.SSE and 'task.data' not in perms:
+            return
+        if event_type != EVENT_TYPE.SSE and 'task.monitor' not in perms:
+            return
+
+        # Internal connections always receive SSE events (no subscription
+        # needed — the orchestrator filters locally). This avoids rrext_monitor
+        # churn for every pipe open/close.
+        is_internal = 'internal' in getattr(info, 'sysPermissions', [])
+        if is_internal and event_type == EVENT_TYPE.SSE:
+            await _send_event(EVENT_TYPE.SSE)
             return
 
         # Build the base project-scoped key
@@ -359,6 +379,66 @@ class MonitorCommands(DAPConn):
         # And done
         return
 
+    # =========================================================================
+    # OVERRIDABLE HOOKS
+    # =========================================================================
+
+    def _resolve_task_by_token(self, token: str):
+        """
+        Resolve a task token to its control structure.
+
+        OSS (TaskConn): returns the local TASK_CONTROL from TaskServer.
+        Orchestrator: overrides to return None (tasks live on EAAS, not locally).
+
+        Args:
+            token: Task token string.
+
+        Returns:
+            TASK_CONTROL-like object with project_id, source, id, teamId,
+            or None if the task cannot be resolved locally.
+        """
+        return self._server.get_task_control_by_token(token)
+
+    def _resolve_task_by_project(self, project_id: str, source: str):
+        """
+        Resolve a project_id/source pair to its task control.
+
+        Pure lookup — no permission check. Callers must verify access
+        separately using ``verify_task_access()``.
+
+        OSS (TaskConn): returns the local TASK_CONTROL from TaskServer.
+        Orchestrator: overrides to look up from _task_table.
+
+        Args:
+            project_id: Pipeline project UUID.
+            source:     Source component ID.
+
+        Returns:
+            TASK_CONTROL-like object, or None if not found locally.
+        """
+        try:
+            return self._server.get_task_control_by_project(project_id, source)
+        except RuntimeError:
+            return None
+
+    async def _on_monitor_changed(self, event_key: str, subscribed: bool) -> None:
+        """
+        Hook called after a monitor subscription changes.
+
+        OSS (TaskConn): no-op — events are delivered via local broadcast.
+        Orchestrator: overrides to subscribe/unsubscribe the EventBus
+        Redis pub/sub channel so task events flow to this connection.
+
+        Args:
+            event_key:  The subscription key (e.g. ``'p.{pid}.{src}'`` or ``'*'``).
+            subscribed: True if subscribed, False if unsubscribed.
+        """
+        pass
+
+    # =========================================================================
+    # SET MONITOR
+    # =========================================================================
+
     async def set_monitor(
         self,
         token: str = None,
@@ -370,90 +450,94 @@ class MonitorCommands(DAPConn):
         """
         Configure event monitoring subscription for a specific task.
 
-        Updates the monitor registry to add, modify, or remove event subscriptions
-        for a given task. This allows clients to dynamically control which events
-        they receive from specific tasks.
+        Updates the ``_monitors`` registry to add, modify, or remove event
+        subscriptions.  Calls ``_resolve_task_by_token`` / ``_resolve_task_by_project``
+        for task resolution (overridable) and ``_on_monitor_changed`` after
+        the subscription changes (overridable for EventBus integration).
+
+        Works identically on OSS standalone (TaskConn) and the Orchestrator
+        (OrchestratorConn) — subclasses only override the hooks above.
 
         Args:
-            token (str): Unique identifier for the task to monitor
-            type (EVENT_TYPE): Subscription bits
+            token:      Task token, or ``'*'`` for all tasks.
+            project_id: Alternative to token — project UUID.
+            source:     Alternative to token — source component ID.
+            pipe_id:    Optional pipe-level filter.
+            type:       EVENT_TYPE bitmask.  NONE removes the subscription.
 
         Returns:
-            Dict[str, Any]: Status information about the subscription change
-
-        Side Effects:
-        - Updates internal _monitors registry
-        - Logs subscription changes for debugging purposes
-        - NONE type removes the subscription entirely from registry
+            event_id string for the response body, or None.
         """
         control = None
 
-        # If we are supposed to monitor all tasks...
-        if token == '*':
-            # Only token can be specified
-            if project_id or source:
-                raise ValueError('You must specifiy either token or project_id/source, not both')
+        # ── Resolve subscription target ──────────────────────────────────
 
+        self.debug_message(f'[set_monitor] token={token!r} project_id={project_id!r} source={source!r} type={type}')
+
+        if token == '*':
+            # Wildcard: monitor all tasks
+            if project_id or source:
+                raise ValueError('You must specify either token or project_id/source, not both')
             event_key = '*'
             event_id = None
             filter_name = '<all>'
 
-        # If a token is specified, resolve it to project_id/source
         elif token:
-            # Only token can be specified
+            # Token: resolve to project_id/source
             if project_id or source:
-                raise ValueError('You must specifiy either token or project_id/source, not both')
+                raise ValueError('You must specify either token or project_id/source, not both')
 
-            # Resolve the token to a project key
-            control = self._server.get_task_control(token)
+            control = self._resolve_task_by_token(token)
 
-            # Verify the caller has access to this task's team
-            if not resolve_task_permissions(self._account_info, control.teamId):
-                raise PermissionError('Access denied: no permissions for this task')
-
-            # Use the project key so subscribe/unsubscribe by token or project_id/source use the same key
-            event_key = f'p.{control.project_id}.{control.source}'
-            event_id = control.id
-            filter_name = control.id
-
-        # If project/source we specified
-        elif project_id and source:
-            # Get the project key
-            event_key = f'p.{project_id}.{source}'
-
-            # If is ok if the task doesn't exist at this point in time...
-            try:
-                # Get the task (ownership check inside)
-                control = self._server.get_task_control_by_project(
-                    project_id, source, self._account_info, require='task.monitor'
-                )
-
-                # The task is running, we can fill it in
+            if control:
+                # Verify the caller has access to this task's team
+                if not resolve_task_permissions(self._account_info, control.teamId):
+                    raise PermissionError('Access denied: no permissions for this task')
+                event_key = f'p.{control.project_id}.{control.source}'
                 event_id = control.id
                 filter_name = control.id
+            else:
+                # Task not resolvable locally (orchestrator) — derive key from token
+                event_key = f't.{token}'
+                event_id = None
+                filter_name = f'<token:{token[:8]}>'
 
-            except PermissionError:
-                raise
+        elif project_id and source:
+            # Project/source: resolve directly
+            self.debug_message(f'[set_monitor] project/source branch: {project_id}.{source}')
+            event_key = f'p.{project_id}.{source}'
 
-            except Exception:
+            control = self._resolve_task_by_project(project_id, source)
+            if control:
+                # Verify the caller has access to this task's team
+                if not resolve_task_permissions(self._account_info, control.teamId):
+                    raise PermissionError('Access denied: no permissions for this task')
+                event_id = control.id
+                filter_name = control.id
+            else:
                 event_id = None
                 filter_name = f'<Project:{project_id[:8]}.{source}>'
 
         else:
-            # Invalid
-            raise ValueError('You must specifiy either token or project_id/source')
+            raise ValueError('You must specify either token or project_id/source')
 
-        # If a pipe_id is specified, narrow the key to that specific pipe
+        # Narrow to pipe if specified
         if pipe_id is not None and event_key != '*':
             event_key = f'{event_key}.{pipe_id}'
             filter_name = f'{filter_name}.pipe{pipe_id}'
 
+        # ── Update subscription registry ─────────────────────────────────
+
         try:
             if type == EVENT_TYPE.NONE:
-                # Unsubscribe: remove from monitor registry
+                # Unsubscribe
                 self._monitors.pop(event_key, None)
                 self.debug_message(f'Removed monitoring for "{filter_name}"')
 
+                # Notify hook (EventBus unsubscribe on orchestrator)
+                await self._on_monitor_changed(event_key, subscribed=False)
+
+                # Dashboard notification
                 await self._server.broadcast_server_event(
                     EVENT_TYPE.DASHBOARD,
                     {
@@ -468,16 +552,18 @@ class MonitorCommands(DAPConn):
                             'change': 'unsubscribed',
                         },
                     },
-                    user_id=self._account_info.userId,
+                    user_id=self._account_info.userId if self._account_info else None,
                 )
             else:
-                # Get the current type so we know what to update
+                # Subscribe or update
                 prev = self._monitors.get(event_key, EVENT_TYPE.NONE)
-
-                # Subscribe or update: add/modify registry entry
                 self._monitors[event_key] = type
                 self.debug_message(f'Set "{filter_name}" monitoring to {type}')
 
+                # Notify hook (EventBus subscribe on orchestrator)
+                await self._on_monitor_changed(event_key, subscribed=True)
+
+                # Dashboard notification
                 await self._server.broadcast_server_event(
                     EVENT_TYPE.DASHBOARD,
                     {
@@ -492,21 +578,19 @@ class MonitorCommands(DAPConn):
                             'change': 'subscribed',
                         },
                     },
-                    user_id=self._account_info.userId,
+                    user_id=self._account_info.userId if self._account_info else None,
                 )
 
-                # Send updates for what was missed (or empty state if task not running)
+                # Send catch-up events for newly enabled bits
                 await self._send_updates(control, prev, type, project_id=project_id, source=source)
 
-            # Return the event id to put into the response
             return event_id
 
         except Exception as e:
-            # Log subscription management errors
             self.debug_message(f'Error configuring monitoring: {str(e)}')
             raise
 
-    async def on_rrext_monitor(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_monitor(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Handle DAP 'rrext_monitor' command to establish or modify event subscriptions.
 
@@ -561,8 +645,17 @@ class MonitorCommands(DAPConn):
                     print(f"Warning: Unknown event type '{event_str}' ignored")
             return bitmask
 
-        # Verify permission
-        token = self.get_task_token(request, 'task.monitor')
+        # Verify permission and extract the task token
+        self.debug_message(f'[on_rrext_monitor] args={request.get("arguments", {})}')
+        self.debug_message(
+            f'[on_rrext_monitor] ctx.account_info.auth={getattr(ctx.account_info, "auth", "?")} sysPerms={getattr(ctx.account_info, "sysPermissions", [])}'
+        )
+        self.debug_message(
+            f'[on_rrext_monitor] self._account_info.auth={getattr(self._account_info, "auth", "?")} sysPerms={getattr(self._account_info, "sysPermissions", [])}'
+        )
+        token = self.get_task_token(request, ctx, 'task.monitor')
+
+        self.debug_message(f'[on_rrext_monitor] token={token}')
 
         # Parse monitoring configuration from request arguments
         args = request.get('arguments', {})
@@ -601,3 +694,221 @@ class MonitorCommands(DAPConn):
 
         # Acknowledge successful subscription setup
         return self.build_response(request)
+
+    # =========================================================================
+    # DASHBOARD
+    # =========================================================================
+
+    async def on_rrext_dashboard(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
+        """
+        Handle DAP 'rrext_dashboard' command to retrieve server dashboard data.
+
+        Returns a snapshot of the server's current state including overview
+        metrics, active connections, and task information for administrative
+        monitoring dashboards.
+
+        Args:
+            request: DAP request (no arguments required).
+            ctx:     RequestContext with authenticated caller identity.
+
+        Returns:
+            DAP response containing:
+                - body.overview: Server-level aggregate metrics
+                - body.connections: List of active connection details
+                - body.tasks: List of task details with status and metrics
+        """
+        try:
+            # Require monitor permission
+            self.verify_permission('task.monitor', ctx)
+
+            server = self._server
+            current_time = time.time()
+            caller_user_id = ctx.account_info.userId
+
+            # Snapshot tasks the caller has access to (own, teammate, org admin)
+            task_controls = [
+                c for c in server._task_control.values() if resolve_task_permissions(ctx.account_info, c.teamId)
+            ]
+            # Connections are user-scoped (not task-scoped), so filter by userId
+            conn_items = [
+                (cid, conn)
+                for cid, conn in server._connections.items()
+                if hasattr(conn, '_account_info') and conn._account_info and conn._account_info.userId == caller_user_id
+            ]
+
+            # Task-scoped tokens (tk_) can only see their own task
+            caller_auth = ctx.account_info.auth if hasattr(ctx.account_info, 'auth') else ''
+            if caller_auth.startswith('tk_'):
+                task_controls = [c for c in task_controls if c.token == caller_auth]
+                conn_items = [(cid, conn) for cid, conn in conn_items if cid == self._connection_id]
+
+            # Build connection-to-task mapping by scanning task controls
+            conn_tasks: Dict[int, List[str]] = {}
+            for control in task_controls:
+                if control.task is None:
+                    continue
+                task_name = getattr(control.task.get_status(), 'name', None) or control.source
+                for cid, conn in conn_items:
+                    if not hasattr(conn, '_monitors'):
+                        continue
+                    project_key = f'p.{control.project_id}.{control.source}'
+                    project_wildcard_key = f'p.{control.project_id}.*'
+                    pipe_prefix = f'{project_key}.'
+                    if (
+                        project_key in conn._monitors
+                        or project_wildcard_key in conn._monitors
+                        or '*' in conn._monitors
+                        or any(k.startswith(pipe_prefix) for k in conn._monitors)
+                    ):
+                        conn_tasks.setdefault(cid, []).append(task_name)
+
+            # Build project ID → friendly name map from task controls
+            # so monitor keys like p.{uuid}.{source} can be displayed readably
+            project_names: Dict[str, str] = {}
+            source_names: Dict[str, str] = {}
+            for control in task_controls:
+                if control.task is None:
+                    continue
+                status = control.task.get_status()
+                task_name = getattr(status, 'name', None) or control.source
+                # Use the task_name prefix (before the dot) as project label
+                name_parts = task_name.split('.', 1)
+                project_names.setdefault(control.project_id, name_parts[0])
+                source_names.setdefault(
+                    f'{control.project_id}.{control.source}', name_parts[-1] if len(name_parts) > 1 else control.source
+                )
+
+            # Build connections list
+            connections = []
+            for conn_id, conn in conn_items:
+                conn_info: Dict[str, Any] = {
+                    'id': conn_id,
+                    'connectedAt': getattr(conn, '_connected_at', current_time),
+                    'lastActivity': getattr(conn, '_last_activity', current_time),
+                    'messagesIn': getattr(conn, '_messages_in', 0),
+                    'messagesOut': getattr(conn, '_messages_out', 0),
+                    'authenticated': getattr(conn, '_authenticated', False),
+                    'clientId': None,
+                    'clientInfo': getattr(conn, '_client_info', {}),
+                    'monitors': self._build_monitors_list(conn._monitors, project_names, source_names)
+                    if hasattr(conn, '_monitors')
+                    else [],
+                    'attachedTasks': conn_tasks.get(conn_id, []),
+                }
+                if hasattr(conn, '_account_info') and conn._account_info:
+                    conn_info['clientId'] = conn._account_info.userId
+                connections.append(conn_info)
+
+            # Build tasks list
+            tasks = []
+            for control in task_controls:
+                try:
+                    task_status = control.task.get_status()
+                    start = getattr(task_status, 'startTime', 0) or 0
+                    end = getattr(task_status, 'endTime', 0) or 0
+                    completed = getattr(task_status, 'completed', False)
+                    if completed and start > 0 and end > 0:
+                        elapsed = end - start
+                    elif start > 0:
+                        elapsed = current_time - start
+                    else:
+                        elapsed = 0
+
+                    # Convert Pydantic metrics model to plain dict for JSON serialization
+                    metrics_raw = getattr(task_status, 'metrics', None)
+                    metrics_dict = metrics_raw.model_dump() if hasattr(metrics_raw, 'model_dump') else metrics_raw
+
+                    tasks.append(
+                        {
+                            'id': control.id,
+                            'name': getattr(task_status, 'name', control.source),
+                            'projectId': control.project_id,
+                            'source': control.source,
+                            'provider': control.provider,
+                            'launchType': control.launch_type.value,
+                            'startTime': start,
+                            'elapsedTime': elapsed,
+                            'completed': completed,
+                            'status': getattr(task_status, 'status', None) if not completed else None,
+                            'exitCode': getattr(task_status, 'exitCode', None) if completed else None,
+                            'endTime': end if completed else None,
+                            'connections': control.task.get_connection_count(),
+                            'state': getattr(task_status, 'state', 0),
+                            'idleTime': getattr(control.task, '_idle_time', 0),
+                            'ttl': getattr(control.task, '_ttl', 0),
+                            'metrics': metrics_dict,
+                            'totalCount': getattr(task_status, 'totalCount', 0),
+                            'completedCount': getattr(task_status, 'completedCount', 0),
+                            'rateCount': getattr(task_status, 'rateCount', 0),
+                            'rateSize': getattr(task_status, 'rateSize', 0),
+                        }
+                    )
+                except Exception as e:
+                    self.debug_message(f'Error building task info for "{control.id}": {e}')
+                    continue
+
+            # Build overview — derive from sanitized tasks list to avoid
+            # re-calling get_status() on potentially torn-down controls
+            active_count = sum(1 for task in tasks if not task['completed'])
+            start_time = getattr(server._server, '_startTime', None) or current_time
+            overview = {
+                'totalConnections': len(conn_items),
+                'activeTasks': active_count,
+                'serverUptime': current_time - start_time,
+            }
+
+            return self.build_response(
+                request,
+                body={
+                    'overview': overview,
+                    'connections': connections,
+                    'tasks': tasks,
+                },
+            )
+
+        except Exception as e:
+            self.debug_message(f'Failed to retrieve dashboard data: {str(e)}')
+            raise
+
+    @staticmethod
+    def _build_monitors_list(
+        monitors: Dict[str, 'EVENT_TYPE'],
+        project_names: Dict[str, str],
+        source_names: Dict[str, str],
+    ) -> List[Dict[str, Any]]:
+        """Convert the _monitors dict into a list of {key, flags} objects for the dashboard."""
+        result = []
+        for key, flags in monitors.items():
+            flag_names = [f.name.lower() for f in EVENT_TYPE if f.value and f in flags]
+            label = MonitorCommands._resolve_monitor_label(key, project_names, source_names)
+            result.append({'key': label, 'flags': flag_names})
+        return result
+
+    @staticmethod
+    def _resolve_monitor_label(
+        key: str,
+        project_names: Dict[str, str],
+        source_names: Dict[str, str],
+    ) -> str:
+        """Resolve a raw monitor key into a human-friendly label."""
+        if key == '*':
+            return 'All tasks'
+
+        if not key.startswith('p.'):
+            return 'Task monitor'
+
+        # Strip the 'p.' prefix and split: projectId, source, [pipeId]
+        parts = key[2:].split('.', 2)
+        project_id = parts[0]
+        project_label = project_names.get(project_id, project_id[:8])
+
+        if len(parts) == 1 or (len(parts) == 2 and parts[1] == '*'):
+            return f'{project_label}.*'
+
+        source = parts[1]
+        source_label = source_names.get(f'{project_id}.{source}', source)
+
+        if len(parts) == 3:
+            return f'{project_label}.{source_label}.pipe{parts[2]}'
+
+        return f'{project_label}.{source_label}'

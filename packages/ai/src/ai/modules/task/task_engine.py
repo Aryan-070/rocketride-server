@@ -738,6 +738,23 @@ class Task(DAPBase):
             self._status.state = TASK_STATE.CANCELLED.value
             self.debug_message(f'Task terminated abnormally with exit code {exit_code}')
 
+        # Zero metrics after stop_monitoring() has audited them.
+        # The audit in stop_monitoring() freezes the final token totals
+        # for billing. Now clear the metrics so the client chart shows
+        # zero after task completion instead of stale values.
+        try:
+            self._status.metrics.cpu_percent = 0.0
+            self._status.metrics.cpu_memory_mb = 0.0
+            self._status.metrics.gpu_memory_mb = 0.0
+            self._status.metrics.peak_cpu_percent = 0.0
+            self._status.metrics.peak_cpu_memory_mb = 0.0
+            self._status.metrics.peak_gpu_memory_mb = 0.0
+            self._status.metrics.avg_cpu_percent = 0.0
+            self._status.metrics.avg_cpu_memory_mb = 0.0
+            self._status.metrics.avg_gpu_memory_mb = 0.0
+        except Exception:
+            pass
+
         # Send final status update
         await self._send_status_update()
 
@@ -792,7 +809,7 @@ class Task(DAPBase):
                 # Notify dashboard of task errors (non-zero exit)
                 if self._status.exitCode and self._status.exitCode != 0:
                     try:
-                        task_user_id = self._server.get_task_control(self.token).userId if self.token else None
+                        task_user_id = self._server.get_task_control_by_token(self.token).userId if self.token else None
                     except Exception:
                         task_user_id = None
                     await self._server.broadcast_server_event(
@@ -900,6 +917,15 @@ class Task(DAPBase):
                     self.debug_message(f'Failed to send event to debugger: {e}')
 
         else:
+            # Inject routing fields into the event body so consumers
+            # (orchestrator on_event callback, clients) can identify the
+            # task and event type without needing a TASK_CONTROL lookup.
+            body = message.get('body') if message else None
+            if isinstance(body, dict):
+                body['event_type'] = type.value
+                body.setdefault('project_id', self.project_id)
+                body.setdefault('source', self.source)
+
             # Route through server broadcast system
             await self._server.broadcast_task_event(
                 event_type=type,
@@ -1586,7 +1612,7 @@ class Task(DAPBase):
             # Initialize metrics tracking (uses default sample_interval from constants)
             try:
                 # Resolve billing identity from task control
-                _control = self._server.get_task_control(self.token) if self.token else None
+                _control = self._server.get_task_control_by_token(self.token) if self.token else None
                 self._task_metrics = TaskMetrics(
                     pid=self._engine_process.pid,
                     task_status=self._status,

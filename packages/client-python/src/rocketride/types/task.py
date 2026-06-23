@@ -343,6 +343,10 @@ class TASK_STATUS(BaseModel):
 
     source: str = Field(default='', description='Source component to execute')
 
+    event_type: int = Field(
+        default=0, description='EVENT_TYPE bitmask indicating the event category that produced this status update'
+    )
+
     completed: bool = Field(default=False, description='Task completion flag - true when task has finished execution')
 
     state: int = Field(

@@ -191,49 +191,72 @@ def test_get_task_control_returns_registered_control():
     ts = _make_server()
     control = _make_control(token='tk_1')
     ts._task_control['tk_1'] = control
-    assert ts.get_task_control('tk_1') is control
+    assert ts.get_task_control_by_token('tk_1') is control
 
 
-def test_get_task_control_missing_token_raises():
+def test_get_task_control_by_token_missing_token_raises():
     """An empty token raises ValueError before lookup."""
     ts = _make_server()
     with pytest.raises(ValueError, match='Task token is required'):
-        ts.get_task_control('')
+        ts.get_task_control_by_token('')
 
 
-def test_get_task_control_unknown_token_raises_runtime():
+def test_get_task_control_by_token_unknown_token_raises_runtime():
     """An unknown but non-empty token raises RuntimeError."""
     ts = _make_server()
     with pytest.raises(RuntimeError, match='not running'):
-        ts.get_task_control('tk_unknown')
+        ts.get_task_control_by_token('tk_unknown')
 
 
-def test_get_task_control_with_require_enforces_permission(monkeypatch):
-    """When account_info+require are provided, missing perms raise PermissionError."""
+def test_verify_task_access_enforces_permission(monkeypatch):
+    """Missing perms raise PermissionError via verify_task_access."""
     from ai.modules.task import task_server as ts_mod
 
-    monkeypatch.setattr(ts_mod, 'resolve_team_permissions', lambda info, team: set())
-
-    ts = _make_server()
-    ts._task_control['tk_1'] = _make_control()
-    account = SimpleNamespace(userId='u', defaultTeam='t')
-
-    with pytest.raises(PermissionError, match="'task.debug' denied"):
-        ts.get_task_control('tk_1', account_info=account, require='task.debug')
-
-
-def test_get_task_control_with_require_passes_when_granted(monkeypatch):
-    """A granted permission lets get_task_control return the control unmodified."""
-    from ai.modules.task import task_server as ts_mod
-
-    monkeypatch.setattr(ts_mod, 'resolve_team_permissions', lambda info, team: {'task.debug'})
+    monkeypatch.setattr(ts_mod, 'resolve_task_permissions', lambda info, team: [])
 
     ts = _make_server()
     control = _make_control()
     ts._task_control['tk_1'] = control
-    account = SimpleNamespace(userId='u', defaultTeam='t')
+    account = SimpleNamespace(userId='u', defaultTeam='t', auth='rr_test', sysPermissions=[])
+    ctx = SimpleNamespace(account_info=account)
 
-    assert ts.get_task_control('tk_1', account_info=account, require='task.debug') is control
+    with pytest.raises(PermissionError, match='no permissions'):
+        ts.verify_task_access(control, ctx, require='task.debug')
+
+
+def test_verify_task_access_passes_when_granted(monkeypatch):
+    """A granted permission lets verify_task_access pass without error."""
+    from ai.modules.task import task_server as ts_mod
+
+    monkeypatch.setattr(ts_mod, 'resolve_task_permissions', lambda info, team: ['task.debug'])
+
+    ts = _make_server()
+    control = _make_control()
+    ts._task_control['tk_1'] = control
+    account = SimpleNamespace(userId='u', defaultTeam='t', auth='rr_test', sysPermissions=[])
+    ctx = SimpleNamespace(account_info=account)
+
+    ts.verify_task_access(control, ctx, require='task.debug')  # should not raise
+
+
+def test_verify_task_access_internal_gets_full_permissions():
+    """Internal connections get full permissions via resolve_task_permissions."""
+    ts = _make_server()
+    control = _make_control()
+    account = SimpleNamespace(userId='', auth='internal_cred', sysPermissions=['internal'], organization=None)
+    ctx = SimpleNamespace(account_info=account)
+
+    ts.verify_task_access(control, ctx, require='task.debug')  # should not raise
+
+
+def test_verify_task_access_sys_admin_gets_full_permissions():
+    """sys.admin connections get full permissions via resolve_task_permissions."""
+    ts = _make_server()
+    control = _make_control()
+    account = SimpleNamespace(userId='u', auth='rr_test', sysPermissions=['sys.admin'], organization=None)
+    ctx = SimpleNamespace(account_info=account)
+
+    ts.verify_task_access(control, ctx, require='task.control')  # should not raise
 
 
 def test_get_task_returns_underlying_task():

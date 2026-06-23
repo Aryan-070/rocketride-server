@@ -59,6 +59,11 @@ let clientId = 0;
  * ```
  */
 export class DataPipe {
+	/** Maximum bytes per write subcommand.  Larger buffers are auto-chunked to
+	 *  prevent head-of-line blocking on the multiplexed orchestrator<->EAAS
+	 *  WebSocket.  Matches the Python client constant. */
+	private static readonly MAX_WRITE_CHUNK = 512 * 1024; // 512 KB
+
 	private _client: RocketRideClient;
 	private _token: string;
 	private _objinfo: Record<string, unknown>;
@@ -181,6 +186,18 @@ export class DataPipe {
 	 * @throws Error if the pipe is not opened or buffer is invalid
 	 * @throws PipeException if the server reports a write failure
 	 */
+	/**
+	 * Write data to the pipe, auto-chunking buffers larger than 512 KB.
+	 *
+	 * Buffers at or below 512 KB are sent in a single subcommand.  Larger
+	 * buffers are split into sequential 512 KB chunks so that no single write
+	 * monopolises the multiplexed orchestrator<->EAAS WebSocket and causes
+	 * head-of-line blocking for other clients.
+	 *
+	 * @param buffer - Data to send as a Uint8Array.
+	 * @throws Error if the pipe is not opened.
+	 * @throws PipeException if the server reports a write failure.
+	 */
 	async write(buffer: Uint8Array): Promise<void> {
 		if (!this._opened) {
 			throw new Error('Pipe not opened');
@@ -190,20 +207,27 @@ export class DataPipe {
 			throw new Error('Buffer must be Uint8Array');
 		}
 
-		const request = this._client.buildRequest('rrext_process', {
-			arguments: {
-				subcommand: 'write',
-				pipe_id: this._pipeId,
-				data: buffer,
-			},
-			token: this._token,
-		});
+		// Split into ≤ 512 KB chunks; a single-chunk path has no overhead.
+		let offset = 0;
+		while (offset < buffer.length) {
+			const chunk = buffer.subarray(offset, offset + DataPipe.MAX_WRITE_CHUNK);
+			offset += chunk.length;
 
-		const response = await this._client.request(request);
+			const request = this._client.buildRequest('rrext_process', {
+				arguments: {
+					subcommand: 'write',
+					pipe_id: this._pipeId,
+					data: chunk,
+				},
+				token: this._token,
+			});
 
-		if (this._client.didFail(response)) {
-			const msg = response.message || 'Failed to write to a data pipe.';
-			throw new PipeException({ ...response, message: msg });
+			const response = await this._client.request(request);
+
+			if (this._client.didFail(response)) {
+				const msg = response.message || 'Failed to write to a data pipe.';
+				throw new PipeException({ ...response, message: msg });
+			}
 		}
 	}
 
@@ -731,7 +755,10 @@ export class RocketRideClient extends DAPClient {
 			this._desiredState = this._desiredState === 'detached' ? 'attached' : this._desiredState;
 			return;
 		}
-		this._desiredState = 'attached';
+		// Only upgrade — don't downgrade from 'authenticated' to 'attached'
+		if (this._desiredState === 'detached') {
+			this._desiredState = 'attached';
+		}
 		await this._internalAttach(options?.timeout);
 	}
 
@@ -860,6 +887,7 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async connect(credential?: string | { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
 		this._currentReconnectDelay = 250;
+		this._desiredState = 'authenticated';
 		await this.attach(options?.uri, { timeout: options?.timeout });
 		return this.login(credential, options);
 	}

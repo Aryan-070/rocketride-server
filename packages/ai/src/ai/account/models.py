@@ -27,6 +27,7 @@
 # =============================================================================
 
 import time
+from dataclasses import dataclass
 from typing import Literal, Optional, TypedDict
 
 from pydantic import BaseModel, Field
@@ -132,6 +133,40 @@ class AccountInfo(BaseModel):
 
 
 # =============================================================================
+# REQUEST CONTEXT
+# Per-request identity passed through the handler chain.  In OSS standalone
+# mode ctx is built from the connection's _account_info.  In pod mode ctx
+# is deserialized from the _ctx field injected by the Orchestrator into the
+# forwarded request arguments.
+# =============================================================================
+
+
+@dataclass
+class RequestContext:
+    """
+    Per-request caller identity for DAP command handlers.
+
+    Every ``on_*`` handler receives a ``ctx`` parameter built by ``on_receive``
+    before dispatch.  Handlers use ``ctx.account_info`` for user identity and
+    ``ctx.conn_id`` for resource-scoping (file handles, profiler sessions).
+
+    Attributes:
+        account_info: The authenticated user's AccountInfo.  None only for
+                      pre-auth commands (``on_auth``).
+        conn_id:      Stable identifier for the originating client connection,
+                      e.g. ``"orch-1:4527"`` (pod mode) or ``"conn-5"`` (OSS).
+                      Used to scope and clean up per-connection resources.
+        source:       ``'local'`` for OSS standalone connections or
+                      ``'orchestrator'`` for commands forwarded by the
+                      Orchestrator via an internal pod connection.
+    """
+
+    account_info: Optional[AccountInfo] = None
+    conn_id: str = ''
+    source: str = 'local'
+
+
+# =============================================================================
 # DEPLOYMENT RECORD
 # =============================================================================
 
@@ -196,6 +231,11 @@ def resolve_task_permissions(account_info: AccountInfo, task_team_id: str) -> li
         Effective permission list, or empty list if the caller has no
         membership in the task's team.
     """
+    # sys.admin and internal credentials have full access to all tasks
+    sys_perms = getattr(account_info, 'sysPermissions', []) or []
+    if 'sys.admin' in sys_perms or 'internal' in sys_perms:
+        return list(_FULL_TEAM_PERMISSIONS)
+
     org = account_info.organization
     if not org:
         return []

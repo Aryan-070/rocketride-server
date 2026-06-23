@@ -95,6 +95,77 @@ export interface DAPMessage {
 }
 
 /**
+ * A DAP request message sent from client to server.
+ *
+ * Requests carry a {@link command} and optional {@link arguments}.  The server
+ * responds with a {@link DAPResponse} whose `request_seq` matches the
+ * request's `seq`.
+ */
+export interface DAPRequest extends DAPMessage {
+	/** Always 'request' for request messages */
+	type: 'request';
+
+	/** Command name (e.g. 'execute', 'rrext_account_me') */
+	command: string;
+
+	/** Command-specific parameters */
+	arguments?: Record<string, unknown>;
+
+	/** Task or pipeline token for operation context */
+	token?: string;
+}
+
+/**
+ * A DAP response message sent from server to client.
+ *
+ * Every response corresponds to a request identified by `request_seq`.
+ * `success` indicates whether the command succeeded; on failure `message`
+ * carries the error description.
+ */
+export interface DAPResponse extends DAPMessage {
+	/** Always 'response' for response messages */
+	type: 'response';
+
+	/** Sequence number of the original request */
+	request_seq: number;
+
+	/** Command this response corresponds to */
+	command: string;
+
+	/** True if the command succeeded */
+	success: boolean;
+
+	/** Response payload */
+	body?: Record<string, unknown>;
+
+	/** Error description when success is false */
+	message?: string;
+
+	/** Additional data (e.g. binary payloads) */
+	arguments?: Record<string, unknown>;
+
+	/** Stack trace on error */
+	trace?: TraceInfo;
+}
+
+/**
+ * A DAP event message sent from server to client.
+ *
+ * Events are server-initiated notifications about state changes,
+ * output, or other asynchronous occurrences.
+ */
+export interface DAPEvent extends DAPMessage {
+	/** Always 'event' for event messages */
+	type: 'event';
+
+	/** Event type name (e.g. 'apaevt_status_update') */
+	event: string;
+
+	/** Event-specific payload */
+	body?: Record<string, unknown>;
+}
+
+/**
  * Callback functions for transport layer events and debugging.
  *
  * These callbacks provide hooks for monitoring transport activity,
