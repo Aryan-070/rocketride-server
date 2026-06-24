@@ -47,6 +47,7 @@ interface AccountWebviewMessage {
 	newPriceId?: string;
 	orgId?: string;
 	subscriptionId?: string;
+	url?: string;
 }
 
 // =============================================================================
@@ -259,6 +260,15 @@ export class AccountProvider {
 				break;
 
 			// Environment variables removed — now handled by EnvironmentProvider.
+
+			// -- External links (Free/Enterprise plan CTAs) -----------------------
+			// window.open / mailto are sandboxed in the webview, so the PlanPicker
+			// CTA posts here and we open via the VS Code shell instead.
+			case 'openExternal':
+				if (message.url) {
+					await vscode.env.openExternal(vscode.Uri.parse(message.url));
+				}
+				break;
 
 			// -- Section navigation (lazy loading) --------------------------------
 			case 'account:sectionChange':

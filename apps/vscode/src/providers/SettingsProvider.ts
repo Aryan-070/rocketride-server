@@ -166,6 +166,14 @@ export class SettingsProvider {
 						await this.clearCredentials(panel.webview);
 						break;
 
+					// Plan CTA links (Free → github, Enterprise → mailto) — webview
+					// navigation is sandboxed, so open via the VS Code shell instead.
+					case 'openExternal':
+						if (message.url) {
+							await vscode.env.openExternal(vscode.Uri.parse(message.url as string));
+						}
+						break;
+
 					// -- Checkout flow (embedded Stripe Elements) --------------------
 					case 'checkout:fetchPlans': {
 						try {

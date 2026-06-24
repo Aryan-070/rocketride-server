@@ -470,6 +470,15 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 					break;
 				}
 
+				// Plan CTA links (Free → github, Enterprise → mailto) — webview
+				// navigation is sandboxed, so open via the VS Code shell instead.
+				case 'openExternal': {
+					if (data.url) {
+						await vscode.env.openExternal(vscode.Uri.parse(data.url as string));
+					}
+					break;
+				}
+
 				// Trace messages
 				case 'trace:clear':
 					// No-op on host side
