@@ -180,18 +180,17 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 	const isValidSelection = selectedPlan && selectedPlan.stripePriceId !== currentPriceId;
 
 	/** Normalize amount to monthly cost for comparison across intervals. */
-	const monthlyAmount = (plan: CheckoutPlan) => {
-		if (plan.interval === 'year') return plan.amountCents / 12;
-		return plan.amountCents;
-	};
-
 	/** Determine if the selected plan is an upgrade or downgrade. */
 	const changeDirection = useMemo(() => {
 		if (!selectedPlan) return null;
 		const currentPlan = subscriptionPlans.find((p) => p.stripePriceId === currentPriceId);
 		if (!currentPlan) return 'change';
-		if (monthlyAmount(selectedPlan) > monthlyAmount(currentPlan)) return 'upgrade';
-		if (monthlyAmount(selectedPlan) < monthlyAmount(currentPlan)) return 'downgrade';
+
+		// Compare raw charge amounts — matches the server-side logic in
+		// apps.py which uses unit_amount directly to decide immediate
+		// proration (upgrade) vs deferred schedule (downgrade).
+		if (selectedPlan.amountCents > currentPlan.amountCents) return 'upgrade';
+		if (selectedPlan.amountCents < currentPlan.amountCents) return 'downgrade';
 		return 'change';
 	}, [selectedPlan, currentPriceId, subscriptionPlans]);
 
