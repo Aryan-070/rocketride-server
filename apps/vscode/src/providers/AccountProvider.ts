@@ -15,6 +15,7 @@
  */
 
 import * as vscode from 'vscode';
+import { openExternalUrl } from '../shared/util/openExternal';
 import * as crypto from 'crypto';
 import { readFileSync } from 'fs';
 import { ConnectionManager } from '../connection/connection';
@@ -266,7 +267,7 @@ export class AccountProvider {
 			// CTA posts here and we open via the VS Code shell instead.
 			case 'openExternal':
 				if (message.url) {
-					await vscode.env.openExternal(vscode.Uri.parse(message.url));
+					await openExternalUrl(message.url);
 				}
 				break;
 

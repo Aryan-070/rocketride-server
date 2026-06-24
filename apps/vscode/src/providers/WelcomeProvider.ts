@@ -35,6 +35,7 @@
  */
 
 import * as vscode from 'vscode';
+import { openExternalUrl } from '../shared/util/openExternal';
 import { ConfigManager } from '../config';
 import { getConnectionManager, getEngineRegistry } from '../extension';
 import { ConnectionMessageHandler } from './shared/connection-message-handler';
@@ -110,7 +111,7 @@ export class WelcomeProvider {
 
 					case 'openExternal':
 						if (message.url) {
-							vscode.env.openExternal(vscode.Uri.parse(message.url));
+							await openExternalUrl(message.url);
 						}
 						break;
 

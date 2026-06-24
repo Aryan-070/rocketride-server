@@ -40,6 +40,7 @@ import { AgentManager } from '../agents/agent-manager';
 import { DeployManager } from '../connection/deploy-manager';
 import { ConnectionMessageHandler } from './shared/connection-message-handler';
 import { isSubscribed } from '../shared/util/subscriptionGate';
+import { openExternalUrl } from '../shared/util/openExternal';
 import { PIPE_BUILDER_APP_ID } from '../shared/types';
 
 export class SettingsProvider {
@@ -170,7 +171,7 @@ export class SettingsProvider {
 					// navigation is sandboxed, so open via the VS Code shell instead.
 					case 'openExternal':
 						if (message.url) {
-							await vscode.env.openExternal(vscode.Uri.parse(message.url as string));
+							await openExternalUrl(message.url as string);
 						}
 						break;
 

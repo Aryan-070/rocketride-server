@@ -22,6 +22,7 @@ import { ConfigManager } from '../config';
 import type { PipelineConfig } from 'rocketride';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
+import { openExternalUrl } from '../shared/util/openExternal';
 import { PipelineFileParser } from '../shared/util/pipelineParser';
 import { isSubscribed } from '../shared/util/subscriptionGate';
 import { handleMissingEnvVars } from '../shared/util/envVarCheck';
@@ -474,7 +475,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				// navigation is sandboxed, so open via the VS Code shell instead.
 				case 'openExternal': {
 					if (data.url) {
-						await vscode.env.openExternal(vscode.Uri.parse(data.url as string));
+						await openExternalUrl(data.url as string);
 					}
 					break;
 				}
