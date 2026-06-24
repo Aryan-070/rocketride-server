@@ -60,6 +60,12 @@ try {
 		const win = window as unknown as Record<string, unknown>;
 		if (typeof win.acquireVsCodeApi === 'function') {
 			vscodeApi = (win.acquireVsCodeApi as () => VSCodeAPI)();
+			// Expose the (one-shot) host bridge on `window` so host-agnostic shared-ui
+			// components — e.g. PlanPicker's external-link CTA — can post to the
+			// extension host without re-calling acquireVsCodeApi (which would throw).
+			// Every React webview mounts through this hook, so the bridge is set for
+			// all of them (Account, Project paywall, Settings) with no per-surface wiring.
+			win.__rrWebviewBridge = vscodeApi;
 		}
 	}
 } catch (err) {
