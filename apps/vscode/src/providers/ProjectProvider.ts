@@ -471,7 +471,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				// Link opening
 				case 'project:openLink': {
 					if (data.url) {
-						this.openLink(data.url as string, data.displayName as string | undefined);
+						this.openLink(data.url as string, data.displayName as string | undefined, data.browser as boolean | undefined);
 					}
 					break;
 				}
@@ -745,10 +745,23 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	// =========================================================================
 
 	/**
-	 * Opens a URL in an embedded VS Code WebviewPanel with an iframe.
-	 * Bridges theme colors, env vars, clipboard, and drag-and-drop to the iframe.
+	 * Opens a URL. With `browser`, opens it in the system browser via the VS Code
+	 * shell (used by sandboxed CTAs like the Free/Enterprise plan links). Otherwise
+	 * opens it in an embedded WebviewPanel with an iframe, bridging theme colors,
+	 * env vars, clipboard, and drag-and-drop to the iframe.
 	 */
-	private openLink(url: string, displayName?: string): void {
+	private openLink(url: string, displayName?: string, browser = false): void {
+		if (browser) {
+			// URL comes from a webview message; allowlist schemes before opening.
+			const uri = vscode.Uri.parse(url);
+			const scheme = uri.scheme.toLowerCase();
+			if (!['https', 'http', 'mailto'].includes(scheme)) {
+				this.logger.error(`[ProjectProvider] Blocked external URL scheme: ${scheme}`);
+				return;
+			}
+			void vscode.env.openExternal(uri);
+			return;
+		}
 		const panel = vscode.window.createWebviewPanel('externalContent', displayName || 'Pipeline', vscode.ViewColumn.One, {
 			enableScripts: true,
 			retainContextWhenHidden: true,
