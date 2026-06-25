@@ -38,6 +38,11 @@ const LAYOUTS_KEY = 'rocketride.layouts';
 // TYPES
 // =============================================================================
 
+// Defined locally on purpose: the host tsconfig excludes `src/providers/views/**`
+// and does not map the `shared/*` path alias, so it cannot import the canonical
+// TraceLevel from the webview/shared-ui layer. Keep in sync with that union.
+type TraceLevel = 'none' | 'metadata' | 'summary' | 'full';
+
 interface EditorState {
 	document: vscode.TextDocument;
 	webviewPanel: vscode.WebviewPanel;
@@ -421,6 +426,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				case 'status:pipelineAction': {
 					const action = data.action as 'run' | 'stop' | 'restart';
 					const source = data.source as string | undefined;
+					const traceLevel = data.pipelineTraceLevel as TraceLevel | undefined;
 					if (action === 'run' || action === 'restart') {
 						// Gate: check connection before running
 						const runClient = this.connectionManager.getClient();
@@ -440,7 +446,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 							await this.saveDocument(document, document.getText());
 							const parsed = JSON.parse(document.getText());
 							const pipeName = path.basename(document.uri.fsPath, '.pipe');
-							await this.runPipeline({ pipeline: { ...parsed, source: source ?? parsed.source } }, pipeName);
+							await this.runPipeline({ pipeline: { ...parsed, source: source ?? parsed.source } }, pipeName, traceLevel);
 						} catch (error: unknown) {
 							const message = error instanceof Error ? error.message : String(error);
 							vscode.window.showErrorMessage(`Failed to run pipeline: ${message}`);
@@ -685,7 +691,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	// PIPELINE EXECUTION
 	// =========================================================================
 
-	private async runPipeline(document: { pipeline: PipelineConfig }, name?: string): Promise<void> {
+	private async runPipeline(document: { pipeline: PipelineConfig }, name?: string, pipelineTraceLevel?: TraceLevel): Promise<void> {
 		try {
 			const client = this.connectionManager.getClient();
 			if (!client) throw new Error('Not connected to server');
@@ -695,7 +701,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			await client.use({
 				pipeline: project,
 				source: project.source,
-				pipelineTraceLevel: 'full',
+				pipelineTraceLevel: pipelineTraceLevel ?? 'summary',
 				args: ConfigManager.getInstance().getEngineArgs('development'),
 				name,
 			});
@@ -704,8 +710,6 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			vscode.window.showErrorMessage(`Failed to run pipeline: ${message}`);
 		}
 	}
-
-
 
 	private async stopPipeline(componentId: string, document: vscode.TextDocument): Promise<void> {
 		try {

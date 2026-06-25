@@ -89,6 +89,7 @@ const ProjectWebview: React.FC = () => {
 					mode: vs?.mode ?? 'design',
 					flowViewMode: vs?.flowViewMode ?? 'pipeline',
 					viewport: vs?.viewport,
+					pipelineTraceLevel: vs?.pipelineTraceLevel,
 				});
 				setPrefs(msg.prefs ?? {});
 				setTraceEvents([]);
@@ -186,6 +187,7 @@ const ProjectWebview: React.FC = () => {
 					mode: msg.state?.mode ?? 'design',
 					flowViewMode: msg.state?.flowViewMode ?? 'pipeline',
 					viewport: msg.state?.viewport,
+					pipelineTraceLevel: msg.state?.pipelineTraceLevel,
 				});
 				break;
 			case 'project:initialPrefs':
@@ -238,9 +240,9 @@ const ProjectWebview: React.FC = () => {
 
 	const handlePipelineAction = useCallback(
 		(action: 'run' | 'stop' | 'restart', source?: string) => {
-			sendMessage({ type: 'status:pipelineAction', action, source });
+			sendMessage({ type: 'status:pipelineAction', action, source, pipelineTraceLevel: viewState?.pipelineTraceLevel ?? 'summary' });
 		},
-		[sendMessage]
+		[sendMessage, viewState]
 	);
 
 	const handleMissingEnvVars = useCallback(
@@ -252,6 +254,8 @@ const ProjectWebview: React.FC = () => {
 
 	const handleViewStateChange = useCallback(
 		(vs: ViewState) => {
+			// Keep local state current so the next run message carries the latest trace level
+			setViewState(vs);
 			// Persist to VS Code webview state (survives tab switches)
 			const current = getState() ?? ({} as ViewState);
 			setState({ ...current, ...vs });
