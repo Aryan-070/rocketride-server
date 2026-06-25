@@ -466,16 +466,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				// Link opening
 				case 'project:openLink': {
 					if (data.url) {
-						this.openLink(data.url as string, data.displayName as string | undefined);
-					}
-					break;
-				}
-
-				// Plan CTA links (Free → github, Enterprise → mailto) — webview
-				// navigation is sandboxed, so open via the VS Code shell instead.
-				case 'openExternal': {
-					if (data.url) {
-						await openExternalUrl(data.url as string);
+						this.openLink(data.url as string, data.displayName as string | undefined, data.browser as boolean | undefined);
 					}
 					break;
 				}
@@ -751,10 +742,16 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	// =========================================================================
 
 	/**
-	 * Opens a URL in an embedded VS Code WebviewPanel with an iframe.
-	 * Bridges theme colors, env vars, clipboard, and drag-and-drop to the iframe.
+	 * Opens a URL. With `browser`, opens it in the system browser via the VS Code
+	 * shell (used by sandboxed CTAs like the Free/Enterprise plan links). Otherwise
+	 * opens it in an embedded WebviewPanel with an iframe, bridging theme colors,
+	 * env vars, clipboard, and drag-and-drop to the iframe.
 	 */
-	private openLink(url: string, displayName?: string): void {
+	private openLink(url: string, displayName?: string, browser = false): void {
+		if (browser) {
+			void openExternalUrl(url);
+			return;
+		}
 		const panel = vscode.window.createWebviewPanel('externalContent', displayName || 'Pipeline', vscode.ViewColumn.One, {
 			enableScripts: true,
 			retainContextWhenHidden: true,

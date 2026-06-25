@@ -16,8 +16,8 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 
-import { AccountView, CheckoutModal } from 'shared';
-import type { ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, AccountSection, ProfileUpdate, CheckoutPlan } from 'shared';
+import { AccountView, CheckoutModal, actionHref } from 'shared';
+import type { ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, AccountSection, ProfileUpdate, CheckoutPlan, PlanAction } from 'shared';
 import type { ConnectResult } from 'rocketride';
 import { useMessaging } from '../hooks/useMessaging';
 import type { AccountHostToWebview, AccountWebviewToHost } from '../types';
@@ -468,6 +468,7 @@ const AccountWebview: React.FC = () => {
 					onConfirmPending={handleConfirmPending}
 					onSuccess={handleCheckoutSuccess}
 					onClose={() => setShowCheckout(false)}
+					onActionClick={(_plan: CheckoutPlan, action: PlanAction) => sendMessageRef.current({ type: 'openExternal', url: actionHref(action) })}
 				/>
 			)}
 		</>

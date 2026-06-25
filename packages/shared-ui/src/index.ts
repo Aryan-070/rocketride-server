@@ -83,7 +83,7 @@ export { CreditsPanel, UpgradeModal } from './modules/billing';
 export type { UpgradeModalProps } from './modules/billing';
 
 // --- Checkout module (subscription checkout flow) ----------------------------
-export { CheckoutModal, PlanPicker } from './modules/checkout';
+export { CheckoutModal, PlanPicker, actionHref } from './modules/checkout';
 export type { CheckoutModalProps, CheckoutPlan, PlanAction, PlanPickerProps } from './modules/checkout';
 
 // --- Chat module (conversational chat surface) --------------------------------

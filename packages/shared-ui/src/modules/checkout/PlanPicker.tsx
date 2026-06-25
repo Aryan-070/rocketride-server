@@ -90,7 +90,7 @@ function planIntervalLabel(plan: CheckoutPlan): string | null {
  * @param action - The plan action descriptor.
  * @returns A navigable URL string.
  */
-function actionHref(action: PlanAction): string {
+export function actionHref(action: PlanAction): string {
 	if (action.type === 'mailto') {
 		const subject = action.subject ? `?subject=${encodeURIComponent(action.subject)}` : '';
 		return `mailto:${action.url}${subject}`;
@@ -99,38 +99,18 @@ function actionHref(action: PlanAction): string {
 }
 
 /**
- * Returns the VS Code webview host bridge when running inside the extension
- * webview, otherwise null. Set on `window` by the extension's useMessaging hook
- * (acquireVsCodeApi is one-shot, so we can't acquire our own handle here).
- */
-function getWebviewBridge(): { postMessage: (message: unknown) => void } | null {
-	if (typeof window === 'undefined') return null;
-	const bridge = (window as unknown as Record<string, unknown>).__rrWebviewBridge;
-	if (bridge && typeof (bridge as { postMessage?: unknown }).postMessage === 'function') {
-		return bridge as { postMessage: (message: unknown) => void };
-	}
-	return null;
-}
-
-/**
  * Default handler for action plan clicks -- opens link in new tab or mailto.
  *
- * In a browser (SaaS) this uses native navigation. Inside the VS Code extension
- * webview, window.open / window.location are sandboxed and silently no-op, so we
- * post `openExternal` to the host, which routes both https and mailto URLs
- * through vscode.env.openExternal. Works on every extension checkout surface
- * (Account, Project paywall, Settings) since each provider handles openExternal.
+ * This is the browser (SaaS) behaviour. Inside the VS Code extension webview
+ * window.open / window.location are sandboxed and silently no-op, so each host
+ * passes its own onActionClick that routes the URL through the extension host
+ * (see the AccountWebview / ProjectWebview / CloudPanel wiring).
  *
  * @param _plan  - The plan that was clicked (unused, kept for signature).
  * @param action - The action descriptor with type and url.
  */
 function defaultActionClick(_plan: CheckoutPlan, action: PlanAction): void {
 	const href = actionHref(action);
-	const bridge = getWebviewBridge();
-	if (bridge) {
-		bridge.postMessage({ type: 'openExternal', url: href });
-		return;
-	}
 	if (action.type === 'link') {
 		window.open(href, '_blank', 'noopener,noreferrer');
 	} else {

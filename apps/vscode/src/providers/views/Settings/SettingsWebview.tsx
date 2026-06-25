@@ -31,7 +31,8 @@ import { IntegrationSettings } from './IntegrationSettings';
 import { DeploySettings } from './DeploySettings';
 import { MessageDisplay } from './MessageDisplay';
 import { commonStyles } from 'shared/themes/styles';
-import type { CheckoutPlan } from 'shared';
+import { actionHref } from 'shared';
+import type { CheckoutPlan, PlanAction } from 'shared';
 import { TabPanel } from 'shared/components/tab-panel/TabPanel';
 import type { ITabPanelTab, ITabPanelPanel } from 'shared/components/tab-panel/TabPanel';
 import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
@@ -889,6 +890,7 @@ export const Settings: React.FC = () => {
 							onCreateCheckout={handleCreateCheckout}
 							onConfirmPending={handleConfirmPending}
 							onCheckoutSuccess={handleCheckoutSuccess}
+							onActionClick={(_plan: CheckoutPlan, action: PlanAction) => sendMessage({ type: 'openExternal', url: actionHref(action) } as any)}
 						/>
 					</div>
 				),
@@ -953,6 +955,7 @@ export const Settings: React.FC = () => {
 							onCreateCheckout={handleCreateCheckout}
 							onConfirmPending={handleConfirmPending}
 							onCheckoutSuccess={handleCheckoutSuccess}
+							onActionClick={(_plan: CheckoutPlan, action: PlanAction) => sendMessage({ type: 'openExternal', url: actionHref(action) } as any)}
 						/>
 					</div>
 				),
