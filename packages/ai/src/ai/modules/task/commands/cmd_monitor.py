@@ -436,6 +436,39 @@ class MonitorCommands(DAPConn):
         pass
 
     # =========================================================================
+    # MONITOR PERMISSION CHECK
+    # =========================================================================
+
+    def _verify_monitor_permissions(self, team_id: str, event_type: EVENT_TYPE) -> None:
+        """
+        Verify the caller has the right permissions for the requested event types.
+
+        ``task.monitor`` is required for non-SSE events (SUMMARY, FLOW, etc.).
+        ``task.data`` is required for SSE events (data pipe streaming).
+
+        Mirrors the delivery-time check in ``send_task_event`` but rejects
+        the subscription upfront instead of silently dropping events later.
+
+        Args:
+            team_id:    Team that owns the task.
+            event_type: EVENT_TYPE bitmask the caller is requesting.
+
+        Raises:
+            PermissionError: If the caller lacks the required permission.
+        """
+        perms = resolve_task_permissions(self._account_info, team_id)
+        if not perms:
+            raise PermissionError('Access denied: no permissions for this task')
+
+        # Check specific permission for the requested event types
+        has_sse = bool(event_type & EVENT_TYPE.SSE)
+        has_non_sse = bool(event_type & ~EVENT_TYPE.SSE)
+        if has_non_sse and 'task.monitor' not in perms:
+            raise PermissionError('task.monitor permission required')
+        if has_sse and 'task.data' not in perms:
+            raise PermissionError('task.data permission required')
+
+    # =========================================================================
     # SET MONITOR
     # =========================================================================
 
@@ -490,9 +523,8 @@ class MonitorCommands(DAPConn):
             control = self._resolve_task_by_token(token)
 
             if control:
-                # Verify the caller has access to this task's team
-                if not resolve_task_permissions(self._account_info, control.teamId):
-                    raise PermissionError('Access denied: no permissions for this task')
+                # Verify the caller has permission for the requested event types
+                self._verify_monitor_permissions(control.teamId, type)
                 event_key = f'p.{control.project_id}.{control.source}'
                 event_id = control.id
                 filter_name = control.id
@@ -509,9 +541,8 @@ class MonitorCommands(DAPConn):
 
             control = self._resolve_task_by_project(project_id, source)
             if control:
-                # Verify the caller has access to this task's team
-                if not resolve_task_permissions(self._account_info, control.teamId):
-                    raise PermissionError('Access denied: no permissions for this task')
+                # Verify the caller has permission for the requested event types
+                self._verify_monitor_permissions(control.teamId, type)
                 event_id = control.id
                 filter_name = control.id
             else:

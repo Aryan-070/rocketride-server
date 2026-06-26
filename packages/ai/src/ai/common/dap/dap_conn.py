@@ -271,26 +271,26 @@ class DAPConn(DAPBase):
 
     def verify_auth(self, ctx: RequestContext) -> None:
         """
-        Raise PermissionError if the caller was not authenticated via Zitadel.
+        Raise PermissionError if the caller is not a fully authenticated user.
 
-        Called by SaaS handlers that require OIDC-backed identity (i.e. the
-        user must have gone through PKCE / access-token auth, not just an
-        internal rr_* key).
+        Called by SaaS handlers that require a real user identity (userId).
+        Rejects unauthenticated connections, waitlisted users, and
+        task-scoped credentials (``pk_*``) which have no userId.
 
         Args:
             ctx:  Per-request context carrying the caller's AccountInfo.
 
         Raises:
             PermissionError: If account_info is None, or the user is
-                waitlisted, or the account lacks a Zitadel ``sub`` claim.
+                waitlisted, or the account lacks a ``userId``.
         """
         info = ctx.account_info
         if not info:
             raise PermissionError('Authentication required')
         if getattr(info, 'waitlisted', False):
             raise PermissionError('Account is waitlisted')
-        if not getattr(info, 'sub', None):
-            raise PermissionError('Zitadel authentication required')
+        if not getattr(info, 'userId', None):
+            raise PermissionError('User authentication required')
 
     # =========================================================================
     # TASK TOKEN RESOLUTION

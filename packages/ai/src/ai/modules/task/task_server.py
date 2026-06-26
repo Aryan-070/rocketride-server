@@ -533,7 +533,20 @@ class TaskServer(DAPBase):
         self.debug_message(f'Connection {connection_id} disconnected and cleaned up.')
 
     def _build_task_account_info(self, token: str, control: 'TASK_CONTROL', permissions: list) -> AccountInfo:
-        """Build a minimal AccountInfo for pk_*/tk_* task-scoped authentication."""
+        """
+        Build a minimal AccountInfo for task-scoped authentication.
+
+        For ``pk_*`` (public data pipe): only ``auth`` is set.  No userId,
+        userToken, or org context — the credential is scoped to data
+        operations and SSE monitoring only.  ``verify_auth()`` will reject
+        it from user-scoped handlers.
+
+        For ``tk_*`` (private task token): full task context with userId,
+        teamId, and org permissions so the caller can manage the task.
+        """
+        if token.startswith('pk_'):
+            return AccountInfo(auth=token)
+
         return AccountInfo(
             auth=token,
             userToken=token,
