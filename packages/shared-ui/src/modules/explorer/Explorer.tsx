@@ -736,23 +736,12 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 												style={S.submenuTrigger}
 												onMouseEnter={() => setSubmenuId(a.id)}
 												onMouseLeave={() => setSubmenuId(null)}
-												onFocus={() => setSubmenuId(a.id)}
-												onBlur={(e) => {
-													if (!e.currentTarget.contains(e.relatedTarget as Node)) setSubmenuId(null);
-												}}
 											>
 												<button
 													style={S.popupRow}
-													role="menuitem"
-													aria-haspopup="true"
-													aria-expanded={submenuId === a.id}
-													tabIndex={0}
 													onMouseEnter={(e) => ((e.target as HTMLElement).style.background = HOVER_BG)}
 													onMouseLeave={(e) => ((e.target as HTMLElement).style.background = 'none')}
-													onClick={(e) => {
-														e.stopPropagation();
-														setSubmenuId(submenuId === a.id ? null : a.id);
-													}}
+													onClick={(e) => e.stopPropagation()}
 												>
 													{a.icon} {a.label} <span style={S.submenuArrow}>&#x25B8;</span>
 												</button>
