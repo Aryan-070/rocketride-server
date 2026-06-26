@@ -520,20 +520,8 @@ class AzureBlobStore(IStore):
     # URL Generation
     # =========================================================================
 
-    async def get_url(
-        self, filename: str, expires_in: int = 3600, content_disposition: Optional[str] = None
-    ) -> str | None:
-        """
-        Generate a SAS URL for direct browser access to an Azure blob.
-
-        Args:
-            filename: Relative store path.
-            expires_in: URL validity in seconds.
-            content_disposition: Optional ``Content-Disposition`` header value
-                (e.g. ``attachment; filename="report.pdf"``). Signed into the
-                SAS so it survives cross-origin, where the browser
-                ``<a download>`` hint is ignored.
-        """
+    async def get_url(self, filename: str, expires_in: int = 3600) -> str | None:
+        """Generate a SAS URL for direct browser access to an Azure blob."""
         from datetime import datetime, timedelta, timezone
 
         blob_name = self._get_blob_name(filename)
@@ -561,19 +549,9 @@ class AzureBlobStore(IStore):
                 account_key=account_key,
                 permission=BlobSasPermissions(read=True),
                 expiry=datetime.now(timezone.utc) + timedelta(seconds=expires_in),
-                content_disposition=content_disposition,
             )
 
-            # Derive the base URL from the actual blob client rather than a
-            # hardcoded host. This yields the correct scheme/host (custom,
-            # sovereign, or Azurite endpoints from the connection string) and a
-            # properly URL-encoded blob path, then append the SAS query string.
-            client = self._get_client()
-            blob_client = client.get_blob_client(
-                container=self._container,
-                blob=blob_name,
-            )
-            blob_url = f'{blob_client.url}?{sas_token}'
+            blob_url = f'https://{account_name}.blob.core.windows.net/{self._container}/{blob_name}?{sas_token}'
             return blob_url
         except ImportError:
             raise StorageError('Azure SDK not installed. Install with: pip install azure-storage-blob')

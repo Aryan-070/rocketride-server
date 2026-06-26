@@ -453,13 +453,10 @@ class WebServer:
         # signing) can construct URLs without needing a reference to the
         # web server instance.  Only set if not already overridden by the
         # operator via .env or environment.
-        self._base_url_scheme = 'https' if ssl_certfile else 'http'
-        self._base_url_host = 'localhost' if host == '0.0.0.0' else host
         if not os.environ.get('RR_BASE_URL'):
-            if port != 0:
-                os.environ['RR_BASE_URL'] = f'{self._base_url_scheme}://{self._base_url_host}:{port}'
-            # When port is 0 the OS assigns the real port at bind time;
-            # RR_BASE_URL will be set lazily by get_port() once resolved.
+            scheme = 'https' if ssl_certfile else 'http'
+            public_host = 'localhost' if host == '0.0.0.0' else host
+            os.environ['RR_BASE_URL'] = f'{scheme}://{public_host}:{port}'
 
         # Setup the Uvicorn configuration
         config = uvicorn.Config(

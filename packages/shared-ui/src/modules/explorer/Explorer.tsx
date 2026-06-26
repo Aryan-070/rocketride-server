@@ -537,8 +537,6 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 		// Internal move
 		const sourcePath = e.dataTransfer.getData('text/plain');
 		if (sourcePath && onMove && sourcePath !== dirPath) {
-			// Prevent moving a directory into itself or its own descendant
-			if (dirPath === sourcePath || dirPath.startsWith(sourcePath + '/')) return;
 			onMove(sourcePath, dirPath);
 		}
 	}, [onMove, onUpload]);

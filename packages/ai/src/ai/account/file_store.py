@@ -638,7 +638,7 @@ class FileStore:
 
         return normalized
 
-    async def get_url(self, path: str, expires_in: int = 3600, download_name: Optional[str] = None) -> str:
+    async def get_url(self, path: str, expires_in: int = 3600) -> str:
         """
         Get a direct HTTP URL for accessing the file.
 
@@ -648,39 +648,19 @@ class FileStore:
 
         Args:
             path: Relative path within the account store.
-            expires_in: URL validity in seconds (default 1 hour, max 1 hour).
-            download_name: If provided, the URL forces a browser download with
-                this filename via ``Content-Disposition: attachment``. This is
-                the only way to control the download filename for cross-origin
-                cloud URLs, where the ``<a download>`` attribute is ignored.
-                When ``None`` (default) the URL is served inline, so media
-                viewers can stream it.
+            expires_in: URL validity in seconds (default 1 hour).
 
         Returns:
             A direct HTTP(S) URL to the file.
 
         Raises:
-            ValueError: If ``expires_in`` is not positive, or if
-                ``RR_SIGNING_KEY`` is not set and the backend requires a
-                locally-signed URL.
-            RuntimeError: If ``RR_BASE_URL`` is not configured and the
-                backend requires a locally-signed URL.
+            ValueError: If ``RR_SIGNING_KEY`` is not set and the backend
+                requires a locally-signed URL.
         """
         import os
 
-        if expires_in <= 0:
-            raise ValueError('expires_in must be positive')
-        expires_in = min(expires_in, 3600)
-
-        # Build the Content-Disposition header the backend should bake into the
-        # URL. Sanitize the filename so it cannot inject header/quote characters.
-        content_disposition = None
-        if download_name:
-            safe_name = _sanitize_download_name(download_name)
-            content_disposition = f'attachment; filename="{safe_name}"'
-
         full_path = self._full_path(path)
-        url = await self._store.get_url(full_path, expires_in, content_disposition=content_disposition)
+        url = await self._store.get_url(full_path, expires_in)
         if url is not None:
             return url
 
@@ -697,19 +677,10 @@ class FileStore:
             'path': path,
             'exp': int(time.time()) + expires_in,
         }
-        # Carry the download filename in the signed claim so /task/fetch can set
-        # Content-Disposition: attachment (else it serves the file inline).
-        if download_name:
-            payload['download_name'] = _sanitize_download_name(download_name)
         token = jwt.encode(payload, signing_key, algorithm='HS256')
 
-        # This was set by the main web server at startup
-        base_url = os.environ.get('RR_BASE_URL')
-        if not base_url:
-            raise RuntimeError(
-                'RR_BASE_URL is not set — configure it in .env or ensure'
-                ' the web server has started before generating fetch URLs'
-            )
+        # This was set by the main web server
+        base_url = os.environ.get('RR_BASE_URL', 'http://localhost:5565')
         return f'{base_url}/task/fetch?token={token}'
 
     def _full_path(self, path: str) -> str:
