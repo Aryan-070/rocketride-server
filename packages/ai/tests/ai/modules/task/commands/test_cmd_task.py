@@ -45,17 +45,17 @@ def _make_conn(*, account_info=None, server=None, connection_id=1):
     conn._get_file_store = MethodType(StoreCommands._get_file_store, conn)
     # Re-build the dispatch table that StoreCommands.__init__ would have created.
     conn._store_subcommand_handlers = {
-        'fs_open': lambda req, args: StoreCommands._store_fs_open(conn, req, args),
-        'fs_read': lambda req, args: StoreCommands._store_fs_read(conn, req, args),
-        'fs_write': lambda req, args: StoreCommands._store_fs_write(conn, req, args),
-        'fs_close': lambda req, args: StoreCommands._store_fs_close(conn, req, args),
-        'fs_delete': lambda req, args: StoreCommands._store_fs_delete(conn, req, args),
-        'fs_list_dir': lambda req, args: StoreCommands._store_fs_list_dir(conn, req, args),
-        'fs_mkdir': lambda req, args: StoreCommands._store_fs_mkdir(conn, req, args),
-        'fs_rmdir': lambda req, args: StoreCommands._store_fs_rmdir(conn, req, args),
-        'fs_stat': lambda req, args: StoreCommands._store_fs_stat(conn, req, args),
-        'fs_rename': lambda req, args: StoreCommands._store_fs_rename(conn, req, args),
-        'fs_geturl': lambda req, args: StoreCommands._store_fs_geturl(conn, req, args),
+        'fs_open': lambda req, args: TaskCommands._store_fs_open(conn, req, args),
+        'fs_read': lambda req, args: TaskCommands._store_fs_read(conn, req, args),
+        'fs_write': lambda req, args: TaskCommands._store_fs_write(conn, req, args),
+        'fs_close': lambda req, args: TaskCommands._store_fs_close(conn, req, args),
+        'fs_delete': lambda req, args: TaskCommands._store_fs_delete(conn, req, args),
+        'fs_list_dir': lambda req, args: TaskCommands._store_fs_list_dir(conn, req, args),
+        'fs_mkdir': lambda req, args: TaskCommands._store_fs_mkdir(conn, req, args),
+        'fs_rmdir': lambda req, args: TaskCommands._store_fs_rmdir(conn, req, args),
+        'fs_stat': lambda req, args: TaskCommands._store_fs_stat(conn, req, args),
+        'fs_rename': lambda req, args: TaskCommands._store_fs_rename(conn, req, args),
+        'fs_geturl': lambda req, args: TaskCommands._store_fs_geturl(conn, req, args),
     }
     return conn
 
