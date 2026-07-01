@@ -32,9 +32,6 @@ from typing import Literal, Optional, TypedDict
 
 from pydantic import BaseModel, Field
 
-from rocketride.types.client import AppManifestEntry
-
-
 # =============================================================================
 # NESTED SHAPES
 # Lightweight TypedDicts documenting the shape of AccountInfo's
@@ -96,11 +93,6 @@ class AccountInfo(BaseModel):
     # None when the user has no org membership (e.g. freshly invited, not yet provisioned).
     organization: Optional[OrgInfo] = None
 
-    # Apps on the user's desktop — full manifest entries with appStatus + onDesktop.
-    # OSS: all apps with appStatus="free", onDesktop=True.
-    # SaaS: populated from app_users table, enriched with full manifest + billing info.
-    apps: list[AppManifestEntry] = []
-
     # Server capability tags — 'oss' or 'saas' depending on the account provider
     capabilities: list[str] = []
 
@@ -108,13 +100,30 @@ class AccountInfo(BaseModel):
     # Set manually in the database, never via API.
     sysPermissions: list[str] = []
 
-    # Credit wallet balance snapshot — dict of resource→balance pairs.
-    # Populated from the credit_wallets table for the user's primary org.
-    credits: dict = {}
-
     # True when the user is authenticated but not yet granted app access
     # (email did not match any allowed pattern in the user_grants table)
     waitlisted: bool = False
+
+    def to_pod_context(self) -> dict:
+        """
+        Return the slim subset of fields that pods consume via ``_ctx``.
+
+        Only the six fields that backend pods actually read are included:
+        auth, userId, userToken, defaultTeam, organization, sysPermissions.
+        Profile fields, apps, credits, capabilities, and waitlisted are
+        excluded — they are never accessed by any pod from ``_ctx``.
+
+        Returns:
+            dict: Lightweight identity context for inter-pod forwarding.
+        """
+        return {
+            'auth': self.auth,
+            'userId': self.userId,
+            'userToken': self.userToken,
+            'defaultTeam': self.defaultTeam,
+            'organization': self.organization,
+            'sysPermissions': list(self.sysPermissions),
+        }
 
     def to_connect_result(self) -> dict:
         """

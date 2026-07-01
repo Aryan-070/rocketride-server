@@ -881,19 +881,25 @@ class MonitorCommands(DAPConn):
             # Build overview — derive from sanitized tasks list to avoid
             # re-calling get_status() on potentially torn-down controls
             active_count = sum(1 for task in tasks if not task['completed'])
+            completed_count = len(tasks) - active_count
             start_time = getattr(server._server, '_startTime', None) or current_time
             overview = {
                 'totalConnections': len(conn_items),
                 'activeTasks': active_count,
+                'completedTasks': completed_count,
+                'totalTasks': len(tasks),
                 'serverUptime': current_time - start_time,
+                'eaasNodes': 0,
             }
 
             return self.build_response(
                 request,
                 body={
                     'overview': overview,
-                    'connections': connections,
                     'tasks': tasks,
+                    'tasks_total': len(tasks),
+                    'connections': connections,
+                    'connections_total': len(connections),
                 },
             )
 

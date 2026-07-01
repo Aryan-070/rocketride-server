@@ -437,13 +437,6 @@ export interface ConnectResult {
 	organization: OrgInfo | null;
 
 	/**
-	 * Apps on the user's desktop with ``appStatus`` and ``onDesktop``.
-	 * OSS: all apps with ``appStatus: "free"``, ``onDesktop: true``.
-	 * SaaS: populated from the ``app_users`` table, enriched with billing info.
-	 */
-	apps: AppManifestEntry[];
-
-	/**
 	 * Server capability tags describing the account provider in use.
 	 * OSS servers report `['oss']`; SaaS servers report `['saas']`.
 	 */
@@ -454,9 +447,6 @@ export interface ConnectResult {
 	 * Set manually in the database, never via API.
 	 */
 	sysPermissions?: string[];
-
-	/** Credit wallet balance snapshot — resource→balance pairs. */
-	credits?: Record<string, unknown>;
 
 	/**
 	 * True when the user is authenticated but not yet granted full app access.
@@ -584,12 +574,4 @@ export interface ServerInfoResult {
 
 	/** Server platform (e.g. `'linux'`, `'win32'`, `'darwin'`). */
 	platform?: string;
-
-	/**
-	 * Public apps visible without authentication.
-	 *
-	 * Returned by the pre-auth probe so the shell can render
-	 * public apps (e.g. landing page) before login.
-	 */
-	apps?: AppManifestEntry[];
 }

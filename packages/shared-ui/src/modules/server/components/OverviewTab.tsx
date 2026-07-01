@@ -360,7 +360,9 @@ interface OverviewTabProps {
 }
 
 export const OverviewTab: React.FC<OverviewTabProps> = ({ data, events, onRefresh }) => {
-	const { overview, connections, tasks } = data;
+	const { overview } = data;
+	const tasks = data.tasks ?? [];
+	const connections = data.connections ?? [];
 	const runningTasks = tasks.filter((t) => !t.completed);
 	const completedTasks = tasks.filter((t) => t.completed);
 	const agg = aggregateMetrics(tasks);

@@ -54,6 +54,10 @@ class AccountBase(ABC):
     # and copied into every AccountInfo returned by authenticate().
     capabilities: tuple[str, ...] = ()
 
+    # Home app manifest entry — cached at init, returned by the probe.
+    # OSS: rocketride.hello from apps.json.  SaaS: rocketride.home from DB.
+    _home_app: dict = {}
+
     # =========================================================================
     # ABSTRACT — must be implemented by both OSS and SaaS
     # =========================================================================

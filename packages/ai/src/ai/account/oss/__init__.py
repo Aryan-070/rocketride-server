@@ -64,6 +64,20 @@ class Account(AccountBase):
     capabilities = ('oss',)
 
     # =========================================================================
+    # INIT
+    # =========================================================================
+
+    async def init_account(self, server, full_init: bool = True) -> None:
+        """
+        Cache the home app manifest entry from apps.json.
+
+        The probe returns this so the shell knows which app to render
+        as the landing page without fetching the full catalog.
+        """
+        apps = self._read_apps_json(public_only=False)
+        self._home_app = next((a for a in apps if a.get('id') == 'rocketride.hello'), {})
+
+    # =========================================================================
     # AUTH
     # =========================================================================
 
@@ -137,13 +151,6 @@ class Account(AccountBase):
                     }
                 ],
             },
-            # OSS: all apps are on the desktop and free — return full manifest
-            # entries so the shell can register MF remotes after auth
-            apps=[
-                {**a, 'appStatus': 'free', 'onDesktop': True}
-                for a in self._read_apps_json(public_only=False)
-                if a.get('id')
-            ],
             capabilities=self.capabilities,
         )
 

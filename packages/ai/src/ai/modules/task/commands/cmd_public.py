@@ -83,8 +83,10 @@ class PublicCommands(DAPConn):
         """
         Return server metadata without requiring authentication.
 
-        Replaces the former ``auth { infoOnly: true }`` hack. Returns
-        version, capabilities, platform, and public apps list.
+        Lightweight capability discovery call — returns version, capabilities,
+        and platform only. Clients fetch apps separately via
+        ``rrext_public_catalog`` (store browsing) or ``rrext_account_me``
+        with ``subcommand='desktop'`` (user's desktop apps after auth).
 
         Args:
             request: Raw DAP request dict.
@@ -96,7 +98,7 @@ class PublicCommands(DAPConn):
             'version': getVersion(),
             'capabilities': account.capabilities,
             'platform': sys.platform,
-            'apps': await account.get_public_apps(),
+            'home': account._home_app,
         }
         return self.build_response(request, body=info)
 

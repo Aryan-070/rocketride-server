@@ -364,7 +364,6 @@ class ConnectResult(TypedDict, total=False):
         locale (str): BCP-47 locale tag (e.g. "en-US").
         defaultTeam (str): ID of the team selected as the default context.
         organization (OrgInfo | None): The organisation the user belongs to, or None.
-        apps (list[AppManifestEntry]): Apps on the user's desktop — full manifest entries with subscription status.
         waitlisted (bool): True when authenticated but not yet granted full app access.
     """
 
@@ -383,8 +382,6 @@ class ConnectResult(TypedDict, total=False):
     organization: OrgInfo
     capabilities: list[str]
     sysPermissions: list[str]
-    credits: dict
-    apps: list[AppManifestEntry]
     waitlisted: bool
 
 
@@ -401,10 +398,8 @@ class ServerInfoResult(TypedDict, total=False):
         capabilities (list[str]): Capability tags — ``['oss']`` for open-source,
             ``['saas']`` for cloud.
         platform (str): Server platform (e.g. ``'linux'``, ``'win32'``, ``'darwin'``).
-        apps (list[AppManifestEntry]): Public apps visible without authentication.
     """
 
     version: str
     capabilities: list[str]
     platform: str
-    apps: list[AppManifestEntry]

@@ -218,7 +218,7 @@ class TaskServer(DAPBase):
         # Global port allocation tracking
         self._allocated_ports: List[int] = []
 
-        # Shared store instance (lazy-loaded via property)
+        # Shared store instance (eagerly created in __init__)
         self._store_instance: Optional[Store] = None
         self._deployments_instance: Optional[DeploymentStore] = None
 
@@ -239,6 +239,9 @@ class TaskServer(DAPBase):
         # Register authentication handler for our keys
         server.add_authenticator(self.authenticate)
 
+        # Create shared Store instance for task data and deployment management
+        self._store_instance = Store.create()
+
         # Initialize DAP base class with server identification
         super().__init__('SERVER', **kwargs)
 
@@ -247,15 +250,14 @@ class TaskServer(DAPBase):
         """
         Shared Store instance for all tasks and connections.
 
-        Lazy initialization ensures Store is only created when first accessed.
-        All TaskCommands and Task instances share this single Store instance
-        for consistent data access and reduced resource usage.
+        Created eagerly during __init__ so the storage backend is ready
+        before the first request arrives.  All TaskCommands and Task
+        instances share this single Store instance for consistent data
+        access and reduced resource usage.
 
         Returns:
             Store: The shared store instance
         """
-        if self._store_instance is None:
-            self._store_instance = Store.create()
         return self._store_instance
 
     @property

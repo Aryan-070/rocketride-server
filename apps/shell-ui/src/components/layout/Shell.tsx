@@ -43,15 +43,14 @@ import { ConnectionManager } from '../../connection/connection';
 import { CloudAuthProvider } from '../../auth/CloudAuthProvider';
 import { useShellConnection } from '../../connection/ConnectionContext';
 import { ShellApiConfigProvider } from '../../connection/ShellApiConfigContext';
-import { WorkspaceProvider } from '../../workspace/WorkspaceContext';
+import { WorkspaceProvider, useWorkspace } from '../../workspace/WorkspaceContext';
+import { AppRegistryProvider } from '../../hooks/AppRegistryContext';
 import type { ShellConfig } from '../../workspace/types';
 import { ShellLayout } from './ShellLayout';
 import { CheckoutFlow } from './CheckoutFlow';
 import { ApiKeyLogin } from './ApiKeyLogin';
 import LoadingScreen from './LoadingScreen';
 import { SS_PENDING_APP_ID } from '../../constants';
-import { registerAndMapApps } from '../../lib/appLoader';
-import type { ServerAppEntry } from '../../lib/appLoader';
 
 // =============================================================================
 // STYLES
@@ -146,6 +145,35 @@ export interface ShellProps {
 }
 
 /**
+ * Gate that keeps the branded loading screen visible during deep-link
+ * navigation until the target app's MF remote is loaded.
+ *
+ * Must be rendered inside WorkspaceProvider so it can read appLoading.
+ * For non-deep-link visits, renders children immediately.
+ */
+const DeepLinkGate: React.FC<{
+	sessionAppId: string;
+	defaultAppId: string;
+	loadingAppInfo: { name?: string; icon?: string } | null;
+	children: React.ReactNode;
+}> = ({ sessionAppId, defaultAppId, loadingAppInfo, children }) => {
+	const { appLoading, loadedApps } = useWorkspace();
+
+	// Not a deep link — render immediately
+	if (!sessionAppId || sessionAppId === defaultAppId) return <>{children}</>;
+
+	// Deep link: keep showing the loading screen until the target app's
+	// descriptor is fully loaded. This prevents home-ui from flashing
+	// while the target app's MF remote is being fetched and loaded.
+	const targetLoaded = !!loadedApps[sessionAppId];
+	if (!targetLoaded) {
+		return <LoadingScreen appInfo={loadingAppInfo} isDeepLink />;
+	}
+
+	return <>{children}</>;
+};
+
+/**
  * Top-level Shell component — auth bootstrap + provider composition.
  *
  * On mount, initialises the ConnectionManager and runs the auth bootstrap
@@ -178,43 +206,19 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	const [activeAppId, setActiveAppId] = useState<string | null>(null);
 	const [showApiKeyLogin, setShowApiKeyLogin] = useState(false);
 	const [apiKeyError] = useState<string | null>(null);
+	// App info for the branded loading screen (deep-link via ?appId=)
+	const [loadingAppInfo, setLoadingAppInfo] = useState<{ name?: string; icon?: string } | null>(null);
 	const loginTargetRef = useRef<string | null>(null);
 	const mountedRef = useRef(true);
 
 	// ── Connection state ──────────────────────────────────────────────────
 	const { client, isConnected, statusMessage } = useShellConnection();
 
-	// ── Apps — probe catalog + post-auth merge ────────────────────────────
-	// The pre-auth probe registers public MF remotes. Post-auth, the
-	// ConnectResult may include additional apps the user is entitled to
-	// (e.g. apps gated by requiredPermissions). Those need to be registered
-	// as MF remotes and merged into the app list so they can be launched.
-	const apps = useMemo(() => {
-		if (!identity?.apps?.length) return config.apps;
-
-		// Index ConnectResult apps by id
-		const identityApps = identity.apps as Array<ServerAppEntry & { appStatus?: string; onDesktop?: boolean }>;
-		const identityById = new Map(identityApps.map((a) => [a.id, a]));
-
-		// Overlay desktop metadata onto probe entries
-		const probeIds = new Set(config.apps.map((a) => a.id));
-		const merged = config.apps.map((a) => {
-			const da = identityById.get(a.id);
-			return da ? { ...a, appStatus: da.appStatus, onDesktop: da.onDesktop } : a;
-		});
-
-		// Register and append apps that were NOT in the probe (e.g. permission-gated)
-		const newApps = identityApps.filter((a) => !probeIds.has(a.id) && a.entry && a.moduleId);
-		if (newApps.length > 0) {
-			const registered = registerAndMapApps(newApps);
-			for (const app of registered) {
-				const da = identityById.get(app.id);
-				merged.push(da ? { ...app, appStatus: da.appStatus, onDesktop: da.onDesktop } : app);
-			}
-		}
-
-		return merged;
-	}, [identity?.apps, config.apps]);
+	// ── Apps — seeded from probe, grown by AppRegistry ──────────────────
+	// The probe provides the home app. After auth, AppRegistryProvider
+	// fetches desktop apps and merges them in. On-demand catalog fetches
+	// add apps as needed. WorkspaceContext reads from AppRegistry.
+	const apps = config.apps;
 
 	// =====================================================================
 	// BOOTSTRAP — one-time auth sequence on mount
@@ -242,6 +246,31 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			// Run the optional init callback (e.g. theme initialisation)
 			config.onInit?.();
 
+			// If deep-linking to a specific app, fetch its name/icon for
+			// the branded loading screen before starting auth. Uses a
+			// temporary unauthenticated connection (rrext_public_catalog
+			// doesn't require auth).
+			if (sessionAppId && sessionAppId !== defaultAppId && ROCKETRIDE_URI) {
+				try {
+					const { RocketRideClient: TempClient } = await import('rocketride');
+					const tmp = new TempClient({ uri: ROCKETRIDE_URI });
+					await tmp.attach();
+					const resp = await tmp.call('rrext_public_catalog', {
+						action: 'get', appId: sessionAppId,
+					});
+					await tmp.detach();
+					const info = resp?.body;
+					if (info && mountedRef.current) {
+						setLoadingAppInfo({
+							name: info.name,
+							icon: info.icon || info.iconPath,
+						});
+					}
+				} catch {
+					// Catalog fetch failed — show generic loading screen
+				}
+			}
+
 			// Run the auth bootstrap
 			try {
 				const result = await cm.bootstrap({
@@ -254,14 +283,12 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 				if (result) {
 					setIdentity(result.result);
 					if (result.appId) setActiveAppId(result.appId);
-					// Gate on waitlist — authenticated but not yet granted access
 					setRenderPhase(result.result?.waitlisted ? 'waitlisted' : 'shell');
 				} else {
-					// No auth — render unauthenticated shell with the default app
 					setRenderPhase('shell');
 				}
 			} catch (err) {
-				console.error('[Shell] Bootstrap failed:', err);
+				console.error('[Shell] Bootstrap FAILED:', err);
 				if (mountedRef.current) setRenderPhase('error');
 			}
 		})();
@@ -477,9 +504,9 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		);
 	}
 
-	// Loading
+	// Loading — show app-branded screen for deep links, generic rocket for normal boot
 	if (renderPhase === 'loading') {
-		return <LoadingScreen />;
+		return <LoadingScreen appInfo={loadingAppInfo} isDeepLink={!!sessionAppId && sessionAppId !== defaultAppId} />;
 	}
 
 	// =====================================================================
@@ -502,24 +529,31 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	return (
 		<ShellIdentityContext.Provider value={identity}>
 			<ShellApiConfigProvider config={config.apiConfig}>
+				<AppRegistryProvider initialApps={apps}>
 				<WorkspaceProvider
 					client={client}
 					isConnected={isConnected}
-					apps={apps}
 					workspaceDir={config.workspaceDir}
 					startupAppId={activeAppId || sessionAppId || (() => { try { return sessionStorage.getItem(SS_PENDING_APP_ID); } catch { return null; } })() || defaultAppId}
 					defaultAppId={defaultAppId}
 					themeOptions={config.themeConfig.options}
 					onThemeChange={config.themeConfig.onThemeChange}
 				>
-					<ShellLayout
-						config={resolvedConfig}
-						isConnected={isConnected}
-						statusMessage={statusMessage}
-						hideAppSwitcher={!!sessionAppId}
+					<DeepLinkGate
+						sessionAppId={sessionAppId}
 						defaultAppId={defaultAppId}
-					/>
+						loadingAppInfo={loadingAppInfo}
+					>
+						<ShellLayout
+							config={resolvedConfig}
+							isConnected={isConnected}
+							statusMessage={statusMessage}
+							hideAppSwitcher={!!sessionAppId}
+							defaultAppId={defaultAppId}
+						/>
+					</DeepLinkGate>
 				</WorkspaceProvider>
+				</AppRegistryProvider>
 			</ShellApiConfigProvider>
 
 			{/* Checkout overlay — renders outside the shell layout */}

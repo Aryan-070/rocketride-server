@@ -21,12 +21,12 @@
 // SOFTWARE.
 
 // =============================================================================
-// useSubscriptions — reads desktop apps from ConnectResult.apps
+// useSubscriptions -- reads desktop/subscription state from AppRegistry
 // =============================================================================
 
 import { useMemo } from 'react';
 import type { AppManifestEntry } from '../workspace/types';
-import { useAuthUser } from './useAuthUser';
+import { useAppRegistry } from './AppRegistryContext';
 
 // =============================================================================
 // TYPES
@@ -43,11 +43,11 @@ export type SubscriptionStatus = AppStatus;
 // =============================================================================
 
 /**
- * Returns the user's desktop apps from ``ConnectResult.apps``.
+ * Returns the user's desktop apps from the app registry.
  *
- * Single source of truth for which apps are on the desktop and their
- * subscription status. Data arrives with the auth handshake and is
- * pushed live via ``apaext_account`` events.
+ * Filters the registry to apps that have ``onDesktop`` set (i.e. apps
+ * that arrived via the desktop fetch or desktop push events). Apps
+ * registered only from the probe or catalog won't appear here.
  */
 export function useSubscriptions(): {
 	desktopApps: AppManifestEntry[];
@@ -56,25 +56,30 @@ export function useSubscriptions(): {
 	/** Quick lookup: what's this app's appStatus? */
 	getStatus: (appId: string) => AppStatus | undefined;
 } {
-	const identity = useAuthUser();
+	const { apps } = useAppRegistry();
 
 	return useMemo(() => {
-		const raw: AppManifestEntry[] = identity?.apps ?? [];
-
-		// Build lookup maps for fast access
+		// Build lookup maps from apps that have subscription data
 		const statusMap = new Map<string, AppStatus>();
 		const desktopSet = new Set<string>();
-		for (const entry of raw) {
-			if (entry?.id) {
-				statusMap.set(entry.id, (entry.appStatus ?? 'free') as AppStatus);
-				if (entry.onDesktop) desktopSet.add(entry.id);
+		const desktopApps: AppManifestEntry[] = [];
+
+		for (const entry of apps) {
+			if (!entry?.id) continue;
+			// Only include apps with subscription/desktop metadata
+			if (entry.appStatus) {
+				statusMap.set(entry.id, entry.appStatus as AppStatus);
+			}
+			if (entry.onDesktop) {
+				desktopSet.add(entry.id);
+				desktopApps.push(entry);
 			}
 		}
 
 		return {
-			desktopApps: raw,
+			desktopApps,
 			isOnDesktop: (appId: string) => desktopSet.has(appId),
 			getStatus: (appId: string) => statusMap.get(appId),
 		};
-	}, [identity?.apps]);
+	}, [apps]);
 }

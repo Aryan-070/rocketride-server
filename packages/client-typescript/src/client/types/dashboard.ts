@@ -29,14 +29,42 @@
  * server-level dashboard push events (apaevt_dashboard).
  */
 
-/** Server-level aggregate metrics (scoped to the caller's account). */
+/** Pagination parameters for a dashboard section. */
+export interface DashboardPageParams {
+	/** Starting index (default 0). */
+	offset?: number;
+	/** Max items to return (default 100, max 500). 0 = omit section. */
+	limit?: number;
+	/** Sort field name. */
+	sort_by?: string;
+	/** Sort direction (default 'desc'). */
+	sort_order?: 'asc' | 'desc';
+	/** State filter for tasks: 'running' | 'completed' | null (all). */
+	state_filter?: string | null;
+}
+
+/** Request arguments for rrext_dashboard. */
+export interface DashboardRequest {
+	/** Task pagination/sort/filter. Omit for defaults (offset:0, limit:100). */
+	tasks?: DashboardPageParams;
+	/** Connection pagination/sort. Omit for defaults (offset:0, limit:100). */
+	connections?: DashboardPageParams;
+}
+
+/** Server-level aggregate metrics (scoped to the caller's permissions). */
 export interface DashboardOverview {
-	/** Number of currently active WebSocket connections for this account. */
+	/** Total connections visible to the caller. */
 	totalConnections: number;
-	/** Number of tasks currently in the registry for this account. */
+	/** Tasks in STARTING/INITIALIZING/RUNNING/STOPPING visible to the caller. */
 	activeTasks: number;
-	/** Seconds since server started. */
+	/** Tasks in COMPLETED/CANCELLED visible to the caller. */
+	completedTasks: number;
+	/** Total tasks visible to the caller (activeTasks + completedTasks). */
+	totalTasks: number;
+	/** Seconds since server started (0 on orchestrator). */
 	serverUptime: number;
+	/** Number of connected EAAS nodes (orchestrator only, 0 on OSS). */
+	eaasNodes: number;
 }
 
 /** Details for a single active WebSocket connection. */
@@ -113,9 +141,16 @@ export interface DashboardTask {
 
 /** Complete response from the rrext_dashboard command. */
 export interface DashboardResponse {
+	/** Always present — aggregate counts scoped to caller's permissions. */
 	overview: DashboardOverview;
-	connections: DashboardConnection[];
-	tasks: DashboardTask[];
+	/** Paginated task list (omitted if tasks.limit=0 in request). */
+	tasks?: DashboardTask[];
+	/** Total tasks matching the filter (for pagination UI). */
+	tasks_total?: number;
+	/** Paginated connection list (omitted if connections.limit=0 in request). */
+	connections?: DashboardConnection[];
+	/** Total connections visible to the caller (for pagination UI). */
+	connections_total?: number;
 }
 
 /** Base fields shared by all dashboard events. */
