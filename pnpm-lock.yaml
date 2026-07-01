@@ -527,6 +527,9 @@ importers:
 
   apps/test-ui:
     dependencies:
+      '@module-federation/rsbuild-plugin':
+        specifier: ^2.5.1
+        version: 2.5.1(@rsbuild/core@2.0.11(@module-federation/runtime-tools@2.5.1(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.48.0))(@rspack/core@2.0.6(@module-federation/runtime-tools@2.5.1(node-fetch@2.7.0(encoding@0.1.13)))(@swc/helpers@0.5.23))(node-fetch@2.7.0(encoding@0.1.13))(typescript@5.9.3)(webpack@5.104.1)
       react:
         specifier: ^18.2.0
         version: 18.3.1
@@ -543,9 +546,6 @@ importers:
         specifier: workspace:*
         version: link:../shell-ui
     devDependencies:
-      '@module-federation/rsbuild-plugin':
-        specifier: ^2.5.1
-        version: 2.5.1(@rsbuild/core@2.0.11(@module-federation/runtime-tools@2.5.1(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.48.0))(@rspack/core@2.0.6(@module-federation/runtime-tools@2.5.1(node-fetch@2.7.0(encoding@0.1.13)))(@swc/helpers@0.5.23))(node-fetch@2.7.0(encoding@0.1.13))(typescript@5.9.3)(webpack@5.104.1)
       '@rsbuild/core':
         specifier: ~2.0.11
         version: 2.0.11(@module-federation/runtime-tools@2.5.1(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.48.0)
