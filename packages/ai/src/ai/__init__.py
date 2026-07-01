@@ -39,6 +39,18 @@ os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 os.environ['HF_HUB_DISABLE_SYMLINKS'] = '1'
 os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
 
+os.environ['PYTHONASYNCIODEBUG'] = '1'
+
+# Ensure asyncio slow-callback warnings are visible
+_asyncio_logger = logging.getLogger('asyncio')
+_asyncio_logger.setLevel(logging.WARNING)
+_asyncio_handler = logging.StreamHandler(sys.stderr)
+_asyncio_handler.setFormatter(logging.Formatter('[ASYNCIO-DEBUG] %(message)s'))
+_asyncio_logger.addHandler(_asyncio_handler)
+
+# Proof that this code ran
+print('[ASYNCIO-DEBUG] *** PYTHONASYNCIODEBUG=1 enabled, asyncio logger configured ***', flush=True)
+
 # Track if we've already run suppression
 _suppressed = False
 

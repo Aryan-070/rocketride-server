@@ -162,6 +162,14 @@ async def run(config: Dict[str, Any] = None) -> None:
 
     await account.init_account(server)
 
+    # Enable asyncio debug mode — logs any callback blocking >100ms
+    from rocketlib import debug as _debug
+
+    loop = asyncio.get_running_loop()
+    loop.set_debug(True)
+    loop.slow_callback_duration = 0.1  # 100ms threshold
+    _debug(f'[ASYNCIO-DEBUG] Debug mode enabled, threshold: {loop.slow_callback_duration}s')
+
     # Start the FastAPI server loop
     await server.serve()
 

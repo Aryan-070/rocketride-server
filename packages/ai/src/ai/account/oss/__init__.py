@@ -296,7 +296,7 @@ class Account(AccountBase):
     # HANDLE ACCOUNT — env-only support for OSS
     # =========================================================================
 
-    async def handle_account(self, conn, request):
+    async def handle_account(self, conn, request, ctx=None):
         """
         Handle ``rrext_account_me`` for env subcommands only.
 
