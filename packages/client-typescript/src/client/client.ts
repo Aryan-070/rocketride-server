@@ -32,7 +32,7 @@ import { AccountApi } from './account.js';
 import { BillingApi } from './billing.js';
 import { DatabaseApi } from './database.js';
 import { DeployApi } from './deploy.js';
-import { AuthenticationException, ConnectionException, PipeException } from './exceptions/index.js';
+import { AuthenticationException, ConnectionException, DAPException, PipeException } from './exceptions/index.js';
 
 // Global counter for generating unique client IDs
 let clientId = 0;
@@ -2713,7 +2713,7 @@ export class RocketRideClient extends DAPClient {
 		// Throw on server-reported failure
 		if (response.success === false) {
 			this._onTrace?.(TraceType.Error, response);
-			throw new Error(response.message ?? `${command} failed`);
+			throw new DAPException(response as unknown as Record<string, unknown>);
 		}
 
 		// Trace: success response
