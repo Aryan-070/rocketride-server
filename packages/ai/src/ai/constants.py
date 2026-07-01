@@ -29,9 +29,8 @@ Global configuration values for metrics, billing, and system tuning.
 # =============================================================================
 # Metrics Sampling and Reporting Intervals
 # =============================================================================
-CONST_METRICS_SAMPLE_INTERVAL = 0.25  # seconds between metric samples (250ms)
-CONST_BILLING_REPORT_INTERVAL = 15.0  # 5 * 60.0  # seconds between billing reports (5 minutes)
-CONST_METRICS_STOP_TIMEOUT = 5.0  # seconds to wait for metrics monitoring to stop gracefully
+CONST_BILLING_REPORT_INTERVAL = 15.0  # seconds between billing reports to ledger
+CONST_PROCESS_REPORT_INTERVAL = 1.0  # seconds between subprocess >MET* live metrics emissions
 
 # =============================================================================
 # Billing API Configuration

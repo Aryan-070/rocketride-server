@@ -268,26 +268,20 @@ export interface TaskStatus {
 
 	/**
 	 * Optional task token usage tracking (user-facing billing).
-	 * 
+	 *
+	 * Dynamic key-value map where each key matches a metric_key in the
+	 * metrics_conversions database table. Values are cumulative token charges.
+	 * Well-known keys: cpu_compute, cpu_memory, gpu_compute, gpu_memory.
+	 * Additional keys appear automatically for new billable metrics.
+	 * The client computes the total by summing all values.
+	 *
 	 * Behavior:
-	 *   - Values are CUMULATIVE from when monitoring starts
-	 *   - Updated in real-time every 250ms as metrics are sampled
+	 *   - Values are CUMULATIVE from when billing starts (after serviceUp)
+	 *   - Updated on each >USG* message from the subprocess
 	 *   - Preserved when monitoring stops (frozen at final values)
-	 *   - RESET to 0.0 when start_monitoring() is called for a new session
+	 *   - RESET when start_monitoring() is called for a new session
 	 */
-	tokens?: {
-		/** Cumulative CPU utilization tokens charged since monitoring started */
-		cpu_utilization?: number;
-		
-		/** Cumulative CPU memory tokens charged since monitoring started */
-		cpu_memory?: number;
-		
-		/** Cumulative GPU memory tokens charged since monitoring started */
-		gpu_memory?: number;
-		
-		/** Total cumulative tokens charged (cpu_utilization + cpu_memory + gpu_memory) since monitoring started */
-		total?: number;
-	};
+	tokens?: Record<string, number>;
 
 	/** Optional flow data for pipeline-specific tasks */
 	pipeflow?: FlowData;

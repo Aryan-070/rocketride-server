@@ -228,6 +228,8 @@ class TaskServer(DAPBase):
             asyncio.create_task(self._cleanup_tasks()),
             # TTL monitoring
             asyncio.create_task(self._monitor_ttl()),
+            # Centralized metrics sampling — one loop for all tasks
+            asyncio.create_task(self._billing_report_loop()),
         ]
 
         # Store reference to parent server for statistics integration
@@ -262,6 +264,45 @@ class TaskServer(DAPBase):
         if self._deployments_instance is None:
             self._deployments_instance = DeploymentStore(self.store._store)
         return self._deployments_instance
+
+    async def _billing_report_loop(self) -> None:
+        """
+        Periodic billing report loop for all active tasks.
+
+        CPU/memory/GPU sampling is now handled by each subprocess via
+        ``>MET*`` (live metrics) and ``>USG*`` (billing values).  This
+        loop only checks whether periodic billing reports are due.
+
+        Cadence: every 5 seconds (billing reports are every 15s).
+        """
+        while True:
+            try:
+                # Snapshot the task list to avoid mutation during iteration
+                controls = list(self._task_control.values())
+
+                for control in controls:
+                    task = getattr(control, 'task', None)
+                    if task is None:
+                        continue
+                    task_metrics = getattr(task, '_task_metrics', None)
+                    if task_metrics is None:
+                        continue
+
+                    try:
+                        await task_metrics.check_billing_report()
+                    except Exception as e:
+                        self.debug_message(f'Billing report error: {e}')
+
+                    # Yield between tasks
+                    await asyncio.sleep(0)
+
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                self.debug_message(f'Billing report loop error: {e}')
+
+            # Relaxed cadence — billing reports are every 15s
+            await asyncio.sleep(5.0)
 
     async def _cleanup_tasks(self) -> None:
         """
@@ -866,20 +907,21 @@ class TaskServer(DAPBase):
         if token not in self._task_control:
             return
 
-        # Snapshot to list() so a connection joining or dropping mid-broadcast
-        # does not raise RuntimeError on the next iteration; matches the
-        # pattern used by broadcast_server_event / broadcast_account_update above.
+        # Fire-and-forget: status broadcasts are advisory — we don't need to
+        # wait for each WebSocket write to complete before continuing. This
+        # prevents 32 concurrent tasks' broadcasts from serializing on the
+        # event loop and starving pings/requests.
         for conn in list(self._connections.values()):
-            try:
-                await conn.send_task_event(event_type, token=token, event=event)
 
-            except PermissionError:
-                # Normal condition: connection is using a public key that lacks task.monitor
-                continue
+            async def _send(c=conn):
+                try:
+                    await c.send_task_event(event_type, token=token, event=event)
+                except PermissionError:
+                    pass
+                except Exception as e:
+                    self.debug_message(f'Failed to broadcast event to connection: {e}')
 
-            except Exception as e:
-                # Log individual monitor failures but continue broadcasting
-                self.debug_message(f'Failed to broadcast event to connection: {e}')
+            asyncio.create_task(_send())
 
     def is_debug_available(self, token: str) -> bool:
         """
@@ -1223,7 +1265,9 @@ class TaskServer(DAPBase):
             self._task_control[control.token] = control
 
             # Start task execution
+            _t_start = time.time()
             await control.task.start_task()
+            self.debug_message(f'[TIMING] start_task call: {(time.time() - _t_start) * 1000:.1f}ms')
 
             # Log successful task creation
             self.debug_message(f'Task "{control.id}" started... (type: {control.launch_type.value})')
@@ -1235,7 +1279,9 @@ class TaskServer(DAPBase):
             # Retrieve the task instance for status monitoring
             if wait_for_running:
                 # Block until the task transitions to running state
+                _t_wait = time.time()
                 await control.task.wait_for_running()
+                self.debug_message(f'[TIMING] wait_for_running: {(time.time() - _t_wait) * 1000:.1f}ms')
 
             # Return formatted results
             return _return_results(control)

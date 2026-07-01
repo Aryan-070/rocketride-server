@@ -77,7 +77,7 @@ Usage:
 
 from typing import List, Dict, Union
 from enum import Enum
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class TASK_STATE(Enum):
@@ -158,28 +158,28 @@ class TASK_TOKENS(BaseModel):
     """
     Task token usage tracking (user-facing billing).
 
-    Behavior:
-        - Values are CUMULATIVE from when monitoring starts
-        - Updated in real-time every 250ms as metrics are sampled
-        - Preserved when monitoring stops (frozen at final values)
-        - RESET to 0.0 when start_monitoring() is called for a new session
+    Dynamic key-value model where each key matches a ``metric_key`` in the
+    ``metrics_conversions`` database table.  Values are cumulative token
+    charges that only grow over the task's billing lifetime.
 
+    Well-known keys (from ``metrics_conversions``):
+        - ``cpu_compute``:  CPU utilization tokens  (rate * CPU-ms)
+        - ``cpu_memory``:   CPU memory tokens       (rate * GB-sec)
+        - ``gpu_compute``:  GPU inference tokens    (rate * GPU-ms)
+        - ``gpu_memory``:   GPU VRAM tokens         (rate * GB-sec)
+
+    Additional keys appear automatically when the subprocess reports timers
+    or counters that match a non-zero rate in the database.  The client is
+    responsible for computing the total (sum of all values).
+
+    Behavior:
+        - Values are CUMULATIVE from when billing starts (after serviceUp)
+        - Updated on each ``>USG*`` message from the subprocess
+        - Preserved when monitoring stops (frozen at final values)
+        - RESET when start_monitoring() is called for a new session
     """
 
-    cpu_utilization: float = Field(
-        default=0.0, description='Cumulative CPU utilization tokens charged since monitoring started'
-    )
-    cpu_memory: float = Field(default=0.0, description='Cumulative CPU memory tokens charged since monitoring started')
-    gpu_memory: float = Field(default=0.0, description='Cumulative GPU memory tokens charged since monitoring started')
-    gpu_inference: float = Field(
-        default=0.0, description='Cumulative GPU inference timing tokens charged since monitoring started'
-    )
-    custom: Dict[str, float] = Field(
-        default_factory=dict, description='Custom node billing counters converted to tokens (counter_name -> tokens)'
-    )
-    total: float = Field(
-        default=0.0, description='Total cumulative tokens charged (all dimensions) since monitoring started'
-    )
+    model_config = ConfigDict(extra='allow')
 
 
 class TASK_METRICS(BaseModel):

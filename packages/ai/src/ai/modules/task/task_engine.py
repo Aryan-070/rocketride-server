@@ -712,7 +712,8 @@ class Task(DAPBase):
             # Clean up attached debugger
             if self._debugger:
                 await self._debugger.send_event('terminated', id=self.id)
-                await self._debugger._transport.disconnect()
+                if self._debugger._transport:
+                    await self._debugger._transport.disconnect()
 
                 self._debugger = None
                 self._status.debuggerAttached = False
@@ -983,11 +984,25 @@ class Task(DAPBase):
             download_name = download_info.get('name', 'unknown')
             self._status.status = f'Downloading "{download_name}"'
 
-        # Handle subprocess billing metrics (from >MET* protocol)
+        # Handle live metrics from >MET* (point-in-time resource snapshot)
         elif event_type == 'apaevt_status_metrics':
-            new_metrics = body.get('metrics', {})
+            cpu = body.get('cpu_percent', 0.0)
+            mem = body.get('cpu_memory_mb', 0.0)
+            gpu = body.get('gpu_memory_mb', 0.0)
+            # Update live snapshot
+            self._status.metrics.cpu_percent = cpu
+            self._status.metrics.cpu_memory_mb = mem
+            self._status.metrics.gpu_memory_mb = gpu
+            # Track lifetime peaks
+            self._status.metrics.peak_cpu_percent = max(self._status.metrics.peak_cpu_percent, cpu)
+            self._status.metrics.peak_cpu_memory_mb = max(self._status.metrics.peak_cpu_memory_mb, mem)
+            self._status.metrics.peak_gpu_memory_mb = max(self._status.metrics.peak_gpu_memory_mb, gpu)
+            self._status_updated = True
+
+        # Handle billing usage from >USG* (cumulative values for token calc)
+        elif event_type == 'apaevt_status_tokens':
             if self._task_metrics:
-                self._task_metrics.merge_subprocess_metrics(new_metrics)
+                self._task_metrics.merge_subprocess_usage(body)
 
         # Handle general status messages
         elif event_type == 'apaevt_status_message':
@@ -1457,6 +1472,8 @@ class Task(DAPBase):
         if self._status.state != TASK_STATE.NONE.value:
             raise RuntimeError('Task has already been started')
 
+        _t_total = time.perf_counter()
+
         try:
             # Make sure some of our start is initialized in case we are restarting
             self._status.completed = False
@@ -1472,17 +1489,23 @@ class Task(DAPBase):
 
             # Resolve ${...} placeholders into a local variable — never stored on self
             # so secrets are not retained in memory beyond the temp file write.
+            _t = time.perf_counter()
             resolved = self._resolve_pipeline(self._pipeline)
+            self.debug_message(f'[TIMING] resolve_pipeline: {(time.perf_counter() - _t) * 1000:.1f}ms')
 
             # Check it - throws on error
+            _t = time.perf_counter()
             self._check_pipeline(resolved)
+            self.debug_message(f'[TIMING] check_pipeline: {(time.perf_counter() - _t) * 1000:.1f}ms')
 
             # Mark the start time
             if not self._is_restarting:
                 self._status.startTime = time.time()
 
             # Write it out, then let `resolved` go out of scope
+            _t = time.perf_counter()
             self._tmpfile = await self._write_task_file(resolved)
+            self.debug_message(f'[TIMING] write_task_file: {(time.perf_counter() - _t) * 1000:.1f}ms')
             del resolved
 
             # Setup the first part of the command line args
@@ -1490,6 +1513,7 @@ class Task(DAPBase):
             child_args = [CONST_AI_NODE_SCRIPT, self._tmpfile, '--autoterm', '--monitor=app']
 
             # Configure execution environment
+            _t = time.perf_counter()
             if self._is_debugging() and self._get_attach_subprocesses():
                 # VS Code subprocess debugging
                 self._debug_subprocess = False
@@ -1534,6 +1558,7 @@ class Task(DAPBase):
 
                 if self._launch_type == LAUNCH_TYPE.LAUNCH:
                     child_args.append('--wait_for_client')
+            self.debug_message(f'[TIMING] exec_env_setup: {(time.perf_counter() - _t) * 1000:.1f}ms')
 
             # Configure data communication
             self._data_port = self._server.assign_port()
@@ -1574,15 +1599,26 @@ class Task(DAPBase):
                         child_args.append(arg)
                         break
 
+            _t = time.perf_counter()
             await self._send_status_update()
+            self.debug_message(f'[TIMING] status_update_1: {(time.perf_counter() - _t) * 1000:.1f}ms')
 
             # Launch subprocess - pass environment with account context for store access
+            _t = time.perf_counter()
             subprocess_env = os.environ.copy()
+            self.debug_message(f'[TIMING] environ_copy: {(time.perf_counter() - _t) * 1000:.1f}ms')
             subprocess_env['ROCKETRIDE_CLIENT_ID'] = self.client_id
 
             # avoidMocks: strip ROCKETRIDE_MOCK so node.py loads real libraries
             if self._pipeline.get('avoidMocks'):
                 subprocess_env.pop('ROCKETRIDE_MOCK', None)
+
+            _t = time.perf_counter()
+
+            # EXPERIMENT: Yield before and after subprocess creation to
+            # test if other coroutines (ping, other use() requests) can
+            # interleave when given explicit yield points.
+            await asyncio.sleep(0)
 
             self._engine_process = await asyncio.create_subprocess_exec(
                 exec_path,
@@ -1595,7 +1631,11 @@ class Task(DAPBase):
                 env=subprocess_env,
             )
 
+            await asyncio.sleep(0)
+            self.debug_message(f'[TIMING] create_subprocess: {(time.perf_counter() - _t) * 1000:.1f}ms')
+
             # Initialize stdio interface
+            _t = time.perf_counter()
             try:
                 self._debug_stdio = Task.TaskDbgStdio(
                     parent_task=self,
@@ -1608,8 +1648,10 @@ class Task(DAPBase):
             except Exception as e:
                 self._debug_stdio = None
                 self.debug_message(f'Failed to initialize stdio interface: {e}')
+            self.debug_message(f'[TIMING] stdio_connect: {(time.perf_counter() - _t) * 1000:.1f}ms')
 
             # Initialize metrics tracking (uses default sample_interval from constants)
+            _t = time.perf_counter()
             try:
                 # Resolve billing identity from task control
                 _control = self._server.get_task_control_by_token(self.token) if self.token else None
@@ -1630,6 +1672,7 @@ class Task(DAPBase):
             except Exception as e:
                 self._task_metrics = None
                 self.debug_message(f'Failed to initialize metrics tracking: {e}')
+            self.debug_message(f'[TIMING] metrics_init: {(time.perf_counter() - _t) * 1000:.1f}ms')
 
             # Setup to initializing
             self._status.state = TASK_STATE.INITIALIZING.value
@@ -1638,6 +1681,7 @@ class Task(DAPBase):
             self._status_update_task = asyncio.create_task(self._status_update_loop())
 
             # If we are not restarting, notify of task action
+            _t = time.perf_counter()
             if not self._is_restarting:
                 # Send out a begin message
                 task_message = self.build_event(
@@ -1670,11 +1714,15 @@ class Task(DAPBase):
                     EVENT_TYPE.TASK,
                     task_message,
                 )
+            self.debug_message(f'[TIMING] forward_task_event: {(time.perf_counter() - _t) * 1000:.1f}ms')
 
             # Broadcast a status change
+            _t = time.perf_counter()
             await self._send_status_update()
+            self.debug_message(f'[TIMING] status_update_2: {(time.perf_counter() - _t) * 1000:.1f}ms')
 
             # And done
+            self.debug_message(f'[TIMING] start_task TOTAL: {(time.perf_counter() - _t_total) * 1000:.1f}ms')
             self.debug_message(f'Task started successfully with PID {self._engine_process.pid}')
 
         except Exception as e:

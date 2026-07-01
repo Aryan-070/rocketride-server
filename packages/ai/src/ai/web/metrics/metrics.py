@@ -60,7 +60,7 @@ Usage:
         t_post = (time.perf_counter() - t0) * 1000
 
         # Keys match model server's build_dap_result() perf dict
-        metrics.add_time(
+        metrics.add_value(
             {
                 'gpu_preprocess': t_pre,
                 'gpu_compute': t_gpu,
@@ -76,7 +76,7 @@ Usage:
         # In ModelClient.send_command(), after receiving response:
         perf = body.get('perf')
         if perf:
-            metrics.add_time(perf)
+            metrics.add_value(perf)
 
     Node-level (nodes report what they own)::
 
@@ -170,27 +170,41 @@ class MetricsManager:
             with self._lock:
                 self._timers[name] = self._timers.get(name, 0.0) + elapsed_ms
 
-    def add_time(self, timers: Dict[str, float]):
+    def add_value(self, values: Dict[str, float]):
         """
-        Add milliseconds to one or more timers from a dict.
+        Add values to one or more accumulators from a dict.
 
         Accumulates all entries in a single lock acquisition — more
         efficient than calling ``timer()`` multiple times.  Used by:
 
-        - **Local-mode wrappers**: report ``preprocess``, ``gpu``,
-          ``postprocess``, ``queue_wait``, and ``latency`` after
-          manually timing each phase with ``perf_counter``.
+        - **Local-mode wrappers**: report ``gpu_preprocess``, ``gpu_compute``,
+          ``gpu_postprocess``, ``gpu_queue_wait``, and ``gpu_memory``
+          after manually timing each phase with ``perf_counter``.
         - **ModelClient**: relay server-reported perf counters from
           the model server's ``build_dap_result()`` response.
 
         Args:
-            timers: ``{name: ms, ...}`` — values to accumulate into
-                    the corresponding timer keys.
+            values: ``{name: amount, ...}`` — values to accumulate into
+                    the corresponding keys.
         """
         with self._lock:
-            # Walk the dict and accumulate each timer
-            for name, ms in timers.items():
-                self._timers[name] = self._timers.get(name, 0.0) + ms
+            for name, amount in values.items():
+                self._timers[name] = self._timers.get(name, 0.0) + amount
+
+    def set_value(self, name: str, value: float):
+        """
+        Set an accumulator to an absolute cumulative value (not additive).
+
+        Used by ``ProcessReporter`` for ``cpu_compute`` and ``cpu_memory``
+        which are tracked as running totals externally (from ``getrusage``
+        and RSS integration).  Each call replaces the previous value.
+
+        Args:
+            name: Accumulator key (e.g. ``'cpu_compute'``, ``'cpu_memory'``).
+            value: Absolute cumulative value to set.
+        """
+        with self._lock:
+            self._timers[name] = value
 
     # ========================================================================
     # COUNTERS
@@ -232,25 +246,27 @@ class MetricsManager:
 
     def report(self) -> dict:
         """
-        Return a cumulative snapshot for the ``>MET*`` protocol.
+        Return a cumulative snapshot for the ``>USG*`` protocol.
 
         The parent process (``task_metrics.py``) replaces its previous
-        snapshot with each new report via ``merge_subprocess_metrics()``,
+        snapshot with each new report via ``merge_subprocess_usage()``,
         so values here must be running totals — not deltas.
 
-        The snapshot contains shallow copies of all three collections
-        so the caller can safely use/serialize them outside the lock.
+        Timers and counters are merged into a single flat dict.  Keys
+        match the ``metrics_conversions`` DB table (e.g. ``cpu_compute``,
+        ``gpu_memory``, ``requests``, ``pages``).  Events are included
+        separately for structured billing metadata.
 
         Returns:
-            ``{'timers': {name: ms, ...},
-              'counters': {name: int, ...},
-              'events': [dict, ...]}``
+            ``{'values': {name: amount, ...}, 'events': [dict, ...]}``
         """
         with self._lock:
-            # Shallow-copy each collection so the snapshot is independent
+            # Merge timers and counters into one flat dict
+            merged = dict(self._timers)
+            for name, count in self._counters.items():
+                merged[name] = merged.get(name, 0.0) + float(count)
             return {
-                'timers': dict(self._timers),
-                'counters': dict(self._counters),
+                'values': merged,
                 'events': list(self._events),
             }
 
