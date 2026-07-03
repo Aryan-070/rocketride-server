@@ -85,8 +85,10 @@ export interface DashboardConnection {
 	clientId: string | null;
 	/** Masked API key (first 4 + last 4 chars). */
 	apikey: string;
-	/** Client name/version from auth handshake. */
+	/** Client SDK name/version from auth handshake (immutable). */
 	clientInfo: Record<string, string>;
+	/** App-level display name set by identify() (mutable). */
+	appName?: string;
 	/** Active monitor subscriptions with their event flags. */
 	monitors: { key: string; flags: string[] }[];
 	/** Task display names this connection is monitoring. */
@@ -224,6 +226,15 @@ interface DashboardAuthFailed extends DashboardEventBase {
 	reason: string;
 }
 
+/** A connection's app-level identity changed (via rrext_identify). */
+interface DashboardConnectionUpdated extends DashboardEventBase {
+	action: 'connection_updated';
+	/** Unique monotonic connection identifier. */
+	connectionId: number;
+	/** New app-level display name. */
+	appName?: string | null;
+}
+
 /** A monitor subscription changed on a connection. */
 interface DashboardMonitorChanged extends DashboardEventBase {
 	action: 'monitor_changed';
@@ -240,4 +251,4 @@ interface DashboardMonitorChanged extends DashboardEventBase {
 }
 
 /** Discriminated union of all dashboard activity events. */
-export type DashboardEvent = DashboardConnectionAdded | DashboardConnectionRemoved | DashboardTaskStarted | DashboardTaskStopped | DashboardTaskRemoved | DashboardTaskError | DashboardAuthFailed | DashboardMonitorChanged;
+export type DashboardEvent = DashboardConnectionAdded | DashboardConnectionRemoved | DashboardConnectionUpdated | DashboardTaskStarted | DashboardTaskStopped | DashboardTaskRemoved | DashboardTaskError | DashboardAuthFailed | DashboardMonitorChanged;

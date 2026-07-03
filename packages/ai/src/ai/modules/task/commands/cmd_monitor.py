@@ -821,6 +821,7 @@ class MonitorCommands(DAPConn):
                     'authenticated': getattr(conn, '_authenticated', False),
                     'clientId': None,
                     'clientInfo': getattr(conn, '_client_info', {}),
+                    'appName': getattr(conn, '_app_name', ''),
                     'monitors': self._build_monitors_list(conn._monitors, project_names, source_names)
                     if hasattr(conn, '_monitors')
                     else [],

@@ -241,6 +241,9 @@ class RocketRideClient(
         # Public mode — permanently unauthenticated, only rrext_public_* commands
         self._public = kwargs.get('public', False)
 
+        # App-level display name set by identify(), re-sent on reconnect
+        self._app_name: str = ''
+
         # Pop kwargs consumed by this constructor so they don't collide
         # with the explicit keyword arguments passed to super().__init__().
         module = kwargs.pop('module', client_name)

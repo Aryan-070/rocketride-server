@@ -374,6 +374,9 @@ export class RocketRideClient extends DAPClient {
 	private _reconnectTimer?: ReturnType<typeof setTimeout>;
 	private _currentReconnectDelay: number = 250;
 
+	/** App-level display name set by identify(), re-sent on reconnect. */
+	private _appName?: string;
+
 	/** Reference-counted monitor subscriptions: keyString → Map<eventType, refCount> */
 	private _monitorKeys = new Map<string, Map<string, number>>();
 
@@ -634,8 +637,12 @@ export class RocketRideClient extends DAPClient {
 			this._apikey = this._connectResult.userToken;
 		}
 
-		// Resubscribe monitors and notify
+		// Resubscribe monitors and re-send app identity
 		await this._resubscribeAllMonitors();
+		if (this._appName) {
+			try { await this.call('rrext_identify', { appName: this._appName, clientName: this._appName }); }
+			catch { /* best-effort — don't block login */ }
+		}
 		const connectionInfo = this._transport?.getConnectionInfo() ?? '';
 		if (this._callerOnConnected) {
 			try { await this._callerOnConnected(connectionInfo); }
@@ -1821,16 +1828,23 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
-	 * Update this connection's display name on the server.
+	 * Set the app-level display name for this connection.
 	 *
 	 * Useful when an app plugin loads and wants the server monitor to show
-	 * a more descriptive name (e.g. "Cloud Shell-UI — rocketride.pipeBuilder")
-	 * instead of the generic client name sent at auth time.
+	 * a more descriptive name (e.g. "rocketride.pipeBuilder")
+	 * in addition to the SDK identity sent at auth time.
 	 *
-	 * @param clientName - The new display name for this connection.
+	 * The name is stored locally and re-sent automatically on reconnect.
+	 *
+	 * @param appName - The app-level display name for this connection.
 	 */
-	async identify(clientName: string): Promise<void> {
-		await this.call('rrext_identify', { clientName });
+	async identify(appName: string): Promise<void> {
+		this._appName = appName;
+		if (this._authenticated) {
+			// Send both appName (new) and clientName (legacy) for back-compat
+			// with older servers that only read clientName
+			await this.call('rrext_identify', { appName, clientName: appName });
+		}
 	}
 
 	/**

@@ -65,7 +65,8 @@ class DASHBOARD_CONNECTION(TypedDict, total=False):
     authenticated: bool  # Whether the connection has completed auth
     clientId: str  # AccountInfo.clientid (account identifier)
     apikey: str  # Masked API key (first 4 + last 4 chars)
-    clientInfo: Dict[str, str]  # Client name/version from auth handshake
+    clientInfo: Dict[str, str]  # Client SDK name/version from auth handshake (immutable)
+    appName: str  # App-level display name set by identify() (mutable)
     monitors: List[DASHBOARD_MONITOR]  # Active monitor subscriptions with flags
     attachedTasks: List[str]  # Task display names this connection is monitoring
 

@@ -218,7 +218,8 @@ class TaskConn(
         self._messages_in: int = 0
         self._messages_out: int = 0
         self._last_activity: float = time.time()
-        self._client_info: Dict[str, str] = {}
+        self._client_info: Dict[str, str] = {}  # SDK identity (set at auth, immutable)
+        self._app_name: str = ''  # App-level identity (set by rrext_identify)
 
         # Brute-force guard: per-connection lifetime count of auth requests.
         # Enforced in on_auth against CONST_AUTH_MAX_ATTEMPTS_PER_CONN so a
@@ -602,23 +603,27 @@ class TaskConn(
         return await self.request(request, ctx)
 
     async def on_rrext_identify(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
-        """Update the client display name for this connection.
+        """Update the app-level display name for this connection.
 
-        Allows clients to refine their identity after auth — e.g. when an
-        app plugin loads and wants to show "Cloud Shell-UI — rocketride.pipeBuilder"
-        instead of the generic "Cloud Shell-UI".
+        Sets ``_app_name`` — a mutable label indicating which application or
+        plugin is currently active on this connection.  This is separate from
+        ``_client_info`` (SDK identity set at auth time, immutable).
+
+        Accepts ``appName`` (preferred) or ``clientName`` (legacy) in the
+        request arguments.
 
         Args:
-            request (Dict[str, Any]): DAP request with ``arguments.clientName`` (str).
+            request (Dict[str, Any]): DAP request with ``arguments.appName`` (str).
             ctx (RequestContext): Per-request context carrying caller identity.
 
         Returns:
-            Dict[str, Any]: Acknowledgement with the new name.
+            Dict[str, Any]: Acknowledgement with the current app name.
         """
         args = request.get('arguments', {})
-        new_name = args.get('clientName')
+        # Accept appName (new) or clientName (legacy back-compat)
+        new_name = args.get('appName') or args.get('clientName')
         if new_name and isinstance(new_name, str):
-            self._client_info['name'] = new_name
+            self._app_name = new_name
             # Notify dashboard so the monitor UI updates in real time
             await self._server.broadcast_server_event(
                 EVENT_TYPE.DASHBOARD,
@@ -628,12 +633,12 @@ class TaskConn(
                         'action': 'connection_updated',
                         'timestamp': time.time(),
                         'connectionId': self.get_connection_id(),
-                        'clientName': new_name,
+                        'appName': new_name,
                     },
                 },
                 user_id=ctx.account_info.userId if ctx.account_info else None,
             )
-        return self.build_response(request, body={'clientName': self._client_info.get('name')})
+        return self.build_response(request, body={'appName': self._app_name})
 
     async def on_rrext_ping(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """

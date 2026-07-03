@@ -168,7 +168,7 @@ export const WorkspaceProvider: React.FC<{
 	const {
 		loaded, seeded, activeAppId, prefs, appState, settings,
 		switchApp, updatePrefs, updateAppState, updateSetting,
-	} = useWorkspaceState(client, isConnected, defaultAppId, workspaceDir, startupAppId);
+	} = useWorkspaceState(client, isConnected, defaultAppId, workspaceDir, startupAppId, apps);
 
 	// --- Lazy descriptor loading -----------------------------------------------
 
