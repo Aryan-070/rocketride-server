@@ -59,7 +59,9 @@ async def handle_fetch(request: Request):
         return JSONResponse({'error': 'Server signing key not configured'}, status_code=500)
 
     try:
-        payload = jwt.decode(token, signing_key, algorithms=['HS256'])
+        # Require the `exp` claim so a signed token without an expiration is
+        # rejected rather than treated as non-expiring.
+        payload = jwt.decode(token, signing_key, algorithms=['HS256'], options={'require': ['exp']})
     except jwt.ExpiredSignatureError:
         return JSONResponse({'error': 'Token expired'}, status_code=401)
     except jwt.InvalidTokenError as e:
@@ -67,6 +69,7 @@ async def handle_fetch(request: Request):
 
     user_id = payload.get('sub')
     path = payload.get('path')
+    download_name = payload.get('download_name')
     if not user_id or not path:
         return JSONResponse({'error': 'Token missing required claims'}, status_code=400)
 
@@ -74,8 +77,12 @@ async def handle_fetch(request: Request):
     task_server = request.app.state.task
     file_store = task_server.store.get_file_store(user_id)
 
-    # Build the full storage path and resolve it through the filesystem backend
-    full_store_path = file_store._full_path(path)
+    # Build the full storage path and resolve it through the filesystem backend.
+    # A malformed `path` claim can raise ValueError; return 400 rather than 500.
+    try:
+        full_store_path = file_store._full_path(path)
+    except ValueError:
+        return JSONResponse({'error': 'Invalid path'}, status_code=400)
     backend = file_store._store
     try:
         abs_path = backend._get_full_path(full_store_path)
@@ -88,9 +95,22 @@ async def handle_fetch(request: Request):
     # ── Serve the file ───────────────────────────────────────────────────
     # FileResponse handles Content-Type (from extension), Content-Length,
     # Range requests (HTTP 206), and streaming automatically.
+    #
+    # If the token carries a download_name, force a download with that filename
+    # (Content-Disposition: attachment). Otherwise serve inline so media
+    # viewers can stream the file (video/audio/pdf) in the browser.
+    if download_name:
+        return FileResponse(
+            path=str(abs_path),
+            filename=download_name,
+            headers={
+                'Cache-Control': 'private, max-age=3600',
+                'Accept-Ranges': 'bytes',
+            },
+        )
     return FileResponse(
         path=str(abs_path),
-        filename=os.path.basename(path),
+        content_disposition_type='inline',
         headers={
             'Cache-Control': 'private, max-age=3600',
             'Accept-Ranges': 'bytes',

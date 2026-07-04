@@ -378,7 +378,9 @@ class StoreCommands(DAPConn):
         Args:
             request: Original DAP request.
             args:    Must contain ``path`` (relative store path). Optional
-                     ``expires_in`` (seconds, default 3600).
+                     ``expires_in`` (seconds, default 3600) and ``download_name``
+                     (forces a browser download with this filename via
+                     ``Content-Disposition: attachment``).
             ctx:     RequestContext for user-scoped file store access.
 
         Returns:
@@ -389,5 +391,8 @@ class StoreCommands(DAPConn):
             return self.build_error(request, 'geturl requires a non-empty "path" string')
 
         expires_in = int(args.get('expires_in', 3600))
-        url = await self._get_file_store(ctx).get_url(path, expires_in)
+        # Optional download filename — when present the fetch URL forces a
+        # browser download via Content-Disposition: attachment.
+        download_name = args.get('download_name') or None
+        url = await self._get_file_store(ctx).get_url(path, expires_in, download_name=download_name)
         return self.build_response(request, body={'url': url})
