@@ -16,12 +16,24 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from rocketride import EVENT_TYPE
+from ai.account.models import RequestContext
 from ai.modules.task.commands.cmd_monitor import MonitorCommands
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _ctx(account_info=None, conn_id='conn-1', source='local'):
+    """
+    Build a RequestContext for command-handler tests.
+
+    Handlers now read caller identity from ``ctx.account_info`` (per-request
+    context) rather than the connection-level ``self._account_info``. Build
+    the ctx from the SAME account the test sets up on the connection.
+    """
+    return RequestContext(account_info=account_info, conn_id=conn_id, source=source)
 
 
 def _make_conn(*, account_info=None, server=None, monitors=None, connection_id=1):
@@ -136,7 +148,7 @@ async def test_send_task_event_skipped_when_caller_lacks_team_access():
     """Task events for a team the caller is not a member of are silently dropped."""
     server = MagicMock()
     # Task belongs to team-other; caller's account only grants access to team-1.
-    server.get_task_control = MagicMock(return_value=_control(team_id='team-other'))
+    server.get_task_control_by_token = MagicMock(return_value=_control(team_id='team-other'))
     conn = _make_conn(account_info=_account_info(), server=server, monitors={'*': EVENT_TYPE.SUMMARY})
     await MonitorCommands.send_task_event(conn, EVENT_TYPE.SUMMARY, 'tk_1', {'event': 'evt', 'body': {}})
     conn.send_event.assert_not_called()
@@ -146,7 +158,7 @@ async def test_send_task_event_skipped_when_caller_lacks_team_access():
 async def test_send_task_event_uses_project_key_subscription():
     """A p.<proj>.<src> subscription receives matching task events."""
     server = MagicMock()
-    server.get_task_control = MagicMock(return_value=_control())
+    server.get_task_control_by_token = MagicMock(return_value=_control())
     conn = _make_conn(
         account_info=_account_info(),
         server=server,
@@ -163,7 +175,7 @@ async def test_send_task_event_uses_project_key_subscription():
 async def test_send_task_event_merges_global_wildcard_and_project_subscriptions():
     """When both '*' and a project key match, their bitmasks are OR-ed."""
     server = MagicMock()
-    server.get_task_control = MagicMock(return_value=_control())
+    server.get_task_control_by_token = MagicMock(return_value=_control())
     conn = _make_conn(
         account_info=_account_info(),
         server=server,
@@ -179,23 +191,51 @@ async def test_send_task_event_merges_global_wildcard_and_project_subscriptions(
 
 @pytest.mark.asyncio
 async def test_send_task_event_checks_data_permission_for_sse():
-    """SSE events require task.data permission, not task.monitor."""
+    """
+    SSE events require ``task.data`` permission, not ``task.monitor``.
+
+    The permission gate moved from ``verify_permission`` to an inline
+    ``resolve_task_permissions`` check inside ``send_task_event``: SSE events
+    are delivered only when the caller's resolved perms include ``task.data``.
+    A caller with ``task.data`` (the default account stub) is delivered; a
+    caller granted only ``task.monitor`` is silently dropped.
+    """
     server = MagicMock()
-    server.get_task_control = MagicMock(return_value=_control())
+    server.get_task_control_by_token = MagicMock(return_value=_control())
+
+    # Caller has task.data -> SSE event delivered.
     conn = _make_conn(
         account_info=_account_info(),
         server=server,
         monitors={'*': EVENT_TYPE.SSE},
     )
     await MonitorCommands.send_task_event(conn, EVENT_TYPE.SSE, 'tk_1', {'event': 'x', 'body': {}})
-    conn.verify_permission.assert_called_with('task.data')
+    conn.send_event.assert_awaited_once()
+
+    # Caller lacking task.data -> SSE event dropped.
+    monitor_only = SimpleNamespace(
+        userId='user-2',
+        userToken='token-user-2',
+        organization={
+            'id': 'org-1',
+            'permissions': [],
+            'teams': [{'id': 'team-1', 'permissions': ['task.monitor']}],
+        },
+    )
+    conn2 = _make_conn(
+        account_info=monitor_only,
+        server=server,
+        monitors={'*': EVENT_TYPE.SSE},
+    )
+    await MonitorCommands.send_task_event(conn2, EVENT_TYPE.SSE, 'tk_1', {'event': 'x', 'body': {}})
+    conn2.send_event.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_send_task_event_pipe_scoped_subscription():
     """A p.<proj>.<src>.<pipe> subscription matches when the event body carries that pipe_id."""
     server = MagicMock()
-    server.get_task_control = MagicMock(return_value=_control())
+    server.get_task_control_by_token = MagicMock(return_value=_control())
     conn = _make_conn(
         account_info=_account_info(),
         server=server,
@@ -277,7 +317,7 @@ async def test_set_monitor_wildcard_token():
 async def test_set_monitor_with_token_resolves_to_project_key():
     """When a token is supplied, the registry key is built from the resolved control."""
     server = MagicMock()
-    server.get_task_control = MagicMock(return_value=_control())
+    server.get_task_control_by_token = MagicMock(return_value=_control())
     server.broadcast_server_event = AsyncMock()
     conn = _make_conn(account_info=_account_info(), server=server)
     event_id = await MonitorCommands.set_monitor(conn, token='tk_1', type=EVENT_TYPE.SUMMARY)
@@ -289,7 +329,7 @@ async def test_set_monitor_with_token_resolves_to_project_key():
 async def test_set_monitor_unsubscribe_removes_key():
     """Setting EVENT_TYPE.NONE deletes the key from the registry."""
     server = MagicMock()
-    server.get_task_control = MagicMock(return_value=_control())
+    server.get_task_control_by_token = MagicMock(return_value=_control())
     server.broadcast_server_event = AsyncMock()
     conn = _make_conn(
         account_info=_account_info(),
@@ -320,7 +360,7 @@ async def test_set_monitor_rejects_no_target():
 async def test_set_monitor_with_pipe_id_narrows_key():
     """A pipe_id appends '.<pipe_id>' to the registry key."""
     server = MagicMock()
-    server.get_task_control = MagicMock(return_value=_control())
+    server.get_task_control_by_token = MagicMock(return_value=_control())
     server.broadcast_server_event = AsyncMock()
     conn = _make_conn(account_info=_account_info(), server=server)
     await MonitorCommands.set_monitor(conn, token='tk_1', type=EVENT_TYPE.SUMMARY, pipe_id=42)
@@ -332,7 +372,7 @@ async def test_set_monitor_cross_tenant_token_raises():
     """A token whose team the caller is not a member of raises PermissionError."""
     server = MagicMock()
     # Task belongs to team-other; caller only has team-1.
-    server.get_task_control = MagicMock(return_value=_control(team_id='team-other'))
+    server.get_task_control_by_token = MagicMock(return_value=_control(team_id='team-other'))
     conn = _make_conn(account_info=_account_info(user_id='user-1'), server=server)
     with pytest.raises(PermissionError, match='Access denied'):
         await MonitorCommands.set_monitor(conn, token='tk_1', type=EVENT_TYPE.SUMMARY)
@@ -347,13 +387,14 @@ async def test_set_monitor_cross_tenant_token_raises():
 async def test_on_rrext_monitor_with_string_list_types():
     """A list of EVENT_TYPE name strings is converted to a bitmask."""
     server = MagicMock()
-    server.get_task_control = MagicMock(return_value=_control())
+    server.get_task_control_by_token = MagicMock(return_value=_control())
     server.broadcast_server_event = AsyncMock()
-    conn = _make_conn(account_info=_account_info(), server=server)
+    account = _account_info()
+    conn = _make_conn(account_info=account, server=server)
     conn.get_task_token = MagicMock(return_value='tk_1')
 
     request = {'arguments': {'types': ['SUMMARY', 'TASK']}}
-    await MonitorCommands.on_rrext_monitor(conn, request)
+    await MonitorCommands.on_rrext_monitor(conn, request, _ctx(account))
 
     monitor_value = conn._monitors.get('p.proj-1.src-1')
     assert monitor_value is not None
@@ -365,13 +406,14 @@ async def test_on_rrext_monitor_with_string_list_types():
 async def test_on_rrext_monitor_with_int_types():
     """An int `types` value is used directly as the bitmask."""
     server = MagicMock()
-    server.get_task_control = MagicMock(return_value=_control())
+    server.get_task_control_by_token = MagicMock(return_value=_control())
     server.broadcast_server_event = AsyncMock()
-    conn = _make_conn(account_info=_account_info(), server=server)
+    account = _account_info()
+    conn = _make_conn(account_info=account, server=server)
     conn.get_task_token = MagicMock(return_value='tk_1')
 
     request = {'arguments': {'types': EVENT_TYPE.SUMMARY.value}}
-    await MonitorCommands.on_rrext_monitor(conn, request)
+    await MonitorCommands.on_rrext_monitor(conn, request, _ctx(account))
     assert conn._monitors.get('p.proj-1.src-1') == EVENT_TYPE.SUMMARY
 
 
@@ -379,13 +421,14 @@ async def test_on_rrext_monitor_with_int_types():
 async def test_on_rrext_monitor_with_unknown_string_in_list_is_ignored():
     """An unknown name in the string list is silently skipped (warning printed)."""
     server = MagicMock()
-    server.get_task_control = MagicMock(return_value=_control())
+    server.get_task_control_by_token = MagicMock(return_value=_control())
     server.broadcast_server_event = AsyncMock()
-    conn = _make_conn(account_info=_account_info(), server=server)
+    account = _account_info()
+    conn = _make_conn(account_info=account, server=server)
     conn.get_task_token = MagicMock(return_value='tk_1')
 
     request = {'arguments': {'types': ['SUMMARY', 'NOPE_NOT_AN_EVENT']}}
-    await MonitorCommands.on_rrext_monitor(conn, request)
+    await MonitorCommands.on_rrext_monitor(conn, request, _ctx(account))
     monitor_value = conn._monitors.get('p.proj-1.src-1')
     assert monitor_value & EVENT_TYPE.SUMMARY
 

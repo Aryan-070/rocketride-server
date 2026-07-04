@@ -3,12 +3,20 @@ Unit tests for ai.modules.task.commands.cmd_misc.MiscCommands.
 
 Three categories:
 
-- ``_mask_apikey`` / ``_resolve_monitor_label`` — pure static helpers.
+- ``_mask_apikey`` — pure static helper on MiscCommands.
 - ``on_rrext_services`` / ``on_rrext_validate`` — thin handlers that
   delegate to rocketlib + ``resolve_implied_source``. Mock those.
-- ``on_rrext_dashboard`` — large method that walks ``_task_control`` and
-  ``_connections``. We cover the happy paths (caller filtering,
-  tk_ scoping) with seeded state and bypassed __init__.
+
+The monitor-label / dashboard helpers (``_resolve_monitor_label``,
+``_build_monitors_list``, ``on_rrext_dashboard``) were moved to
+``cmd_monitor.MonitorCommands`` when monitoring was split out of the misc
+mixin. The tests that cover them now target ``MonitorCommands`` and patch
+``cmd_monitor.time`` (that is where the dashboard reads the clock). They
+live here for continuity with the original suite.
+
+All ``on_rrext_*`` handlers gained a trailing ``ctx: RequestContext`` param
+(built per-request from the caller's ``AccountInfo``); the tests pass one via
+the ``_ctx`` helper.
 """
 
 from __future__ import annotations
@@ -18,8 +26,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ai.modules.task.commands import cmd_misc
+from ai.account.models import RequestContext
+from ai.modules.task.commands import cmd_misc, cmd_monitor
 from ai.modules.task.commands.cmd_misc import MiscCommands
+from ai.modules.task.commands.cmd_monitor import MonitorCommands
 
 
 # ---------------------------------------------------------------------------
@@ -37,6 +47,24 @@ def _make_conn(*, account_info=None, server=None, connection_id=1):
     conn.debug_message = MagicMock()
     conn.verify_permission = MagicMock()  # no-op (granted) by default
     return conn
+
+
+def _make_monitor_conn(*, account_info=None, server=None, connection_id=1):
+    """Build a MonitorCommands instance with __init__ bypassed (for the moved helpers)."""
+    conn = MonitorCommands.__new__(MonitorCommands)
+    conn._account_info = account_info
+    conn._server = server or MagicMock()
+    conn._connection_id = connection_id
+    conn._monitors = {}
+    conn.build_response = MagicMock(side_effect=lambda req, body=None: {'type': 'response', 'body': body})
+    conn.debug_message = MagicMock()
+    conn.verify_permission = MagicMock()  # no-op (granted) by default
+    return conn
+
+
+def _ctx(account_info=None, conn_id='conn-1', source='local'):
+    """Build a RequestContext carrying the caller identity for a handler call."""
+    return RequestContext(account_info=account_info, conn_id=conn_id, source=source)
 
 
 # ---------------------------------------------------------------------------
@@ -63,54 +91,54 @@ def test_mask_apikey_handles_none():
 
 
 # ---------------------------------------------------------------------------
-# _resolve_monitor_label
+# _resolve_monitor_label (moved to MonitorCommands)
 # ---------------------------------------------------------------------------
 
 
 def test_resolve_monitor_label_wildcard():
     """The '*' wildcard maps to 'All tasks'."""
-    assert MiscCommands._resolve_monitor_label('*', {}, {}) == 'All tasks'
+    assert MonitorCommands._resolve_monitor_label('*', {}, {}) == 'All tasks'
 
 
 def test_resolve_monitor_label_unrecognised_key():
     """Any key not starting with 'p.' falls back to 'Task monitor'."""
-    assert MiscCommands._resolve_monitor_label('foo', {}, {}) == 'Task monitor'
+    assert MonitorCommands._resolve_monitor_label('foo', {}, {}) == 'Task monitor'
 
 
 def test_resolve_monitor_label_project_wildcard():
     """A 'p.<id>.*' key uses the project label + '.*' suffix."""
     project_names = {'proj-1': 'my-project'}
-    assert MiscCommands._resolve_monitor_label('p.proj-1.*', project_names, {}) == 'my-project.*'
+    assert MonitorCommands._resolve_monitor_label('p.proj-1.*', project_names, {}) == 'my-project.*'
 
 
 def test_resolve_monitor_label_project_only():
     """A bare 'p.<id>' key (no source) yields '<project>.*'."""
     project_names = {'proj-1': 'my-project'}
-    assert MiscCommands._resolve_monitor_label('p.proj-1', project_names, {}) == 'my-project.*'
+    assert MonitorCommands._resolve_monitor_label('p.proj-1', project_names, {}) == 'my-project.*'
 
 
 def test_resolve_monitor_label_with_source():
     """A 'p.<id>.<source>' key uses both the project and source friendly names."""
     project_names = {'proj-1': 'my-project'}
     source_names = {'proj-1.src-1': 'reader'}
-    result = MiscCommands._resolve_monitor_label('p.proj-1.src-1', project_names, source_names)
+    result = MonitorCommands._resolve_monitor_label('p.proj-1.src-1', project_names, source_names)
     assert result == 'my-project.reader'
 
 
 def test_resolve_monitor_label_with_pipe_suffix():
     """A 4-part 'p.<id>.<source>.<pipe>' key appends a 'pipe<n>' suffix."""
-    result = MiscCommands._resolve_monitor_label('p.proj-1.src-1.42', {}, {})
+    result = MonitorCommands._resolve_monitor_label('p.proj-1.src-1.42', {}, {})
     assert result == 'proj-1.src-1.pipe42'
 
 
 def test_resolve_monitor_label_truncates_project_id_when_no_friendly_name():
     """Unknown project ids are truncated to 8 characters."""
-    result = MiscCommands._resolve_monitor_label('p.proj-very-long-id-here.*', {}, {})
+    result = MonitorCommands._resolve_monitor_label('p.proj-very-long-id-here.*', {}, {})
     assert result.startswith('proj-ver')
 
 
 # ---------------------------------------------------------------------------
-# _build_monitors_list
+# _build_monitors_list (moved to MonitorCommands)
 # ---------------------------------------------------------------------------
 
 
@@ -125,7 +153,7 @@ def test_build_monitors_list_resolves_keys_and_flag_names():
     project_names = {'proj-1': 'my-project'}
     source_names = {'proj-1.src-1': 'reader'}
 
-    out = MiscCommands._build_monitors_list(monitors, project_names, source_names)
+    out = MonitorCommands._build_monitors_list(monitors, project_names, source_names)
 
     # Sort for stability: order isn't part of the contract here.
     out_by_key = {item['key']: item['flags'] for item in out}
@@ -147,7 +175,7 @@ async def test_on_rrext_services_returns_specific_service(monkeypatch):
     monkeypatch.setattr(cmd_misc, 'getServiceDefinition', lambda name: schema if name == 'ocr' else None)
 
     conn = _make_conn()
-    result = await MiscCommands.on_rrext_services(conn, {'arguments': {'service': 'ocr'}})
+    result = await MiscCommands.on_rrext_services(conn, {'arguments': {'service': 'ocr'}}, _ctx())
 
     assert result == {'type': 'response', 'body': schema}
 
@@ -159,7 +187,7 @@ async def test_on_rrext_services_unknown_service_raises(monkeypatch):
 
     conn = _make_conn()
     with pytest.raises(ValueError, match="Service 'unknown' not found"):
-        await MiscCommands.on_rrext_services(conn, {'arguments': {'service': 'unknown'}})
+        await MiscCommands.on_rrext_services(conn, {'arguments': {'service': 'unknown'}}, _ctx())
     conn.debug_message.assert_called()
 
 
@@ -170,7 +198,7 @@ async def test_on_rrext_services_no_service_returns_all(monkeypatch):
     monkeypatch.setattr(cmd_misc, 'getServiceDefinitions', lambda: all_schemas)
 
     conn = _make_conn()
-    result = await MiscCommands.on_rrext_services(conn, {})
+    result = await MiscCommands.on_rrext_services(conn, {}, _ctx())
     assert result['body'] == all_schemas
 
 
@@ -199,7 +227,7 @@ async def test_on_rrext_validate_uses_explicit_source(monkeypatch):
             'source': 'explicit-source',
         },
     }
-    result = await MiscCommands.on_rrext_validate(conn, request)
+    result = await MiscCommands.on_rrext_validate(conn, request, _ctx())
 
     assert captured['payload']['source'] == 'explicit-source'
     assert captured['payload']['version'] == 1  # default
@@ -218,7 +246,7 @@ async def test_on_rrext_validate_falls_back_to_pipeline_source(monkeypatch):
 
     conn = _make_conn()
     request = {'arguments': {'pipeline': {'source': 'pipeline-source', 'components': []}}}
-    await MiscCommands.on_rrext_validate(conn, request)
+    await MiscCommands.on_rrext_validate(conn, request, _ctx())
     assert captured['source'] == 'pipeline-source'
 
 
@@ -234,7 +262,7 @@ async def test_on_rrext_validate_falls_back_to_implied_source(monkeypatch):
     )
 
     conn = _make_conn()
-    await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': {}}})
+    await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': {}}}, _ctx())
     assert captured.get('source') == 'implied'
 
 
@@ -250,7 +278,7 @@ async def test_on_rrext_validate_no_source_anywhere_omits_field(monkeypatch):
     )
 
     conn = _make_conn()
-    await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': {'components': []}}})
+    await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': {'components': []}}}, _ctx())
     assert 'source' not in captured
 
 
@@ -266,19 +294,19 @@ async def test_on_rrext_validate_propagates_validate_pipeline_errors(monkeypatch
 
     conn = _make_conn()
     with pytest.raises(RuntimeError, match='invalid pipeline'):
-        await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': {}}})
+        await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': {}}}, _ctx())
     conn.debug_message.assert_called()
 
 
 # ---------------------------------------------------------------------------
-# on_rrext_dashboard — happy path
+# on_rrext_dashboard (moved to MonitorCommands) — happy path
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
     """The dashboard only includes tasks owned by the caller."""
-    monkeypatch.setattr(cmd_misc.time, 'time', lambda: 1000.0)
+    monkeypatch.setattr(cmd_monitor.time, 'time', lambda: 1000.0)
 
     # Caller is a member of team-1 only; team-other is invisible to them.
     caller_account = SimpleNamespace(
@@ -339,8 +367,8 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
     server._connections = {}
     server._server = SimpleNamespace(_startTime=900.0)
 
-    conn = _make_conn(account_info=caller_account, server=server)
-    result = await MiscCommands.on_rrext_dashboard(conn, {})
+    conn = _make_monitor_conn(account_info=caller_account, server=server)
+    result = await MonitorCommands.on_rrext_dashboard(conn, {}, _ctx(caller_account))
 
     body = result['body']
     assert body['overview']['activeTasks'] == 1
@@ -351,7 +379,7 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
 @pytest.mark.asyncio
 async def test_on_rrext_dashboard_tk_auth_locks_to_owning_task(monkeypatch):
     """Task-token (tk_*) auth restricts the view to just that task."""
-    monkeypatch.setattr(cmd_misc.time, 'time', lambda: 1000.0)
+    monkeypatch.setattr(cmd_monitor.time, 'time', lambda: 1000.0)
 
     # Both tasks belong to caller's team; the tk_ auth filter narrows further.
     caller_account = SimpleNamespace(
@@ -403,8 +431,8 @@ async def test_on_rrext_dashboard_tk_auth_locks_to_owning_task(monkeypatch):
     server._connections = {}
     server._server = SimpleNamespace(_startTime=900.0)
 
-    conn = _make_conn(account_info=caller_account, server=server)
-    result = await MiscCommands.on_rrext_dashboard(conn, {})
+    conn = _make_monitor_conn(account_info=caller_account, server=server)
+    result = await MonitorCommands.on_rrext_dashboard(conn, {}, _ctx(caller_account))
 
     body = result['body']
     assert len(body['tasks']) == 1
@@ -414,10 +442,11 @@ async def test_on_rrext_dashboard_tk_auth_locks_to_owning_task(monkeypatch):
 @pytest.mark.asyncio
 async def test_on_rrext_dashboard_requires_monitor_permission():
     """If verify_permission raises, the error is logged and re-raised."""
-    conn = _make_conn()
+    caller_account = SimpleNamespace(userId='user-1', auth='ak_caller')
+    conn = _make_monitor_conn(account_info=caller_account)
     conn.verify_permission = MagicMock(side_effect=PermissionError('no monitor'))
     with pytest.raises(PermissionError, match='no monitor'):
-        await MiscCommands.on_rrext_dashboard(conn, {})
+        await MonitorCommands.on_rrext_dashboard(conn, {}, _ctx(caller_account))
     conn.debug_message.assert_called()
 
 

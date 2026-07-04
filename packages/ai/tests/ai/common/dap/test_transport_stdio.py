@@ -270,7 +270,8 @@ async def test_met_message_parses_json_metrics():
     events, _ = await _drive('>MET*' + json.dumps(metrics))
     event = _single_event(events)
     assert event['event'] == 'apaevt_status_metrics'
-    assert event['body'] == {'metrics': metrics}
+    # Parser dispatches the parsed JSON directly as the body (flattened).
+    assert event['body'] == metrics
 
 
 # ---------------------------------------------------------------------------

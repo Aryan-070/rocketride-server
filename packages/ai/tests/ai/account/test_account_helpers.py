@@ -20,6 +20,7 @@ import pytest
 
 from ai.account.base import AccountBase
 from ai.account.keystore import KeyStore
+from ai.account.models import RequestContext
 from ai.account.report import Reporter
 
 
@@ -76,7 +77,7 @@ async def test_handle_account_raises_not_implemented_in_oss():
     """OSS deployments do not implement account management."""
     acct = _ConcreteAccount()
     with pytest.raises(NotImplementedError, match='Account management requires SaaS'):
-        await acct.handle_account(MagicMock(), {})
+        await acct.handle_account(MagicMock(), {}, RequestContext())
 
 
 @pytest.mark.asyncio
@@ -84,7 +85,7 @@ async def test_handle_app_raises_not_implemented_in_oss():
     """OSS deployments do not implement the app marketplace."""
     acct = _ConcreteAccount()
     with pytest.raises(NotImplementedError, match='App marketplace requires SaaS'):
-        await acct.handle_app(MagicMock(), {})
+        await acct.handle_app(MagicMock(), {}, RequestContext())
 
 
 # ---------------------------------------------------------------------------

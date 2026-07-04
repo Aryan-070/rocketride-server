@@ -15,11 +15,12 @@ Focus areas:
 - ``get_task_control`` / ``get_task_control_by_public_key`` / ``get_task``
 - ``_dapbase_on_connected`` / ``_dapbase_on_disconnected``
 - ``broadcast_server_event`` / ``broadcast_task_event`` — error tolerance
-- ``store`` property — lazy initialization
+- ``store`` property — returns the eagerly-created instance
 """
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -355,7 +356,12 @@ async def test_broadcast_task_event_skips_when_token_unknown():
 
 @pytest.mark.asyncio
 async def test_broadcast_task_event_calls_each_subscriber():
-    """All connections receive the event when the task token is registered."""
+    """All connections receive the event when the task token is registered.
+
+    broadcast_task_event now dispatches each per-connection send via
+    ``asyncio.create_task`` (fire-and-forget) rather than awaiting inline, so we
+    yield the event loop once to let those child tasks run before asserting.
+    """
     ts = _make_server()
     ts._task_control['tk_x'] = _make_control(token='tk_x')
 
@@ -366,6 +372,8 @@ async def test_broadcast_task_event_calls_each_subscriber():
 
     payload = {'event': 'summary', 'body': {}}
     await TaskServer.broadcast_task_event(ts, event_type='etype', token='tk_x', event=payload)
+    # Let the fire-and-forget _send tasks execute.
+    await asyncio.sleep(0)
 
     a.send_task_event.assert_awaited_once_with('etype', token='tk_x', event=payload)
     b.send_task_event.assert_awaited_once_with('etype', token='tk_x', event=payload)
@@ -384,6 +392,8 @@ async def test_broadcast_task_event_silently_skips_permission_errors():
     ts._connections = {1: pk_conn, 2: other}
 
     await TaskServer.broadcast_task_event(ts, event_type='etype', token='tk_x', event={'event': 'x'})
+    # Let the fire-and-forget _send tasks execute.
+    await asyncio.sleep(0)
 
     other.send_task_event.assert_awaited_once()
     ts.debug_message.assert_not_called()  # permission errors are normal
@@ -402,6 +412,8 @@ async def test_broadcast_task_event_logs_other_exceptions():
     ts._connections = {1: bad, 2: good}
 
     await TaskServer.broadcast_task_event(ts, event_type='etype', token='tk_x', event={'event': 'x'})
+    # Let the fire-and-forget _send tasks execute.
+    await asyncio.sleep(0)
 
     good.send_task_event.assert_awaited_once()
     ts.debug_message.assert_called_once()
@@ -412,21 +424,23 @@ async def test_broadcast_task_event_logs_other_exceptions():
 # ---------------------------------------------------------------------------
 
 
-def test_store_property_creates_once_and_caches(monkeypatch):
-    """First access creates a Store via Store.create(); subsequent access reuses it."""
-    from ai.modules.task import task_server as ts_mod
+def test_store_property_returns_the_eager_instance():
+    """The ``store`` property returns the Store created eagerly in __init__.
 
-    fake_store = MagicMock(name='store')
-    create_mock = MagicMock(return_value=fake_store)
-    monkeypatch.setattr(ts_mod.Store, 'create', create_mock)
-
+    The Store is no longer lazily created on first access — __init__ assigns
+    ``_store_instance = Store.create()`` and the property simply returns it. The
+    property therefore returns whatever ``_store_instance`` holds, and repeated
+    access yields the same object.
+    """
     ts = _make_server()
+    fake_store = MagicMock(name='store')
+    ts._store_instance = fake_store
+
     s1 = ts.store
     s2 = ts.store
 
     assert s1 is fake_store
     assert s2 is fake_store
-    create_mock.assert_called_once()  # cached
 
 
 # ---------------------------------------------------------------------------
@@ -602,53 +616,58 @@ async def test_remove_task_calls_stop_and_broadcasts():
 
 
 # ---------------------------------------------------------------------------
-# push_account_update
+# broadcast_account_update
 # ---------------------------------------------------------------------------
+#
+# push_account_update was renamed to broadcast_account_update. The method now
+# first delegates to an injected ``self._publisher`` (SaaS Redis fan-out; None
+# in OSS/default) and then updates in-process connections: for each connection
+# whose ``_account_info.userId`` matches, it refreshes AccountInfo via
+# ``ai.account.account._service.get_authentication_result`` and pushes an
+# ``apaext_account`` event. Tests set ``_publisher = None`` so only the
+# in-process path runs. The import is ``from ai.account import account`` inside
+# the method, so we patch ``sys.modules['ai.account.account']``.
 
 
 @pytest.mark.asyncio
-async def test_push_account_update_skips_other_users(monkeypatch):
+async def test_broadcast_account_update_skips_other_users(monkeypatch):
     """Connections owned by a different user are not notified."""
-    from ai.modules.task import task_server as ts_mod
-
     fresh_info = MagicMock()
     fresh_info.to_connect_result = MagicMock(return_value={'user_id': 'u1'})
     service = MagicMock()
     service.get_authentication_result = AsyncMock(return_value=fresh_info)
     fake_account = SimpleNamespace(_service=service)
     monkeypatch.setitem(sys.modules, 'ai.account.account', fake_account)
-    monkeypatch.setattr(ts_mod, 'account', fake_account, raising=False)
 
     ts = _make_server()
+    ts._publisher = None  # OSS default — no Redis fan-out
     other = MagicMock()
     other._account_info = SimpleNamespace(userId='u-other', auth='ak_o')
     other.send_event = AsyncMock()
     other.get_connection_id = MagicMock(return_value=99)
     ts._connections = {99: other}
 
-    await TaskServer.push_account_update(ts, 'u1')
+    await TaskServer.broadcast_account_update(ts, 'u1')
     other.send_event.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_push_account_update_swallows_send_errors(monkeypatch):
+async def test_broadcast_account_update_swallows_send_errors(monkeypatch):
     """If account refresh raises, the loop logs and moves on (no propagation)."""
-    from ai.modules.task import task_server as ts_mod
-
     service = MagicMock()
     service.get_authentication_result = AsyncMock(side_effect=RuntimeError('refresh fail'))
     fake_account = SimpleNamespace(_service=service)
     monkeypatch.setitem(sys.modules, 'ai.account.account', fake_account)
-    monkeypatch.setattr(ts_mod, 'account', fake_account, raising=False)
 
     ts = _make_server()
+    ts._publisher = None  # OSS default — no Redis fan-out
     target = MagicMock()
     target._account_info = SimpleNamespace(userId='u1', auth='ak_a')
     target.send_event = AsyncMock()
     target.get_connection_id = MagicMock(return_value=1)
     ts._connections = {1: target}
 
-    await TaskServer.push_account_update(ts, 'u1')
+    await TaskServer.broadcast_account_update(ts, 'u1')
     target.send_event.assert_not_awaited()
     ts.debug_message.assert_called()
 
@@ -659,20 +678,22 @@ async def test_push_account_update_swallows_send_errors(monkeypatch):
 
 
 def test_build_task_account_info_populates_organization():
-    """The synthesized account for pk_/tk_ auth must carry a populated
-    ``organization`` so team permissions resolve. Regression: a plural
-    ``organizations=`` value was silently dropped by pydantic, leaving
-    ``organization`` None and breaking the chat SSE subscribe with
-    'Access denied: no permissions for this task'.
+    """The synthesized account for a ``tk_`` (private task) token must carry a
+    populated ``organization`` so team permissions resolve.
+
+    Note: ``pk_`` (public data-pipe) tokens intentionally return a bare
+    ``AccountInfo(auth=token)`` with no org context — the credential is scoped to
+    data ops / SSE monitoring only. Only the ``tk_`` branch builds the full
+    org/team structure, so this regression is exercised with a ``tk_`` token.
     """
     from ai.account.models import resolve_task_permissions
 
     ts = _make_server()
     control = SimpleNamespace(userId='user-1', teamId='team-1', orgId='org-1')
 
-    info = ts._build_task_account_info('pk_abc', control, ['task.data'])
+    info = ts._build_task_account_info('tk_abc', control, ['task.data'])
 
     assert info.organization is not None
-    # The task's own team is present with the granted permissions, so a pk_
-    # subscriber resolves to a non-empty permission list for its own task.
+    # The task's own team is present with the granted permissions, so the caller
+    # resolves to a non-empty permission list for its own task.
     assert resolve_task_permissions(info, 'team-1') == ['task.data']
