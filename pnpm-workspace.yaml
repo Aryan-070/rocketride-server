@@ -43,7 +43,6 @@ packages:
   - 'apps/shell-ui'
   - 'apps/test-ui'
   - 'apps/vscode'
-  - 'apps/test-ui'
   - 'apps/world-ui'
 
   # Examples
