@@ -286,9 +286,13 @@ class TaskConn(
         raw_ctx = args.pop('_ctx', None)
 
         if raw_ctx:
-            # Pod mode: orchestrator forwarded the caller's identity
+            # Pod mode: orchestrator forwarded the caller's identity. Guard the
+            # account_info lookup — a malformed/pre-auth forward without it must
+            # not raise KeyError out of on_receive (which would silently drop the
+            # message); treat a missing account_info as unauthenticated instead.
+            raw_account = raw_ctx.get('account_info')
             ctx = RequestContext(
-                account_info=AccountInfo(**raw_ctx['account_info']),
+                account_info=AccountInfo(**raw_account) if raw_account else None,
                 conn_id=raw_ctx.get('conn_id', str(self._connection_id)),
                 source=raw_ctx.get('source', 'orchestrator'),
             )

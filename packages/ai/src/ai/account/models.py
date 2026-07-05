@@ -108,10 +108,12 @@ class AccountInfo(BaseModel):
         """
         Return the slim subset of fields that pods consume via ``_ctx``.
 
-        Only the six fields that backend pods actually read are included:
-        auth, userId, userToken, defaultTeam, organization, sysPermissions.
-        Profile fields, apps, credits, capabilities, and waitlisted are
-        excluded — they are never accessed by any pod from ``_ctx``.
+        Includes the identity fields backend pods read from ``_ctx``:
+        auth, userId, userToken, defaultTeam, organization, sysPermissions,
+        and waitlisted.  ``waitlisted`` must be forwarded so that
+        ``verify_auth`` rejects a waitlisted user in pod mode (otherwise it
+        deserializes to ``False`` and the gate is bypassed).  Profile fields,
+        apps, credits, and capabilities are excluded — pods never read them.
 
         Returns:
             dict: Lightweight identity context for inter-pod forwarding.
@@ -123,6 +125,7 @@ class AccountInfo(BaseModel):
             'defaultTeam': self.defaultTeam,
             'organization': self.organization,
             'sysPermissions': list(self.sysPermissions),
+            'waitlisted': self.waitlisted,
         }
 
     def to_connect_result(self) -> dict:
@@ -278,6 +281,13 @@ def resolve_team_permissions(account_info: AccountInfo, team_id: str) -> list[st
     Raises:
         PermissionError: If ``team_id`` is not found in the user's org.
     """
+    # sys.admin and internal (pod service) credentials get full access
+    # regardless of team membership — mirrors resolve_task_permissions so the
+    # team-scoped and task-scoped permission surfaces agree for these callers.
+    sys_perms = getattr(account_info, 'sysPermissions', []) or []
+    if 'sys.admin' in sys_perms or 'internal' in sys_perms:
+        return list(_FULL_TEAM_PERMISSIONS)
+
     org = account_info.organization
     if org:
         for team in org.get('teams', []):
