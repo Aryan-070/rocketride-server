@@ -97,6 +97,9 @@ export const AppRegistryProvider: React.FC<{
 	const appsRef = useRef<AppManifestEntry[]>(initialApps);
 	// Tracks any in-flight desktop fetch so ensureApp can wait for it
 	const desktopFetchRef = useRef<Promise<void> | null>(null);
+	// Guards the mount-time "already authenticated" fetch so a StrictMode
+	// double-mount (or a login racing mount) can't fire the initial fetch twice.
+	const initialFetchDoneRef = useRef(false);
 
 	const cm = ConnectionManager.getInstance();
 
@@ -149,6 +152,11 @@ export const AppRegistryProvider: React.FC<{
 
 	/** Fetch the user's desktop apps and merge into the registry. */
 	const refreshDesktop = useCallback(async () => {
+		// Dedupe: if a fetch is already in flight, await the SAME promise instead
+		// of starting a second one. Prevents concurrent callers (mount + login +
+		// ensureApp) from racing multiple overlapping desktop fetches.
+		if (desktopFetchRef.current) return desktopFetchRef.current;
+
 		const doFetch = async () => {
 			try {
 				const client = cm.getClient();
@@ -161,11 +169,17 @@ export const AppRegistryProvider: React.FC<{
 				console.error('[AppRegistry] refreshDesktop() FAILED:', err);
 			}
 		};
-		// Store the promise so ensureApp can wait for it
+		// Store the promise so ensureApp (and deduped callers) can wait for it.
 		const p = doFetch();
 		desktopFetchRef.current = p;
-		await p;
-		desktopFetchRef.current = null;
+		try {
+			await p;
+		} finally {
+			// Only clear if OUR promise is still the current one — never null out a
+			// newer in-flight fetch that replaced ours.
+			if (desktopFetchRef.current === p) desktopFetchRef.current = null;
+		}
+		return p;
 	}, [cm, mergeApps]);
 
 	// =========================================================================
@@ -223,9 +237,13 @@ export const AppRegistryProvider: React.FC<{
 	// =========================================================================
 
 	useEffect(() => {
-		// If already authenticated when the provider mounts, fetch desktop
+		// If already authenticated when the provider mounts, fetch desktop once.
+		// The ref guard stops a StrictMode double-mount — or a shell:login that
+		// races the mount — from firing the initial fetch a second time (the
+		// refreshDesktop dedupe covers the concurrent case; this covers re-runs).
 		const client = cm.getClient();
-		if (client && client.isAuthenticated()) {
+		if (client && client.isAuthenticated() && !initialFetchDoneRef.current) {
+			initialFetchDoneRef.current = true;
 			refreshDesktop();
 		}
 

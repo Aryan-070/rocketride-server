@@ -53,6 +53,17 @@ import LoadingScreen from './LoadingScreen';
 import { SS_PENDING_APP_ID } from '../../constants';
 
 // =============================================================================
+// CONSTANTS
+// =============================================================================
+
+/**
+ * Safety cap on how long the deep-link loading screen may stay up before the
+ * gate releases regardless of load state. Guards against a deep link that never
+ * resolves (server hang, stuck MF fetch) stranding the branded spinner forever.
+ */
+const DEEP_LINK_GATE_TIMEOUT_MS = 15000;
+
+// =============================================================================
 // STYLES
 // =============================================================================
 
@@ -157,20 +168,36 @@ const DeepLinkGate: React.FC<{
 	loadingAppInfo: { name?: string; icon?: string } | null;
 	children: React.ReactNode;
 }> = ({ sessionAppId, defaultAppId, loadingAppInfo, children }) => {
-	const { appLoading, loadedApps } = useWorkspace();
+	const { loadedApps, appLoadErrors, activeAppId } = useWorkspace();
+
+	// Safety timeout: a deep link that never resolves (server hang, MF fetch
+	// stuck) must not strand the branded spinner forever. After the grace
+	// period, release the gate so ShellLayout can render its error + Retry UI.
+	const [timedOut, setTimedOut] = useState(false);
+	useEffect(() => {
+		// Only arm the timer for an actual deep link.
+		if (!sessionAppId || sessionAppId === defaultAppId) return;
+		const timer = setTimeout(() => setTimedOut(true), DEEP_LINK_GATE_TIMEOUT_MS);
+		return () => clearTimeout(timer);
+	}, [sessionAppId, defaultAppId]);
 
 	// Not a deep link — render immediately
 	if (!sessionAppId || sessionAppId === defaultAppId) return <>{children}</>;
 
-	// Deep link: keep showing the loading screen until the target app's
-	// descriptor is fully loaded. This prevents home-ui from flashing
-	// while the target app's MF remote is being fetched and loaded.
+	// Deep link: keep the loading screen up until a TERMINAL condition is reached,
+	// otherwise home-ui flashes while the target app's MF remote loads. Release when:
+	//  - the target descriptor finished loading (success), OR
+	//  - the target failed to load (error marker set) → let the error UI show, OR
+	//  - the shell fell back to the default app (target not in catalog), OR
+	//  - the safety timeout elapsed.
 	const targetLoaded = !!loadedApps[sessionAppId];
-	if (!targetLoaded) {
-		return <LoadingScreen appInfo={loadingAppInfo} isDeepLink />;
+	const targetErrored = !!appLoadErrors[sessionAppId];
+	const fellBackToDefault = activeAppId === defaultAppId;
+	if (targetLoaded || targetErrored || fellBackToDefault || timedOut) {
+		return <>{children}</>;
 	}
 
-	return <>{children}</>;
+	return <LoadingScreen appInfo={loadingAppInfo} isDeepLink />;
 };
 
 /**
