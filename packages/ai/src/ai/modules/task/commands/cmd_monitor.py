@@ -37,13 +37,20 @@ Primary Responsibilities:
 5. Handles real-time status updates and task state changes
 6. Integrates with the DAP protocol for standardized event communication
 
-Event Types Supported:
-----------------------
-- PASSIVE: General task status and lifecycle events
-- ACTIVE: Interactive events requiring client response
-- DEBUG: Debugging-specific events (breakpoints, variable changes, etc.)
-- ALL: Subscribe to all event types
-- NONE: Unsubscribe from all events
+Event Types (``EVENT_TYPE`` bitmask flags):
+-------------------------------------------
+- SUMMARY / DETAIL: task status and per-item lifecycle updates
+- TASK:      task-scoped lifecycle events
+- SSE:       real-time node-to-UI stream (pass-through data)
+- FLOW:      pipeline component enter/leave trace events (when tracing)
+- OUTPUT:    debug console output
+- DEBUGGER:  debugger-protocol events (breakpoints, variables, etc.)
+- DASHBOARD: server dashboard activity (connection/task changes)
+- BILLING:   token/usage billing events
+- NONE / ALL: unsubscribe from all / subscribe to all
+
+Subscriptions are stored per monitor key as an ``EVENT_TYPE`` bitmask, so a
+client can combine flags (e.g. ``SUMMARY | SSE``).
 
 Architecture:
 -------------
