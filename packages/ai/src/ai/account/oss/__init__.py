@@ -111,12 +111,17 @@ class Account(AccountBase):
             # Key is configured but the credential doesn't match — reject.
             return (401, 'Invalid API key')
 
+        # OSS has no billing — mark every catalog app 'free' (an active status)
+        # so the subscription gate never blocks. Keyed by app id.
+        oss_subscriptions = {a['id']: 'free' for a in self._read_apps_json(public_only=False) if a.get('id')}
+
         # Credential matched — synthesise a local AccountInfo that grants the
         # connecting developer full admin access to the single 'local' team.
         return AccountInfo(
             auth=credential,
             userToken=credential,
             userId='local',
+            subscriptions=oss_subscriptions,
             displayName='RocketRide Developer',
             givenName='',
             familyName='',
@@ -350,6 +355,12 @@ class Account(AccountBase):
             if sub == 'env_keys':
                 keys = sorted(k for k in os.environ if k.startswith('ROCKETRIDE_'))
                 return conn.build_response(request, body={'keys': keys})
+
+            if sub == 'desktop':
+                # OSS desktop mirrors the full catalog — every app is free and
+                # on the desktop (no billing/subscription concept in OSS).
+                apps = [{**a, 'appStatus': 'free', 'onDesktop': True} for a in self._read_apps_json(public_only=False)]
+                return conn.build_response(request, body={'apps': apps})
 
         raise NotImplementedError('Account management requires SaaS mode')
 

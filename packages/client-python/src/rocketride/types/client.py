@@ -383,6 +383,10 @@ class ConnectResult(TypedDict, total=False):
     capabilities: list[str]
     sysPermissions: list[str]
     waitlisted: bool
+    # Per-app subscription status keyed by appId ('subscribed' | 'trialing' |
+    # 'free' | 'unsubscribed' | 'past_due' | 'canceled' | 'auth'). Lightweight
+    # source for subscription gating; SaaS populates from billing, OSS = 'free'.
+    subscriptions: dict[str, str]
 
 
 class ServerInfoResult(TypedDict, total=False):

@@ -377,6 +377,23 @@ export interface OrgInfo {
 }
 
 /**
+ * Per-app subscription lifecycle status, computed server-side. OSS reports
+ * every app as `'free'`.
+ */
+export type AppStatus = 'auth' | 'free' | 'unsubscribed' | 'subscribed' | 'trialing' | 'past_due' | 'canceled';
+
+/**
+ * Statuses that grant access to an app — the subscription gate treats these as
+ * active. `'free'` needs no subscription; `'subscribed'`/`'trialing'` are paid-active.
+ */
+export const ACTIVE_APP_STATUSES: readonly AppStatus[] = ['subscribed', 'trialing', 'free'];
+
+/** True when `status` grants access to the app (see {@link ACTIVE_APP_STATUSES}). */
+export function isActiveStatus(status: AppStatus | string | undefined): boolean {
+	return status !== undefined && (ACTIVE_APP_STATUSES as readonly string[]).includes(status);
+}
+
+/**
  * Full identity and authorisation payload returned by the server after a
  * successful authentication handshake (`auth` command).
  *
@@ -455,6 +472,15 @@ export interface ConnectResult {
 	waitlisted?: boolean;
 
 	/**
+	 * Per-app subscription status keyed by appId — the lightweight source for
+	 * subscription gating (see {@link isActiveStatus}). SaaS populates it from
+	 * the billing layer; OSS marks every app `'free'`. Full billing detail
+	 * (plan/price/seats/credits) is fetched separately via `rrext_account_billing`.
+	 * Refreshed on every `apaext_account` push, so no separate fetch/cache is needed.
+	 */
+	subscriptions?: Record<string, AppStatus>;
+
+	/**
 	 * All org memberships the user has (for the org switcher UI).
 	 * Only present in profile responses, not in the auth handshake.
 	 */
@@ -522,8 +548,8 @@ export interface AppManifestEntry {
 	/** Available pricing tiers (SaaS paid apps only). */
 	stripePrices?: StripePriceEntry[];
 
-	/** App lifecycle status: 'auth' | 'free' | 'unsubscribed' | 'subscribed' | 'trialing' | 'past_due' | 'canceled'. */
-	appStatus?: string;
+	/** App lifecycle / subscription status. */
+	appStatus?: AppStatus;
 
 	/** Whether this app is on the user's desktop. */
 	onDesktop?: boolean;

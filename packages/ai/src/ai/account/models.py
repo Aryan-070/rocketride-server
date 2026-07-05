@@ -104,6 +104,15 @@ class AccountInfo(BaseModel):
     # (email did not match any allowed pattern in the user_grants table)
     waitlisted: bool = False
 
+    # Per-app subscription status: {appId -> AppStatus}. The lightweight
+    # source of truth for "is this app subscribed?" gating (e.g. the VS Code
+    # subscriptionGate). SaaS populates it at auth from the billing layer; OSS
+    # marks every app 'free'. Full billing detail (plan/price/seats/credits)
+    # is fetched separately via rrext_account_billing, not carried here.
+    # Flows to ConnectResult via to_connect_result() and is refreshed on every
+    # apaext_account push, so clients never need a separate fetch or cache.
+    subscriptions: dict[str, str] = {}
+
     def to_pod_context(self) -> dict:
         """
         Return the slim subset of fields that pods consume via ``_ctx``.

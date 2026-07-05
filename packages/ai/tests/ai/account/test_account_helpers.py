@@ -314,3 +314,42 @@ def test_to_pod_context_includes_waitlisted():
 
     assert AccountInfo(userId='u1', waitlisted=True).to_pod_context()['waitlisted'] is True
     assert AccountInfo(userId='u2').to_pod_context()['waitlisted'] is False
+
+
+# ---------------------------------------------------------------------------
+# OSS account — subscriptions + desktop subcommand
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_oss_authenticate_marks_all_catalog_apps_free(monkeypatch):
+    """OSS authenticate populates subscriptions = {appId: 'free'} for the catalog."""
+    from ai.account.oss import Account
+
+    acct = Account.__new__(Account)  # bypass __init__
+    acct.capabilities = ['oss']
+    monkeypatch.setattr(acct, '_read_apps_json', lambda public_only=False: [{'id': 'a1'}, {'id': 'a2'}])
+    monkeypatch.delenv('ROCKETRIDE_APIKEY', raising=False)  # unconfigured -> any credential matches
+
+    info = await acct.authenticate('ak_dev')
+    assert info.subscriptions == {'a1': 'free', 'a2': 'free'}
+
+
+@pytest.mark.asyncio
+async def test_oss_desktop_subcommand_returns_all_apps_free_and_on_desktop(monkeypatch):
+    """OSS 'desktop' subcommand mirrors the catalog: every app free + onDesktop."""
+    from ai.account.oss import Account
+
+    acct = Account.__new__(Account)
+    monkeypatch.setattr(
+        acct, '_read_apps_json', lambda public_only=False: [{'id': 'a1', 'name': 'A'}, {'id': 'a2', 'name': 'B'}]
+    )
+    conn = MagicMock()
+    conn.build_response = MagicMock(side_effect=lambda req, body=None: {'type': 'response', 'body': body})
+
+    req = {'command': 'rrext_account_me', 'arguments': {'subcommand': 'desktop'}}
+    result = await acct.handle_account(conn, req, RequestContext())
+
+    apps = result['body']['apps']
+    assert {a['id'] for a in apps} == {'a1', 'a2'}
+    assert all(a['appStatus'] == 'free' and a['onDesktop'] is True for a in apps)
