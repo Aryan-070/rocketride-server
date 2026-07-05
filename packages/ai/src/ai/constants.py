@@ -33,6 +33,13 @@ CONST_BILLING_REPORT_INTERVAL = 15.0  # seconds between billing reports to ledge
 CONST_PROCESS_REPORT_INTERVAL = 1.0  # seconds between subprocess >MET* live metrics emissions
 
 # =============================================================================
+# Connection Event Delivery
+# =============================================================================
+# Max buffered outbound task events per connection before overflow handling
+# (drop-oldest for idempotent status snapshots; disconnect for SSE streams).
+CONST_CONN_OUT_QUEUE_MAX = 1000
+
+# =============================================================================
 # Billing API Configuration
 # =============================================================================
 CONST_BILLING_API_TIMEOUT = 10.0  # seconds timeout for HTTP requests to billing API

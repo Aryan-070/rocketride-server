@@ -52,10 +52,12 @@ with different event subscription levels. It acts as an event distribution
 hub that respects access permissions and client preferences.
 """
 
+import asyncio
 import time
 from typing import TYPE_CHECKING, Dict, Any, List
 from ai.common.dap import DAPConn, TransportBase
 from ai.account.models import RequestContext, resolve_task_permissions
+from ai.constants import CONST_CONN_OUT_QUEUE_MAX
 from rocketride import EVENT_TYPE, TASK_STATE, TASK_STATUS
 from rocketride.types.client import DAPRequest, DAPResponse
 
@@ -110,6 +112,15 @@ class MonitorCommands(DAPConn):
         # Format: "apikey:token" -> EVENT_TYPE mapping
         self._monitors: Dict[str, EVENT_TYPE] = {}
 
+        # Per-connection outbound event delivery (see enqueue_task_event /
+        # _drain_events). broadcast_task_event enqueues here instead of sending
+        # inline so per-connection ordering is preserved, events are never
+        # GC-dropped, and a slow WebSocket never head-of-line-blocks the parent
+        # event loop. Created lazily on first enqueue (needs a running loop).
+        self._out_q: 'asyncio.Queue | None' = None
+        self._drain_task: 'asyncio.Task | None' = None
+        self._overflow_close_task: 'asyncio.Task | None' = None
+
     async def send_server_event(
         self,
         event_type: EVENT_TYPE,
@@ -155,6 +166,99 @@ class MonitorCommands(DAPConn):
             if self._account_info.userId != user_id:
                 return
         await self.send_event(event.get('event', 'unknown'), body=event.get('body'))
+
+    # =========================================================================
+    # OUTBOUND EVENT QUEUE — ordered, non-blocking task-event delivery
+    # =========================================================================
+
+    def enqueue_task_event(self, event_type: EVENT_TYPE, token: str, event: Dict[str, Any]) -> None:
+        """
+        Queue a task event for ordered delivery by this connection's drain task.
+
+        Called by ``TaskServer.broadcast_task_event`` for every connection.
+        Returns immediately (never awaits a WebSocket write), so a slow consumer
+        cannot head-of-line-block the broadcast loop.  The drain applies the
+        subscription/permission filter via ``send_task_event``, so non-subscribers
+        drain instantly and only a genuinely slow subscriber backs up.
+
+        Overflow: SSE streams cannot tolerate dropped chunks, so a backed-up
+        consumer is disconnected; idempotent snapshots (status/summary/dashboard)
+        drop the oldest in favour of the newest.
+
+        Args:
+            event_type: Event type bitmask.
+            token:      Task token identifying the originating task.
+            event:      Fully-formed DAP event payload.
+        """
+        # Lazily start the drain (we are on the event loop during broadcast).
+        # Covers every registration path, including the pod/orchestrator conn.
+        if self._drain_task is None:
+            self._start_event_drain()
+        if self._out_q is None:
+            return
+
+        try:
+            self._out_q.put_nowait((event_type, token, event))
+        except asyncio.QueueFull:
+            if event_type == EVENT_TYPE.SSE:
+                # A slow SSE consumer cannot keep up; dropping chunks would
+                # corrupt the stream silently, so disconnect it. Retain the task
+                # so it is not garbage-collected mid-flight.
+                if self._overflow_close_task is None or self._overflow_close_task.done():
+                    self._overflow_close_task = asyncio.create_task(self._overflow_disconnect())
+            else:
+                # Idempotent snapshot — keep the latest, drop the oldest.
+                try:
+                    self._out_q.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+                try:
+                    self._out_q.put_nowait((event_type, token, event))
+                except asyncio.QueueFull:
+                    pass
+
+    def _start_event_drain(self) -> None:
+        """Create the outbound queue and start the drain task (idempotent)."""
+        if self._drain_task is not None:
+            return
+        self._out_q = asyncio.Queue(maxsize=CONST_CONN_OUT_QUEUE_MAX)
+        self._drain_task = asyncio.create_task(self._drain_events())
+
+    def stop_event_drain(self) -> None:
+        """Cancel the drain task and drop the queue (called on disconnect)."""
+        if self._drain_task is not None:
+            self._drain_task.cancel()
+            self._drain_task = None
+        if self._overflow_close_task is not None:
+            self._overflow_close_task.cancel()
+            self._overflow_close_task = None
+        self._out_q = None
+
+    async def _drain_events(self) -> None:
+        """
+        Deliver queued task events in FIFO order for this connection.
+
+        One drain task per connection guarantees per-connection ordering.
+        ``send_task_event`` applies the subscription/permission filter and does
+        the actual WebSocket write; ``PermissionError`` is a normal skip and any
+        other error is logged without killing the drain.
+        """
+        while True:
+            event_type, token, event = await self._out_q.get()
+            try:
+                await self.send_task_event(event_type, token, event)
+            except PermissionError:
+                pass
+            except Exception as e:
+                self.debug_message(f'Failed to deliver task event: {e}')
+
+    async def _overflow_disconnect(self) -> None:
+        """Disconnect a connection whose SSE stream overflowed its outbound queue."""
+        self.debug_message('Outbound SSE queue overflow — disconnecting slow consumer')
+        try:
+            await self._transport.disconnect()
+        except Exception:
+            pass
 
     async def send_task_event(
         self,

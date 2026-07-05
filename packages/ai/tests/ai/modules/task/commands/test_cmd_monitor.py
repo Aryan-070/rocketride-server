@@ -10,6 +10,7 @@ token/project/wildcard variants, ``on_rrext_monitor`` argument parsing
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -50,6 +51,11 @@ def _make_conn(*, account_info=None, server=None, monitors=None, connection_id=1
     conn.verify_permission = MagicMock()
     conn.get_connection_id = MagicMock(return_value=connection_id)
     conn.get_task_token = MagicMock(return_value='tk_default')
+    # Outbound event-queue state (normally set in MonitorCommands.__init__,
+    # which __new__ bypasses).
+    conn._out_q = None
+    conn._drain_task = None
+    conn._overflow_close_task = None
     return conn
 
 
@@ -439,7 +445,102 @@ async def test_on_rrext_monitor_with_unknown_string_in_list_is_ignored():
 
 
 def test_monitor_commands_init_creates_empty_monitor_registry():
-    """The constructor seeds _monitors as an empty dict."""
+    """The constructor seeds _monitors and the (unstarted) outbound queue state."""
     conn = MonitorCommands.__new__(MonitorCommands)
     MonitorCommands.__init__(conn, connection_id=1, server=None, transport=None)
     assert conn._monitors == {}
+    assert conn._out_q is None
+    assert conn._drain_task is None
+    assert conn._overflow_close_task is None
+
+
+# ---------------------------------------------------------------------------
+# Outbound event queue — enqueue / drain / overflow
+# ---------------------------------------------------------------------------
+
+
+async def _yield_loop(n: int = 10) -> None:
+    """Yield the event loop repeatedly so the drain task can process the queue."""
+    for _ in range(n):
+        await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_enqueue_lazily_starts_drain_and_delivers_in_order():
+    """enqueue_task_event starts a drain that calls send_task_event in FIFO order."""
+    conn = _make_conn()
+    conn.send_task_event = AsyncMock()
+
+    payloads = [{'event': f'e{i}', 'body': {}} for i in range(3)]
+    for p in payloads:
+        conn.enqueue_task_event(EVENT_TYPE.SUMMARY, 'tk_x', p)
+
+    assert conn._drain_task is not None  # lazily started
+    await _yield_loop()
+
+    calls = [c.args for c in conn.send_task_event.await_args_list]
+    assert calls == [(EVENT_TYPE.SUMMARY, 'tk_x', p) for p in payloads]
+    conn.stop_event_drain()
+
+
+@pytest.mark.asyncio
+async def test_drain_skips_permission_error_without_logging():
+    """A PermissionError from send_task_event is a normal skip (not logged)."""
+    conn = _make_conn()
+    conn.send_task_event = AsyncMock(side_effect=PermissionError('no monitor'))
+
+    conn.enqueue_task_event(EVENT_TYPE.SUMMARY, 'tk_x', {'event': 'e', 'body': {}})
+    await _yield_loop()
+
+    conn.debug_message.assert_not_called()
+    conn.stop_event_drain()
+
+
+@pytest.mark.asyncio
+async def test_drain_logs_other_exceptions_and_survives():
+    """A non-permission error is logged; the drain keeps processing later events."""
+    conn = _make_conn()
+    conn.send_task_event = AsyncMock(side_effect=[RuntimeError('boom'), None])
+
+    conn.enqueue_task_event(EVENT_TYPE.SUMMARY, 'tk_x', {'event': 'bad', 'body': {}})
+    conn.enqueue_task_event(EVENT_TYPE.SUMMARY, 'tk_x', {'event': 'ok', 'body': {}})
+    await _yield_loop()
+
+    conn.debug_message.assert_called()  # the RuntimeError was logged
+    assert conn.send_task_event.await_count == 2  # drain survived and delivered the next
+    conn.stop_event_drain()
+
+
+@pytest.mark.asyncio
+async def test_enqueue_status_overflow_drops_oldest():
+    """When the queue is full, an idempotent snapshot drops the oldest, keeps the newest."""
+    conn = _make_conn()
+    # Block the drain so we can observe overflow on a maxsize-1 queue.
+    conn._drain_task = MagicMock()
+    conn._out_q = asyncio.Queue(maxsize=1)
+    conn._out_q.put_nowait((EVENT_TYPE.SUMMARY, 'tk_x', {'event': 'old', 'body': {}}))
+
+    conn.enqueue_task_event(EVENT_TYPE.SUMMARY, 'tk_x', {'event': 'new', 'body': {}})
+
+    assert conn._out_q.qsize() == 1
+    _, _, event = conn._out_q.get_nowait()
+    assert event['event'] == 'new'
+
+
+@pytest.mark.asyncio
+async def test_enqueue_sse_overflow_disconnects_slow_consumer():
+    """A full SSE queue disconnects the connection instead of silently dropping chunks."""
+    conn = _make_conn()
+    conn._transport = MagicMock()
+    conn._transport.disconnect = AsyncMock()
+    conn._drain_task = MagicMock()  # block the drain so the queue stays full
+    conn._out_q = asyncio.Queue(maxsize=1)
+    conn._out_q.put_nowait((EVENT_TYPE.SSE, 'tk_x', {'event': 'chunk0', 'body': {}}))
+
+    conn.enqueue_task_event(EVENT_TYPE.SSE, 'tk_x', {'event': 'chunk1', 'body': {}})
+
+    assert conn._overflow_close_task is not None  # disconnect scheduled
+    await _yield_loop()
+    conn._transport.disconnect.assert_awaited_once()
+    # The SSE chunk is NOT dropped-and-replaced (queue still holds the original).
+    assert conn._out_q.qsize() == 1

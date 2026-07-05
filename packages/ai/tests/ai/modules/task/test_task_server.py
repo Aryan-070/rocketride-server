@@ -20,7 +20,6 @@ Focus areas:
 
 from __future__ import annotations
 
-import asyncio
 import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -346,77 +345,33 @@ async def test_broadcast_task_event_skips_when_token_unknown():
     """If the token is not in the task registry, the broadcast short-circuits."""
     ts = _make_server()
     conn = MagicMock()
-    conn.send_task_event = AsyncMock()
     ts._connections = {1: conn}
 
     await TaskServer.broadcast_task_event(ts, event_type='etype', token='tk_x', event={'event': 'x'})
 
-    conn.send_task_event.assert_not_called()
+    conn.enqueue_task_event.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_broadcast_task_event_calls_each_subscriber():
-    """All connections receive the event when the task token is registered.
+async def test_broadcast_task_event_enqueues_to_each_connection():
+    """Every connection is handed the event via its ordered outbound queue.
 
-    broadcast_task_event now dispatches each per-connection send via
-    ``asyncio.create_task`` (fire-and-forget) rather than awaiting inline, so we
-    yield the event loop once to let those child tasks run before asserting.
+    Delivery + subscription filtering now happen in each connection's drain
+    task (via send_task_event); broadcast only enqueues, so it never blocks on a
+    slow consumer and per-connection ordering is preserved. (Error/permission
+    isolation is covered by the drain tests in test_cmd_monitor.)
     """
     ts = _make_server()
     ts._task_control['tk_x'] = _make_control(token='tk_x')
 
     a, b = MagicMock(), MagicMock()
-    a.send_task_event = AsyncMock()
-    b.send_task_event = AsyncMock()
     ts._connections = {1: a, 2: b}
 
     payload = {'event': 'summary', 'body': {}}
     await TaskServer.broadcast_task_event(ts, event_type='etype', token='tk_x', event=payload)
-    # Let the fire-and-forget _send tasks execute.
-    await asyncio.sleep(0)
 
-    a.send_task_event.assert_awaited_once_with('etype', token='tk_x', event=payload)
-    b.send_task_event.assert_awaited_once_with('etype', token='tk_x', event=payload)
-
-
-@pytest.mark.asyncio
-async def test_broadcast_task_event_silently_skips_permission_errors():
-    """PermissionError from a connection is treated as normal (not logged)."""
-    ts = _make_server()
-    ts._task_control['tk_x'] = _make_control(token='tk_x')
-
-    pk_conn = MagicMock()
-    pk_conn.send_task_event = AsyncMock(side_effect=PermissionError('no monitor'))
-    other = MagicMock()
-    other.send_task_event = AsyncMock()
-    ts._connections = {1: pk_conn, 2: other}
-
-    await TaskServer.broadcast_task_event(ts, event_type='etype', token='tk_x', event={'event': 'x'})
-    # Let the fire-and-forget _send tasks execute.
-    await asyncio.sleep(0)
-
-    other.send_task_event.assert_awaited_once()
-    ts.debug_message.assert_not_called()  # permission errors are normal
-
-
-@pytest.mark.asyncio
-async def test_broadcast_task_event_logs_other_exceptions():
-    """Non-permission errors are logged but the broadcast continues."""
-    ts = _make_server()
-    ts._task_control['tk_x'] = _make_control(token='tk_x')
-
-    bad = MagicMock()
-    bad.send_task_event = AsyncMock(side_effect=RuntimeError('boom'))
-    good = MagicMock()
-    good.send_task_event = AsyncMock()
-    ts._connections = {1: bad, 2: good}
-
-    await TaskServer.broadcast_task_event(ts, event_type='etype', token='tk_x', event={'event': 'x'})
-    # Let the fire-and-forget _send tasks execute.
-    await asyncio.sleep(0)
-
-    good.send_task_event.assert_awaited_once()
-    ts.debug_message.assert_called_once()
+    a.enqueue_task_event.assert_called_once_with('etype', 'tk_x', payload)
+    b.enqueue_task_event.assert_called_once_with('etype', 'tk_x', payload)
 
 
 # ---------------------------------------------------------------------------

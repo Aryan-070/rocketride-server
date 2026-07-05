@@ -524,6 +524,10 @@ class TaskServer(DAPBase):
         if hasattr(conn, 'release_profiler'):
             conn.release_profiler()
 
+        # Stop this connection's outbound event drain task and drop its queue.
+        if hasattr(conn, 'stop_event_drain'):
+            conn.stop_event_drain()
+
         # Remove connection from active connections registry
         if connection_id in self._connections:
             del self._connections[connection_id]
@@ -909,21 +913,16 @@ class TaskServer(DAPBase):
         if token not in self._task_control:
             return
 
-        # Fire-and-forget: status broadcasts are advisory — we don't need to
-        # wait for each WebSocket write to complete before continuing. This
-        # prevents 32 concurrent tasks' broadcasts from serializing on the
-        # event loop and starving pings/requests.
+        # Enqueue to each connection's ordered outbound queue. Delivery is
+        # non-blocking: each connection's drain task applies the subscription
+        # filter (via send_task_event) and does the WebSocket write, so a slow
+        # consumer cannot head-of-line-block this loop, per-connection ordering
+        # is preserved, and events are never GC-dropped. (Was: an unretained
+        # asyncio.create_task per connection, which lost ordering — event N+1
+        # could beat N on the SSE stream — and could be garbage-collected before
+        # running, silently dropping the event.)
         for conn in list(self._connections.values()):
-
-            async def _send(c=conn):
-                try:
-                    await c.send_task_event(event_type, token=token, event=event)
-                except PermissionError:
-                    pass
-                except Exception as e:
-                    self.debug_message(f'Failed to broadcast event to connection: {e}')
-
-            asyncio.create_task(_send())
+            conn.enqueue_task_event(event_type, token, event)
 
     def is_debug_available(self, token: str) -> bool:
         """
