@@ -750,9 +750,6 @@ class Task(DAPBase):
             self._status.metrics.peak_cpu_percent = 0.0
             self._status.metrics.peak_cpu_memory_mb = 0.0
             self._status.metrics.peak_gpu_memory_mb = 0.0
-            self._status.metrics.avg_cpu_percent = 0.0
-            self._status.metrics.avg_cpu_memory_mb = 0.0
-            self._status.metrics.avg_gpu_memory_mb = 0.0
         except Exception:
             pass
 

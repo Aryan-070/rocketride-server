@@ -225,15 +225,6 @@ class TASK_METRICS(BaseModel):
         default=0.0, description='Peak GPU memory usage in megabytes during task execution'
     )
 
-    # Average values
-    avg_cpu_percent: float = Field(default=0.0, description='Average CPU utilization percentage over task lifetime')
-    avg_cpu_memory_mb: float = Field(
-        default=0.0, description='Average CPU memory usage in megabytes over task lifetime'
-    )
-    avg_gpu_memory_mb: float = Field(
-        default=0.0, description='Average GPU memory usage in megabytes over task lifetime'
-    )
-
 
 class TASK_STATUS_FLOW(BaseModel):
     """

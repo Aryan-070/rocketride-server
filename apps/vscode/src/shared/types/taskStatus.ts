@@ -254,16 +254,6 @@ export interface TaskStatus {
 		
 		/** Peak GPU memory usage in megabytes during task execution */
 		peak_gpu_memory_mb?: number;
-		
-		// Average values
-		/** Average CPU utilization percentage over task lifetime */
-		avg_cpu_percent?: number;
-		
-		/** Average CPU memory usage in megabytes over task lifetime */
-		avg_cpu_memory_mb?: number;
-		
-		/** Average GPU memory usage in megabytes over task lifetime */
-		avg_gpu_memory_mb?: number;
 	};
 
 	/**
