@@ -105,28 +105,35 @@ export const AppRegistryProvider: React.FC<{
 	// =========================================================================
 
 	/**
-	 * Merge new app entries into the registry. If an app already exists,
-	 * its fields are updated (desktop fetch overlays appStatus/onDesktop
-	 * onto probe-registered entries). New apps are registered as MF remotes.
+	 * Merge new app entries into the registry.
+	 *
+	 * Full entries (with an MF `entry` URL) are registered as remotes and
+	 * added/replaced. Lean entries (e.g. an `apaext_desktop` membership push
+	 * carrying only `id` + `onDesktop`) are patched onto EXISTING registry
+	 * entries by id without requiring `entry` — otherwise the desktop
+	 * add/remove would be silently dropped by the `entry` filter.
 	 */
 	const mergeApps = useCallback((incoming: Record<string, unknown>[]) => {
-		// Register all incoming as MF remotes (registerAndMapApps handles dedup)
-		const registered = registerAndMapApps(incoming as AppManifestEntry[]);
+		const entries = incoming as AppManifestEntry[];
+		// Only full entries (with a remoteEntry URL) can be registered as MF remotes.
+		const registered = registerAndMapApps(entries.filter((a) => a.entry));
+		// Lean entries patch existing registry rows (membership/status updates).
+		const lean = entries.filter((a) => a && a.id && !a.entry);
 
 		setApps((prev) => {
 			// Build index of existing apps
 			const byId = new Map(prev.map((a) => [a.id, a]));
 
-			// Merge each incoming app
+			// Full entries: register/replace, overlaying new fields, keep load().
 			for (const app of registered) {
 				const existing = byId.get(app.id);
-				if (existing) {
-					// Update existing entry — overlay new fields, keep load()
-					byId.set(app.id, { ...existing, ...app });
-				} else {
-					// New app
-					byId.set(app.id, app);
-				}
+				byId.set(app.id, existing ? { ...existing, ...app } : app);
+			}
+
+			// Lean entries: patch onto existing rows only (no MF remote to load).
+			for (const patch of lean) {
+				const existing = byId.get(patch.id);
+				if (existing) byId.set(patch.id, { ...existing, ...patch });
 			}
 
 			const result = Array.from(byId.values());

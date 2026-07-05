@@ -25,15 +25,18 @@
 // =============================================================================
 
 import { useMemo } from 'react';
+import { isActiveStatus, type AppStatus } from 'rocketride';
 import type { AppManifestEntry } from '../workspace/types';
 import { useAppRegistry } from './AppRegistryContext';
+import { useAuthUser } from './useAuthUser';
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
-/** App lifecycle status values computed server-side. */
-export type AppStatus = 'auth' | 'free' | 'unsubscribed' | 'subscribed' | 'trialing' | 'past_due' | 'canceled';
+// AppStatus is the shared SDK type; re-export it so existing consumers that
+// import it from here keep working.
+export type { AppStatus };
 
 /** @deprecated Use AppStatus instead. */
 export type SubscriptionStatus = AppStatus;
@@ -43,34 +46,32 @@ export type SubscriptionStatus = AppStatus;
 // =============================================================================
 
 /**
- * Returns the user's desktop apps from the app registry.
+ * Desktop membership (from the app registry) + subscription status (from the
+ * authoritative ``AccountInfo.subscriptions`` map on the cached ConnectResult).
  *
- * Filters the registry to apps that have ``onDesktop`` set (i.e. apps
- * that arrived via the desktop fetch or desktop push events). Apps
- * registered only from the probe or catalog won't appear here.
+ * Desktop membership and subscription status are independent: an app can be
+ * subscribed but not on the desktop, so ``getStatus`` reads the entitlement map
+ * — refreshed on every ``apaext_account`` push — NOT the desktop-derived
+ * registry. ``isOnDesktop`` still reflects the registry's ``onDesktop`` flag.
  */
 export function useSubscriptions(): {
 	desktopApps: AppManifestEntry[];
 	/** Quick lookup: is this appId on the desktop? */
 	isOnDesktop: (appId: string) => boolean;
-	/** Quick lookup: what's this app's appStatus? */
+	/** The app's subscription status (from AccountInfo.subscriptions), or undefined. */
 	getStatus: (appId: string) => AppStatus | undefined;
+	/** True when the app's status grants access (subscribed | trialing | free). */
+	isSubscribed: (appId: string) => boolean;
 } {
 	const { apps } = useAppRegistry();
+	const subscriptions = useAuthUser()?.subscriptions;
 
 	return useMemo(() => {
-		// Build lookup maps from apps that have subscription data
-		const statusMap = new Map<string, AppStatus>();
+		// Desktop membership comes from the registry (fed by getDesktop + push).
 		const desktopSet = new Set<string>();
 		const desktopApps: AppManifestEntry[] = [];
-
 		for (const entry of apps) {
-			if (!entry?.id) continue;
-			// Only include apps with subscription/desktop metadata
-			if (entry.appStatus) {
-				statusMap.set(entry.id, entry.appStatus as AppStatus);
-			}
-			if (entry.onDesktop) {
+			if (entry?.id && entry.onDesktop) {
 				desktopSet.add(entry.id);
 				desktopApps.push(entry);
 			}
@@ -79,7 +80,8 @@ export function useSubscriptions(): {
 		return {
 			desktopApps,
 			isOnDesktop: (appId: string) => desktopSet.has(appId),
-			getStatus: (appId: string) => statusMap.get(appId),
+			getStatus: (appId: string) => subscriptions?.[appId] as AppStatus | undefined,
+			isSubscribed: (appId: string) => isActiveStatus(subscriptions?.[appId]),
 		};
-	}, [apps]);
+	}, [apps, subscriptions]);
 }
