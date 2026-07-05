@@ -122,11 +122,11 @@ class TaskMetrics:
         # billing.  Captured at/after service-up (see set_service_up).
         self._baselines: dict[str, float] = {}
 
-        # ``>USG*`` is only emitted at object boundaries, which occur AFTER
-        # service-up — so at the service-up instant _subprocess_usage is
-        # usually still empty and the baseline snapshot would be empty (and
-        # startup would be billed).  When that happens this flag defers the
-        # baseline capture to the first ``>USG*`` received after service-up.
+        # At the service-up instant _subprocess_usage may still be empty — the
+        # first ``>USG*`` (a periodic billing-cadence emit from ProcessReporter,
+        # or an object boundary) may not have arrived yet.  Snapshotting an empty
+        # baseline would bill all of startup, so when it is empty this flag
+        # defers the baseline capture to the first ``>USG*`` after service-up.
         self._baseline_pending: bool = False
 
     def set_service_up(self, value: bool) -> None:
@@ -140,10 +140,11 @@ class TaskMetrics:
         if value and self._billing_gated:
             # Baseline = cumulative usage at the moment the pipeline became
             # ready; everything before this point is startup and is excluded
-            # from billing.  >USG* is only emitted at object boundaries (after
-            # service-up), so _subprocess_usage is usually still empty here —
-            # capture whatever we have and, if empty, defer the baseline to the
-            # first >USG* that arrives after service-up (merge_subprocess_usage).
+            # from billing.  The first >USG* may not have arrived yet at this
+            # instant (periodic billing-cadence emit or object boundary), so
+            # _subprocess_usage may still be empty here — capture whatever we
+            # have and, if empty, defer the baseline to the first >USG* that
+            # arrives after service-up (merge_subprocess_usage).
             self._baselines = dict(self._subprocess_usage)
             self._baseline_pending = not self._subprocess_usage
             debug('[TaskMetrics] Pipeline ready — billing accumulation started')
