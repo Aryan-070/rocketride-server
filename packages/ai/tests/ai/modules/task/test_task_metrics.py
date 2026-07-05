@@ -249,14 +249,20 @@ def test_update_tokens_converts_usage_via_db_rates(mock_account):
     """Tokens = billable_usage * DB rate, per key, on _status.tokens."""
     tm, status = _make_metrics()
     tm.set_service_up(True)
-    tm._subprocess_usage = {
-        'cpu_compute': 5000.0,  # 5000 * 0.001 = 5.0
-        'gpu_memory': 3.0,  # 3 * 2.0 = 6.0
-        'requests': 4.0,  # 4 * 1.0 = 4.0
-        'pages': 100.0,  # rate 0.0 -> no token line
-    }
+    # First >USG* after service-up establishes a zero baseline (no startup
+    # usage accrued), so the real usage below bills in full.
+    tm.merge_subprocess_usage({'values': {'cpu_compute': 0.0, 'gpu_memory': 0.0, 'requests': 0.0, 'pages': 0.0}})
 
-    tm.merge_subprocess_usage({'values': dict(tm._subprocess_usage)})
+    tm.merge_subprocess_usage(
+        {
+            'values': {
+                'cpu_compute': 5000.0,  # 5000 * 0.001 = 5.0
+                'gpu_memory': 3.0,  # 3 * 2.0 = 6.0
+                'requests': 4.0,  # 4 * 1.0 = 4.0
+                'pages': 100.0,  # rate 0.0 -> no token line
+            }
+        }
+    )
 
     dump = status.tokens.model_dump()
     assert dump.get('cpu_compute') == pytest.approx(5.0)
@@ -264,6 +270,29 @@ def test_update_tokens_converts_usage_via_db_rates(mock_account):
     assert dump.get('requests') == pytest.approx(4.0)
     # Zero-rate keys never produce a token line.
     assert 'pages' not in dump
+
+
+def test_baseline_deferred_to_first_usg_after_service_up(mock_account):
+    """When service-up fires before any >USG*, the first post-service-up
+    snapshot becomes the baseline (excluded); only later growth is billed.
+    """
+    tm, status = _make_metrics()
+
+    # serviceUp with no usage yet -> baseline capture is deferred.
+    tm.set_service_up(True)
+    assert tm._baseline_pending is True
+    assert tm._baselines == {}
+
+    # First >USG* after service-up carries all of startup -> it becomes the
+    # baseline and nothing is billed for it.
+    tm.merge_subprocess_usage({'values': {'cpu_compute': 5000.0}})
+    assert tm._baseline_pending is False
+    assert tm._baselines == {'cpu_compute': 5000.0}
+    assert status.tokens.model_dump() == {}
+
+    # Subsequent growth bills against the baseline: (8000 - 5000) * 0.001 = 3.0.
+    tm.merge_subprocess_usage({'values': {'cpu_compute': 8000.0}})
+    assert status.tokens.model_dump().get('cpu_compute') == pytest.approx(3.0)
 
 
 def test_update_tokens_subtracts_baselines(mock_account):

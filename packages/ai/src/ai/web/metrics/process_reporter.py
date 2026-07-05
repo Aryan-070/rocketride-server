@@ -30,7 +30,10 @@ Runs on a dedicated daemon thread within the task subprocess.  Every second it:
 3. Reads GPU VRAM via ``pynvml`` (0 in model-server mode or when no GPU)
 4. Emits ``>MET*`` with live point-in-time values for the dashboard
 5. Accumulates billing values (``cpu_compute``, ``cpu_memory``) into MetricsManager
-   via ``set_value()`` so they flow through ``>USG*`` at each object boundary
+   via ``set_value()`` and emits a cumulative ``>USG*`` billing snapshot on the
+   billing cadence (``CONST_BILLING_REPORT_INTERVAL``) — in addition to the
+   object-boundary ``>USG*`` from taskhook — so idle pipelines that hold GPU/RAM
+   without processing objects are still billed
 
 The parent (EAAS node) is a passive receiver — no psutil, no pynvml, no polling.
 
@@ -42,13 +45,14 @@ Usage (called from taskhook.py)::
     process_reporter.stop()  # final sample + stop thread
 """
 
+import json
 import os
 import sys
 import threading
 import time
 from typing import Optional
 
-from ai.constants import CONST_PROCESS_REPORT_INTERVAL
+from ai.constants import CONST_BILLING_REPORT_INTERVAL, CONST_PROCESS_REPORT_INTERVAL
 from .metrics import metrics
 
 # ============================================================================
@@ -240,6 +244,12 @@ class ProcessReporter:
         # CPU core count for normalization (0-100% range)
         self._cpu_count = os.cpu_count() or 1
 
+        # Periodic >USG* billing emit (see _sample). Emitted on the billing
+        # cadence, not just at object boundaries, so idle pipelines that reserve
+        # GPU/RAM without processing objects are still billed.
+        self._usg_interval = CONST_BILLING_REPORT_INTERVAL
+        self._last_usg_wall = 0.0
+
     def start(self):
         """
         Start the reporter thread.  Idempotent — no-op if already running.
@@ -255,6 +265,7 @@ class ProcessReporter:
         self._last_utime = utime
         self._last_stime = stime
         self._last_wall = time.monotonic()
+        self._last_usg_wall = self._last_wall
 
         # Reset billing accumulators
         self._cumulative_cpu_ms = 0.0
@@ -351,6 +362,24 @@ class ProcessReporter:
             # ── Update MetricsManager for billing (>USG*) ───────────
             metrics.set_value('cpu_compute', self._cumulative_cpu_ms)
             metrics.set_value('cpu_memory', self._cumulative_mem_gb_sec)
+
+            # ── Emit periodic >USG* (billing cadence) ────────────────
+            # >USG* is otherwise only emitted at object boundaries (taskhook).
+            # An idle pipeline (e.g. a chat holding models with no traffic)
+            # processes no objects, so without a periodic emit it would never be
+            # billed for the GPU/RAM it reserves. Push a cumulative snapshot on
+            # the billing cadence so idle reservation is charged and the parent's
+            # startup baseline lands at ~service-up, not at the first object.
+            if now - self._last_usg_wall >= self._usg_interval:
+                self._last_usg_wall = now
+                try:
+                    from rocketlib import monitorOther
+
+                    report = metrics.report()
+                    if report:
+                        monitorOther('USG', json.dumps(report, separators=(',', ':')))
+                except Exception:
+                    pass  # Subprocess may not have rocketlib ready yet
 
         except Exception:
             pass  # Never crash the subprocess

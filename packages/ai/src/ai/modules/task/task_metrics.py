@@ -117,9 +117,17 @@ class TaskMetrics:
         # gpu_memory, requests, pages).  Replaced wholesale on each >USG* message.
         self._subprocess_usage: dict[str, float] = {}
 
-        # Baselines snapshot at set_service_up(True) — subtracted from
-        # subprocess_usage values so startup costs are excluded from billing.
+        # Baselines ("startup delta") — subtracted from subprocess_usage so
+        # startup costs (model load, dependency install) are excluded from
+        # billing.  Captured at/after service-up (see set_service_up).
         self._baselines: dict[str, float] = {}
+
+        # ``>USG*`` is only emitted at object boundaries, which occur AFTER
+        # service-up — so at the service-up instant _subprocess_usage is
+        # usually still empty and the baseline snapshot would be empty (and
+        # startup would be billed).  When that happens this flag defers the
+        # baseline capture to the first ``>USG*`` received after service-up.
+        self._baseline_pending: bool = False
 
     def set_service_up(self, value: bool) -> None:
         """Signal that the pipeline is ready (or no longer ready) to accept data.
@@ -130,9 +138,14 @@ class TaskMetrics:
         Live resource metrics (peaks) are tracked regardless of this flag.
         """
         if value and self._billing_gated:
-            # Snapshot current usage as baselines — everything before this
-            # point is startup and should not be billed
+            # Baseline = cumulative usage at the moment the pipeline became
+            # ready; everything before this point is startup and is excluded
+            # from billing.  >USG* is only emitted at object boundaries (after
+            # service-up), so _subprocess_usage is usually still empty here —
+            # capture whatever we have and, if empty, defer the baseline to the
+            # first >USG* that arrives after service-up (merge_subprocess_usage).
             self._baselines = dict(self._subprocess_usage)
+            self._baseline_pending = not self._subprocess_usage
             debug('[TaskMetrics] Pipeline ready — billing accumulation started')
         self._billing_gated = not value
 
@@ -184,6 +197,15 @@ class TaskMetrics:
         """
         values = payload.get('values', {})
         self._subprocess_usage = {str(k): float(v) for k, v in values.items()}
+
+        # Complete a deferred baseline: if service-up fired before any >USG*
+        # arrived, this first post-service-up cumulative snapshot IS the
+        # startup delta, so it is excluded from billing (this first report
+        # nets to zero; subsequent reports bill value − baseline).
+        if self._baseline_pending and not self._billing_gated:
+            self._baselines = dict(self._subprocess_usage)
+            self._baseline_pending = False
+
         self._update_tokens()
 
         # Notify that metrics were updated
