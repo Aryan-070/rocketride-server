@@ -2371,6 +2371,12 @@ export class RocketRideClient extends DAPClient {
 		if (path.startsWith('/') || path.startsWith('\\')) {
 			throw new Error(`Path must be relative (got ${path})`);
 		}
+		// Reject Windows drive-letter absolute paths (e.g. C:\... or C:/...) — these
+		// don't start with a slash so they slip past the check above, and ':' is a
+		// legal path char on POSIX so it isn't in INVALID_PATH_CHARS.
+		if (/^[a-zA-Z]:/.test(path)) {
+			throw new Error(`Path must be relative (got ${path})`);
+		}
 		// Normalise Windows-style backslashes to forward slashes before splitting
 		for (const segment of path.replace(/\\/g, '/').split('/')) {
 			// Reject parent-directory traversal attempts in any position of the path

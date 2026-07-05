@@ -97,38 +97,86 @@ class DAPConn(DAPBase):
         """
         if message is None:
             message = {}
+
+        # Per-message bookkeeping (metrics/activity) — no-op in the base.
+        self._track_message(message)
+
         # Extract message type to determine handling approach
         message_type = message.get('type', '')
 
-        if message_type == 'request':
-            # Handle DAP requests (commands from client)
-            command = message.get('command', '')
-
-            # Build a default RequestContext from connection state.
-            # Subclasses (TaskConn, pod Conns) override on_receive to build
-            # ctx from _ctx in the forwarded arguments instead.
-            from ai.account.models import RequestContext
-
-            ctx = RequestContext(
-                account_info=getattr(self, '_account_info', None),
-                conn_id=str(getattr(self, '_connection_id', 0)),
-                source='local',
-            )
-
-            # Try to find and call appropriate handler method
-            handled, response = await self._call_method(message, f'on_{command}', 'on_command', ctx)
-
-            if not handled:
-                # No handler found - create default success response
-                self.debug_message(f'No handler for command: {command}')
-                response = self.build_response(message)
-
-            # Send response if handler provided one
-            if response is not None:
-                await self.send(response)
-        else:
+        if message_type != 'request':
             # Handle non-request messages (responses, events, etc.)
             self.debug_message(f'Unhandled message type: {message_type} - {message}')
+            return
+
+        # Handle DAP requests (commands from client)
+        command = message.get('command', '')
+
+        # Pre-dispatch gate (e.g. authentication). Base allows everything;
+        # subclasses may reject and return False after handling the rejection.
+        if not await self._pre_dispatch_gate(message):
+            return
+
+        # Build the per-request identity context (subclass-overridable).
+        ctx = self._build_ctx(message)
+
+        # Try to find and call appropriate handler method
+        handled, response = await self._call_method(message, f'on_{command}', 'on_command', ctx)
+
+        if not handled:
+            # No handler found - create default success response
+            self.debug_message(f'No handler for command: {command}')
+            response = self.build_response(message)
+
+        # Send response if handler provided one
+        if response is not None:
+            await self.send(response)
+
+    def _track_message(self, message: Dict[str, Any]) -> None:
+        """
+        Per-message bookkeeping hook, called for every received message before
+        dispatch. No-op in the base; TaskConn overrides it to update inbound
+        message counters and last-activity time.
+
+        Args:
+            message: The parsed DAP message dict.
+        """
+        return None
+
+    async def _pre_dispatch_gate(self, message: Dict[str, Any]) -> bool:
+        """
+        Gate hook run before a request is dispatched. The base allows every
+        request; subclasses (TaskConn) override this to enforce authentication.
+
+        Args:
+            message: The parsed DAP request message.
+
+        Returns:
+            True to proceed with dispatch, False if the subclass already handled
+            the message (e.g. sent an error and scheduled disconnect).
+        """
+        return True
+
+    def _build_ctx(self, message: Dict[str, Any]):
+        """
+        Build the ``RequestContext`` for a request from connection state.
+
+        Subclasses (TaskConn, pod Conns) override this to extract ``_ctx`` from
+        the forwarded request arguments instead of connection-level state.
+
+        Args:
+            message: The parsed DAP request message.
+
+        Returns:
+            RequestContext: the per-request identity context.
+        """
+        from ai.account.models import RequestContext
+
+        return RequestContext(
+            account_info=getattr(self, '_account_info', None),
+            conn_id=str(getattr(self, '_connection_id', 0)),
+            source='local',
+        )
 
     async def send(self, message: Dict[str, Any]) -> None:
         """

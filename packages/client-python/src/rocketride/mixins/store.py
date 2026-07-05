@@ -431,6 +431,11 @@ class StoreMixin(DAPClient):
             raise ValueError(f'{name} must be a non-empty string')
         if path.startswith('/') or path.startswith('\\'):
             raise ValueError(f'{name} must be a relative path (got {path!r})')
+        # Reject Windows drive-letter absolute paths (e.g. C:\... or C:/...); these
+        # don't start with a slash and ':' is a legal POSIX path char, so they'd
+        # otherwise slip past both checks.
+        if len(path) >= 2 and path[0].isalpha() and path[1] == ':':
+            raise ValueError(f'{name} must be a relative path (got {path!r})')
         StoreMixin._validate_store_path(path)
 
     @staticmethod

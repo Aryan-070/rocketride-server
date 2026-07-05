@@ -49,7 +49,6 @@ class TaskMetrics:
 
     def __init__(
         self,
-        pid: int,
         task_status: 'TASK_STATUS',
         task_id: Optional[str] = None,
         client_id: Optional[str] = None,
@@ -70,7 +69,6 @@ class TaskMetrics:
         task engine from ``>MET*`` — not by this class.
 
         Args:
-            pid: Subprocess process ID (retained for identification)
             task_status: Reference to TASK_STATUS to update in-place (tokens field)
             task_id: Task identifier for billing reports
             client_id: Account/client identifier for billing reports
@@ -79,7 +77,6 @@ class TaskMetrics:
             org_id: Organisation the task belongs to (for per-org billing)
             on_update_callback: Optional callback to invoke when tokens are updated
         """
-        self.pid = pid
         self.task_id = task_id
         # Unique per-run identifier for billing idempotency. task_id is a
         # display ID (e.g. "44568e99.dropper_1") that can repeat across runs

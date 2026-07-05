@@ -106,7 +106,6 @@ def _make_metrics(status=None, **overrides):
     """
     status = status or make_status()
     kwargs = dict(
-        pid=1234,
         task_status=status,
         task_id='task-abc',
         client_id='client-1',
@@ -130,7 +129,6 @@ def test_init_sets_billing_identifiers_and_defaults(mock_account):
     """Constructor stores identifiers and starts billing-gated with empty usage."""
     tm, status = _make_metrics()
 
-    assert tm.pid == 1234
     assert tm.task_id == 'task-abc'
     assert tm.client_id == 'client-1'
     assert tm.user_id == 'user-1'
@@ -160,7 +158,7 @@ def test_init_generates_unique_billing_run_id(mock_account):
 def test_init_optional_identifiers_default_to_empty(mock_account):
     """Missing user/team/org/pipeline/source default to empty strings, not None."""
     status = make_status()
-    tm = task_metrics.TaskMetrics(pid=1, task_status=status)
+    tm = task_metrics.TaskMetrics(task_status=status)
     assert tm.user_id == ''
     assert tm.team_id == ''
     assert tm.org_id == ''

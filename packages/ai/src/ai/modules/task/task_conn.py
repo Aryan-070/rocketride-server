@@ -245,31 +245,35 @@ class TaskConn(
         # Delegate to the parent transport send implementation
         await super().send(message)
 
-    async def on_receive(self, message: Optional[Dict[str, Any]] = None) -> None:
+    def _track_message(self, message: Dict[str, Any]) -> None:
         """
-        Intercept DAP dispatch: allow auth and rrext_public_* commands
-        before authentication; reject everything else until authenticated.
+        Update connection-level inbound metrics for every received message.
 
-        Builds a RequestContext from either the forwarded _ctx argument (pod mode)
-        or from connection-level _account_info (OSS mode), then dispatches to the
-        appropriate handler via _call_method.
+        Overrides the base no-op hook (called from DAPConn.on_receive before
+        dispatch) to count inbound messages and stamp last-activity time.
 
-        The rrext_public_* prefix convention lets public commands (catalog
-        browsing, server probe) bypass auth without maintaining a whitelist.
+        Args:
+            message: The parsed DAP message dict.
         """
-        if message is None:
-            message = {}
-
-        # Update connection-level message metrics
         self._messages_in += 1
         self._last_activity = time.time()
 
-        # Only handle request-type messages
-        message_type = message.get('type', '')
-        if message_type != 'request':
-            self.debug_message(f'Unhandled message type: {message_type} - {message}')
-            return
+    async def _pre_dispatch_gate(self, message: Dict[str, Any]) -> bool:
+        """
+        Enforce authentication before dispatching a request.
 
+        Only ``auth`` and ``rrext_public_*`` commands bypass authentication; the
+        rrext_public_* prefix convention lets public commands (catalog browsing,
+        server probe) through without maintaining a whitelist. Everything else is
+        rejected with an error and the connection is scheduled for disconnect.
+
+        Args:
+            message: The parsed DAP request message.
+
+        Returns:
+            True to proceed with dispatch, False if the request was rejected
+            (an error was sent and disconnect scheduled).
+        """
         cmd = message.get('command', '')
 
         # Pre-auth gate: only auth and rrext_public_* bypass authentication
@@ -278,10 +282,26 @@ class TaskConn(
             err = self.build_error(message, 'Not authenticated')
             await self.send(err)
             self._transport.disconnect()
-            return
+            return False
 
-        # Build RequestContext — extract _ctx from arguments if present (pod mode),
-        # otherwise build from connection-level state (OSS / direct mode).
+        return True
+
+    def _build_ctx(self, message: Dict[str, Any]) -> RequestContext:
+        """
+        Build the RequestContext from either the forwarded ``_ctx`` argument
+        (pod mode) or connection-level ``_account_info`` (OSS / direct mode).
+
+        In pod mode the ``_ctx`` key is popped from the request arguments so the
+        handler never sees it.
+
+        Args:
+            message: The parsed DAP request message.
+
+        Returns:
+            RequestContext: the per-request identity context.
+        """
+        # Extract _ctx from arguments if present (pod mode), otherwise build
+        # from connection-level state (OSS / direct mode).
         args = message.get('arguments') or {}
         raw_ctx = args.pop('_ctx', None)
 
@@ -291,30 +311,18 @@ class TaskConn(
             # not raise KeyError out of on_receive (which would silently drop the
             # message); treat a missing account_info as unauthenticated instead.
             raw_account = raw_ctx.get('account_info')
-            ctx = RequestContext(
+            return RequestContext(
                 account_info=AccountInfo(**raw_account) if raw_account else None,
                 conn_id=raw_ctx.get('conn_id', str(self._connection_id)),
                 source=raw_ctx.get('source', 'orchestrator'),
             )
-        else:
-            # OSS / direct mode: use connection-level account info
-            ctx = RequestContext(
-                account_info=self._account_info,
-                conn_id=str(self._connection_id),
-                source='local',
-            )
 
-        # Dispatch to the matching on_* handler via _call_method
-        handled, response = await self._call_method(message, f'on_{cmd}', 'on_command', ctx)
-
-        if not handled:
-            # No handler found — create default success response
-            self.debug_message(f'No handler for command: {cmd}')
-            response = self.build_response(message)
-
-        # Send response if handler provided one
-        if response is not None:
-            await self.send(response)
+        # OSS / direct mode: use connection-level account info
+        return RequestContext(
+            account_info=self._account_info,
+            conn_id=str(self._connection_id),
+            source='local',
+        )
 
     async def on_auth(self, request: DAPRequest, ctx: RequestContext) -> Optional[DAPResponse]:
         """

@@ -666,8 +666,6 @@ class MonitorCommands(DAPConn):
 
         # ── Resolve subscription target ──────────────────────────────────
 
-        self.debug_message(f'[set_monitor] token={token!r} project_id={project_id!r} source={source!r} type={type}')
-
         if token == '*':
             # Wildcard: monitor all tasks
             if project_id or source:
@@ -697,7 +695,6 @@ class MonitorCommands(DAPConn):
 
         elif project_id and source:
             # Project/source: resolve directly
-            self.debug_message(f'[set_monitor] project/source branch: {project_id}.{source}')
             event_key = f'p.{project_id}.{source}'
 
             control = self._resolve_task_by_project(project_id, source)
@@ -838,16 +835,7 @@ class MonitorCommands(DAPConn):
             return bitmask
 
         # Verify permission and extract the task token
-        self.debug_message(f'[on_rrext_monitor] args={request.get("arguments", {})}')
-        self.debug_message(
-            f'[on_rrext_monitor] ctx.account_info.auth={getattr(ctx.account_info, "auth", "?")} sysPerms={getattr(ctx.account_info, "sysPermissions", [])}'
-        )
-        self.debug_message(
-            f'[on_rrext_monitor] self._account_info.auth={getattr(self._account_info, "auth", "?")} sysPerms={getattr(self._account_info, "sysPermissions", [])}'
-        )
         token = self.get_task_token(request, ctx, 'task.monitor')
-
-        self.debug_message(f'[on_rrext_monitor] token={token}')
 
         # Parse monitoring configuration from request arguments
         args = request.get('arguments', {})

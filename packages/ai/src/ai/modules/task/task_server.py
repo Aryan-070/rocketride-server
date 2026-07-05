@@ -1266,9 +1266,7 @@ class TaskServer(DAPBase):
             self._task_control[control.token] = control
 
             # Start task execution
-            _t_start = time.time()
             await control.task.start_task()
-            self.debug_message(f'[TIMING] start_task call: {(time.time() - _t_start) * 1000:.1f}ms')
 
             # Log successful task creation
             self.debug_message(f'Task "{control.id}" started... (type: {control.launch_type.value})')
@@ -1280,9 +1278,7 @@ class TaskServer(DAPBase):
             # Retrieve the task instance for status monitoring
             if wait_for_running:
                 # Block until the task transitions to running state
-                _t_wait = time.time()
                 await control.task.wait_for_running()
-                self.debug_message(f'[TIMING] wait_for_running: {(time.time() - _t_wait) * 1000:.1f}ms')
 
             # Return formatted results
             return _return_results(control)
