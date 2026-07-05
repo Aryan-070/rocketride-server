@@ -67,6 +67,56 @@ if TYPE_CHECKING:
     from ..task_server import TaskServer, TASK_CONTROL
 
 
+# ============================================================================
+# DASHBOARD PAGINATION HELPERS
+# ============================================================================
+
+
+def _sort_key(value: Any):
+    """
+    Build a total-ordering sort key that tolerates mixed / missing values.
+
+    Returning ``(value is None, value)`` groups ``None`` values together
+    without ever comparing ``None`` against a real value (which would raise
+    ``TypeError``). Within a single dashboard field the real values are
+    homogeneous, so the second element only compares like-typed values.
+    """
+    return (value is None, value)
+
+
+def _paginate(items: List[Dict[str, Any]], params: Dict[str, Any]) -> tuple:
+    """
+    Apply ``sort_by``/``sort_order`` then ``offset``/``limit`` to a section.
+
+    Args:
+        items:  The already-filtered rows (tasks or connections).
+        params: A ``DashboardPageParams`` dict — any of ``offset``, ``limit``,
+                ``sort_by``, ``sort_order`` (all optional).
+
+    Returns:
+        ``(page, total)`` where ``total`` is the pre-slice row count and
+        ``page`` is the requested slice — or ``None`` when ``limit`` is 0,
+        signalling the caller to omit the section entirely. ``limit`` absent
+        means "return everything from ``offset``".
+    """
+    total = len(items)
+    params = params or {}
+
+    sort_by = params.get('sort_by')
+    if sort_by:
+        reverse = str(params.get('sort_order', 'desc')).lower() == 'desc'
+        items = sorted(items, key=lambda row: _sort_key(row.get(sort_by)), reverse=reverse)
+
+    offset = max(int(params.get('offset', 0) or 0), 0)
+    limit = params.get('limit')
+    if limit is None:
+        return items[offset:], total
+    limit = int(limit)
+    if limit <= 0:
+        return None, total  # limit=0 -> caller omits the section
+    return items[offset : offset + limit], total
+
+
 class MonitorCommands(DAPConn):
     """
     DAP-based event monitoring and subscription manager for task events.
@@ -843,14 +893,21 @@ class MonitorCommands(DAPConn):
         monitoring dashboards.
 
         Args:
-            request: DAP request (no arguments required).
+            request: DAP request. Optional ``arguments`` carry per-section
+                pagination: ``tasks`` / ``connections`` ->
+                ``{offset, limit, sort_by, sort_order, state_filter}``. A section
+                with ``limit=0`` is omitted from the response; an absent
+                ``limit`` returns all rows from ``offset``.
             ctx:     RequestContext with authenticated caller identity.
 
         Returns:
             DAP response containing:
-                - body.overview: Server-level aggregate metrics
-                - body.connections: List of active connection details
-                - body.tasks: List of task details with status and metrics
+                - body.overview: server-level aggregate metrics (over ALL
+                  accessible tasks, independent of the page).
+                - body.tasks / body.connections: the requested page (omitted
+                  when that section's ``limit`` is 0).
+                - body.tasks_total / body.connections_total: row counts matching
+                  the (state-)filtered set, for the pagination UI.
         """
         try:
             # Require monitor permission
@@ -859,6 +916,11 @@ class MonitorCommands(DAPConn):
             server = self._server
             current_time = time.time()
             caller_user_id = ctx.account_info.userId
+
+            # Per-section pagination parameters (all optional).
+            args = request.get('arguments') or {}
+            task_params = args.get('tasks') or {}
+            conn_params = args.get('connections') or {}
 
             # Snapshot tasks the caller has access to (own, teammate, org admin)
             task_controls = [
@@ -983,8 +1045,10 @@ class MonitorCommands(DAPConn):
                     self.debug_message(f'Error building task info for "{control.id}": {e}')
                     continue
 
-            # Build overview — derive from sanitized tasks list to avoid
-            # re-calling get_status() on potentially torn-down controls
+            # Build overview — derive from the sanitized tasks list to avoid
+            # re-calling get_status() on potentially torn-down controls. The
+            # overview is a global snapshot over ALL accessible tasks, so it is
+            # computed BEFORE the state_filter / pagination applied below.
             active_count = sum(1 for task in tasks if not task['completed'])
             completed_count = len(tasks) - active_count
             start_time = getattr(server._server, '_startTime', None) or current_time
@@ -997,16 +1061,30 @@ class MonitorCommands(DAPConn):
                 'eaasNodes': 0,
             }
 
-            return self.build_response(
-                request,
-                body={
-                    'overview': overview,
-                    'tasks': tasks,
-                    'tasks_total': len(tasks),
-                    'connections': connections,
-                    'connections_total': len(connections),
-                },
-            )
+            # Apply the tasks state_filter (running vs completed) before paging;
+            # tasks_total then reflects the count matching the filter.
+            state_filter = task_params.get('state_filter')
+            if state_filter == 'running':
+                tasks = [t for t in tasks if not t['completed']]
+            elif state_filter == 'completed':
+                tasks = [t for t in tasks if t['completed']]
+
+            # Sort + slice each section; *_total is the pre-slice filtered count.
+            tasks_page, tasks_total = _paginate(tasks, task_params)
+            connections_page, connections_total = _paginate(connections, conn_params)
+
+            body: Dict[str, Any] = {
+                'overview': overview,
+                'tasks_total': tasks_total,
+                'connections_total': connections_total,
+            }
+            # A section whose limit is 0 is omitted (page is None).
+            if tasks_page is not None:
+                body['tasks'] = tasks_page
+            if connections_page is not None:
+                body['connections'] = connections_page
+
+            return self.build_response(request, body=body)
 
         except Exception as e:
             self.debug_message(f'Failed to retrieve dashboard data: {str(e)}')

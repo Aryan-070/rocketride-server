@@ -459,3 +459,128 @@ def test_misc_commands_init_is_noop():
     """The mixin's __init__ accepts the standard arguments without setting state."""
     instance = MiscCommands.__new__(MiscCommands)
     MiscCommands.__init__(instance, connection_id=1, server=None, transport=None)
+
+
+# ---------------------------------------------------------------------------
+# on_rrext_dashboard — pagination / sort / state_filter
+# ---------------------------------------------------------------------------
+
+
+def _dash_caller():
+    """A caller with task.monitor on team-1 (owns every _dash_control below)."""
+    return SimpleNamespace(
+        userId='user-1',
+        auth='ak_caller',
+        userToken='ak_caller_secret',
+        organization={'id': 'org-1', 'permissions': [], 'teams': [{'id': 'team-1', 'permissions': ['task.monitor']}]},
+    )
+
+
+def _dash_control(idx, *, completed=False, start=900.0):
+    """Build a minimal team-1 task control with a distinct id / startTime."""
+    status = SimpleNamespace(
+        name=f'task.{idx}',
+        startTime=start,
+        endTime=(start + 10 if completed else 0),
+        completed=completed,
+        state=(5 if completed else 3),
+        totalCount=0,
+        completedCount=0,
+        rateCount=0,
+        rateSize=0,
+        metrics=None,
+        status='running',
+        exitCode=0,
+    )
+    task = SimpleNamespace(
+        get_status=lambda s=status: s,
+        get_connection_count=lambda: 0,
+        _idle_time=0,
+        _ttl=0,
+    )
+    return SimpleNamespace(
+        id=f'task-{idx}',
+        userId='user-1',
+        teamId='team-1',
+        token=f'tk_{idx}',
+        source=f'src-{idx}',
+        project_id=f'proj-{idx}',
+        provider='node-x',
+        task=task,
+        launch_type=SimpleNamespace(value='LAUNCH'),
+    )
+
+
+def _dash_server(controls):
+    """A server stub exposing the given task controls and no connections."""
+    server = MagicMock()
+    server._task_control = {c.token: c for c in controls}
+    server._connections = {}
+    server._server = SimpleNamespace(_startTime=900.0)
+    return server
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_dashboard_applies_offset_and_limit(monkeypatch):
+    """offset/limit slice the tasks; tasks_total is the pre-slice matched count."""
+    monkeypatch.setattr(cmd_monitor.time, 'time', lambda: 1000.0)
+    caller = _dash_caller()
+    controls = [_dash_control(i, start=900.0 + i) for i in range(5)]
+    conn = _make_monitor_conn(account_info=caller, server=_dash_server(controls))
+
+    req = {'arguments': {'tasks': {'offset': 1, 'limit': 2, 'sort_by': 'startTime', 'sort_order': 'asc'}}}
+    body = (await MonitorCommands.on_rrext_dashboard(conn, req, _ctx(caller)))['body']
+
+    assert body['tasks_total'] == 5  # all matched, counted before slicing
+    assert [t['id'] for t in body['tasks']] == ['task-1', 'task-2']
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_dashboard_sort_desc(monkeypatch):
+    """sort_order='desc' reverses the sort."""
+    monkeypatch.setattr(cmd_monitor.time, 'time', lambda: 1000.0)
+    caller = _dash_caller()
+    controls = [_dash_control(i, start=900.0 + i) for i in range(3)]
+    conn = _make_monitor_conn(account_info=caller, server=_dash_server(controls))
+
+    req = {'arguments': {'tasks': {'sort_by': 'startTime', 'sort_order': 'desc'}}}
+    body = (await MonitorCommands.on_rrext_dashboard(conn, req, _ctx(caller)))['body']
+    assert [t['id'] for t in body['tasks']] == ['task-2', 'task-1', 'task-0']
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_dashboard_state_filter_running_keeps_overview_global(monkeypatch):
+    """state_filter narrows the page + tasks_total, but overview stays global."""
+    monkeypatch.setattr(cmd_monitor.time, 'time', lambda: 1000.0)
+    caller = _dash_caller()
+    controls = [
+        _dash_control(0, completed=False),
+        _dash_control(1, completed=True),
+        _dash_control(2, completed=False),
+    ]
+    conn = _make_monitor_conn(account_info=caller, server=_dash_server(controls))
+
+    req = {'arguments': {'tasks': {'state_filter': 'running'}}}
+    body = (await MonitorCommands.on_rrext_dashboard(conn, req, _ctx(caller)))['body']
+
+    assert body['tasks_total'] == 2  # filtered count
+    assert all(not t['completed'] for t in body['tasks'])
+    # Overview is a global snapshot, independent of the state_filter/page.
+    assert body['overview']['totalTasks'] == 3
+    assert body['overview']['completedTasks'] == 1
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_dashboard_limit_zero_omits_section(monkeypatch):
+    """limit=0 omits the tasks section but still reports tasks_total."""
+    monkeypatch.setattr(cmd_monitor.time, 'time', lambda: 1000.0)
+    caller = _dash_caller()
+    controls = [_dash_control(i) for i in range(3)]
+    conn = _make_monitor_conn(account_info=caller, server=_dash_server(controls))
+
+    req = {'arguments': {'tasks': {'limit': 0}}}
+    body = (await MonitorCommands.on_rrext_dashboard(conn, req, _ctx(caller)))['body']
+
+    assert 'tasks' not in body  # section omitted
+    assert body['tasks_total'] == 3
+    assert 'connections' in body  # connections section unaffected

@@ -43,8 +43,11 @@ class DASHBOARD_OVERVIEW(TypedDict):
     """Server-level aggregate metrics (scoped to the caller's account)."""
 
     totalConnections: int  # Number of currently active WebSocket connections for this account
-    activeTasks: int  # Number of tasks currently in the registry for this account
+    activeTasks: int  # Number of tasks currently running for this account
+    completedTasks: int  # Number of accessible tasks that have completed
+    totalTasks: int  # Total accessible tasks (active + completed)
     serverUptime: float  # Seconds since server started
+    eaasNodes: int  # Number of EAAS worker nodes (SaaS; 0 in OSS)
 
 
 class DASHBOARD_MONITOR(TypedDict):
@@ -97,12 +100,37 @@ class DASHBOARD_TASK(TypedDict, total=False):
     rateSize: int  # Current processing rate (bytes/sec)
 
 
-class DASHBOARD_RESPONSE(TypedDict):
-    """Complete response from the rrext_dashboard command."""
+class DASHBOARD_PAGE_PARAMS(TypedDict, total=False):
+    """Per-section pagination / sort / filter for a dashboard request."""
+
+    offset: int  # Row offset into the filtered, sorted list (default 0)
+    limit: int  # Max rows to return; 0 omits the section; absent returns all
+    sort_by: str  # Field to sort by (e.g. 'startTime', 'name')
+    sort_order: Literal['asc', 'desc']  # Sort direction (default 'desc')
+    state_filter: Literal['running', 'completed']  # Tasks only: filter by state
+
+
+class DASHBOARD_REQUEST(TypedDict, total=False):
+    """Optional arguments for the rrext_dashboard command (per section)."""
+
+    tasks: DASHBOARD_PAGE_PARAMS
+    connections: DASHBOARD_PAGE_PARAMS
+
+
+class DASHBOARD_RESPONSE(TypedDict, total=False):
+    """
+    Complete response from the rrext_dashboard command.
+
+    ``tasks`` / ``connections`` are omitted when that section's ``limit`` is 0;
+    ``tasks_total`` / ``connections_total`` give the row counts matching the
+    (state-)filtered set, for the pagination UI.
+    """
 
     overview: DASHBOARD_OVERVIEW
-    connections: List[DASHBOARD_CONNECTION]
     tasks: List[DASHBOARD_TASK]
+    tasks_total: int
+    connections: List[DASHBOARD_CONNECTION]
+    connections_total: int
 
 
 # ============================================================================
