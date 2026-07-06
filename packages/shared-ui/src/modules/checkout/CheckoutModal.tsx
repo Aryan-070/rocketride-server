@@ -290,8 +290,18 @@ const S = {
 // PROMO HELPERS
 // =============================================================================
 
-/** First-invoice cents for a plan after applying a validated discount code. */
+/**
+ * First-invoice cents for a plan after applying a validated discount code.
+ *
+ * Prefers the server-computed `discountedAmountCents` (returned when the code
+ * was validated against this plan's price) so the displayed amount always
+ * matches the backend; local math is the fallback when the code was validated
+ * without a plan selected.
+ */
 function discountedCents(plan: CheckoutPlan, promo: PromoValidation): number {
+	if (typeof promo.discountedAmountCents === 'number') {
+		return Math.max(0, promo.discountedAmountCents);
+	}
 	const cents = plan.amountCents || 0;
 	if (promo.percentOff) return Math.max(0, Math.round(cents * (1 - promo.percentOff / 100)));
 	if (promo.amountOffCents) return Math.max(0, cents - promo.amountOffCents);
@@ -494,7 +504,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
 	/** Creates a Stripe subscription and advances to payment. */
 	const handleContinue = useCallback(async () => {
-		if (!selectedPlan || selectedPlan.metadata?.action) return;
+		// promoBusy guard: never start checkout while a just-entered code is
+		// still validating/redeeming — it would silently drop the promo.
+		if (!selectedPlan || selectedPlan.metadata?.action || promoBusy) return;
 
 		setLoadingSecret(true);
 		setError(null);
@@ -518,7 +530,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 		} finally {
 			setLoadingSecret(false);
 		}
-	}, [selectedPlan, appliedPromo, onCreateCheckout, onConfirmPending, onSuccess]);
+	}, [selectedPlan, appliedPromo, promoBusy, onCreateCheckout, onConfirmPending, onSuccess]);
 
 	/** Resets back to the plan picker. */
 	const handleBack = useCallback(() => {
@@ -556,7 +568,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 				});
 				return;
 			}
-			setAppliedPromo(validation);
+			// Preserve the entered code if validation omits the canonical one —
+			// handleContinue sends appliedPromo.code to the server.
+			setAppliedPromo({ ...validation, code: validation.code ?? code.toUpperCase() });
 		} catch (err: any) {
 			setPromoError(err?.message ?? 'Could not apply this code. Please try again.');
 		} finally {
@@ -570,6 +584,19 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 		setPromoInput('');
 		setPromoError(null);
 	}, []);
+
+	/**
+	 * Plan selection wrapper: an applied discount was validated against the
+	 * previously selected plan's price, so switching plans clears it — the
+	 * user re-applies the code and gets amounts for the new plan.
+	 */
+	const handleSelectPlan = useCallback((plan: CheckoutPlan | null) => {
+		setSelectedPlan(plan);
+		if (appliedPromo) {
+			setAppliedPromo(null);
+			setPromoError(null);
+		}
+	}, [appliedPromo]);
 
 	// When a plan is preselected (web pricing page), skip the picker entirely:
 	// create the subscription immediately so the user lands on the payment step.
@@ -664,7 +691,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 							plans={plans}
 							loading={plansLoading}
 							selectedPlan={selectedPlan}
-							onSelectPlan={setSelectedPlan}
+							onSelectPlan={handleSelectPlan}
 							onActionClick={onActionClick}
 							autoSelectDefault
 							footer={
@@ -711,8 +738,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 										</>
 									))}
 									<button
-										style={S.continueBtn(!selectedPlan || !!selectedPlan.metadata?.action)}
-										disabled={!selectedPlan || !!selectedPlan.metadata?.action}
+										style={S.continueBtn(!selectedPlan || !!selectedPlan.metadata?.action || promoBusy)}
+										disabled={!selectedPlan || !!selectedPlan.metadata?.action || promoBusy}
 										onClick={handleContinue}
 									>
 										Continue

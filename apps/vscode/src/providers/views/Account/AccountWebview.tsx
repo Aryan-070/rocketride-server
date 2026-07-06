@@ -198,7 +198,11 @@ const AccountWebview: React.FC = () => {
 				if (r) {
 					checkoutResolvers.current.session = undefined;
 					if ((message as any).error) r.reject(new Error((message as any).error));
-					else r.resolve({ clientSecret: (message as any).clientSecret, subscriptionId: (message as any).subscriptionId });
+					else r.resolve({
+						clientSecret: (message as any).clientSecret,
+						subscriptionId: (message as any).subscriptionId,
+						status: (message as any).status,
+					});
 				}
 				break;
 			}
@@ -215,8 +219,8 @@ const AccountWebview: React.FC = () => {
 				const r = checkoutResolvers.current.validatePromo;
 				if (r) {
 					checkoutResolvers.current.validatePromo = undefined;
-					if (message.error) r.reject(new Error(message.error));
-					else r.resolve(message.result as PromoValidation);
+					if (message.error || !message.result) r.reject(new Error(message.error ?? 'Promo validation failed'));
+					else r.resolve(message.result);
 				}
 				break;
 			}
@@ -224,8 +228,8 @@ const AccountWebview: React.FC = () => {
 				const r = checkoutResolvers.current.redeemPromo;
 				if (r) {
 					checkoutResolvers.current.redeemPromo = undefined;
-					if (message.error) r.reject(new Error(message.error));
-					else r.resolve(message.result as PromoRedemption);
+					if (message.error || !message.result) r.reject(new Error(message.error ?? 'Promo redemption failed'));
+					else r.resolve(message.result);
 				}
 				break;
 			}

@@ -155,12 +155,39 @@ export interface PromoRedemption {
 // =============================================================================
 
 /**
+ * Promo-code callbacks — both or neither.
+ *
+ * The modal's grant-code path needs `onRedeemPromoCode` whenever
+ * `onValidatePromoCode` resolves a hackathon code, so providing only one
+ * of the pair is a misconfiguration; this union makes it a compile-time
+ * error instead of a silent wrong-path fallback.
+ */
+export type CheckoutModalPromoProps =
+	| {
+		/**
+		 * Resolves a promo code without side effects. Providing the pair
+		 * renders a Promo Code box under the plan cards.
+		 */
+		onValidatePromoCode: (code: string, priceId?: string) => Promise<PromoValidation>;
+
+		/**
+		 * Redeems a credit-grant (hackathon) code — $0 subscription plus
+		 * immediate credits, no plan selection or payment step.
+		 */
+		onRedeemPromoCode: (code: string) => Promise<PromoRedemption>;
+	}
+	| {
+		onValidatePromoCode?: undefined;
+		onRedeemPromoCode?: undefined;
+	};
+
+/**
  * Props for the host-agnostic CheckoutModal component.
  *
  * All server communication is delegated to the host via callbacks —
  * the component never imports the SDK or any transport layer directly.
  */
-export interface CheckoutModalProps {
+export interface CheckoutModalBaseProps {
 	/** Display name of the app being subscribed to (e.g. "RocketRide"). */
 	appName: string;
 
@@ -198,19 +225,6 @@ export interface CheckoutModalProps {
 	 */
 	onConfirmPending: (subscriptionId: string, priceId: string) => Promise<void>;
 
-	/**
-	 * Resolves a promo code without side effects. When provided (together
-	 * with `onRedeemPromoCode`), the modal renders a Promo Code box under
-	 * the plan cards.
-	 */
-	onValidatePromoCode?: (code: string, priceId?: string) => Promise<PromoValidation>;
-
-	/**
-	 * Redeems a credit-grant (hackathon) code — $0 subscription plus
-	 * immediate credits, no plan selection or payment step.
-	 */
-	onRedeemPromoCode?: (code: string) => Promise<PromoRedemption>;
-
 	/** Called after a successful payment — host should close the modal. */
 	onSuccess: () => void;
 
@@ -225,3 +239,6 @@ export interface CheckoutModalProps {
 	 */
 	onActionClick?: (plan: CheckoutPlan, action: PlanAction) => void;
 }
+
+/** Full CheckoutModal props: base props plus the paired promo callbacks. */
+export type CheckoutModalProps = CheckoutModalBaseProps & CheckoutModalPromoProps;
