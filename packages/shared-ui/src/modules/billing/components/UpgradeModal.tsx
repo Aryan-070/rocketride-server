@@ -181,9 +181,9 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 	const [success, setSuccess] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
-	// Filter out top-up packs and action-only plans, keep subscription plans
+	// Filter out top-up packs, hidden promo-base plans, and action-only plans
 	const subscriptionPlans = useMemo(
-		() => plans.filter((p) => p.metadata?.kind !== 'topup' && !p.metadata?.action && p.isActive !== false),
+		() => plans.filter((p) => p.metadata?.kind !== 'topup' && p.metadata?.kind !== 'promo_base' && !p.metadata?.action && p.isActive !== false),
 		[plans],
 	);
 
