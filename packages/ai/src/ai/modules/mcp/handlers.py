@@ -1,0 +1,81 @@
+# Copyright 2026 Aparavi Software AG. MIT License.
+"""Assemble the low-level MCP Server: registry-based tool dispatch + resources.
+
+Tools are no longer a dynamic per-pipeline surface. A single `ToolRegistry` is
+built once per server and populated by `tools.register_all`; `list_tools`
+returns its contents and `call_tool` dispatches to its handlers. There is no
+prompt surface -- "knowledge lives in Skills," not MCP prompts.
+"""
+
+import json
+import logging
+from typing import Callable, List
+
+import mcp.types as types
+from mcp.server.lowlevel import Server
+
+from .engine import EngineClient
+from .errors import HardError, normalize_error
+from .registry import TaskRegistry
+from .tooling import ToolRegistry
+from . import resources as resources_mod
+from . import tools as tools_pkg
+
+logger = logging.getLogger(__name__)
+
+
+def build_mcp_server(engine_factory: Callable[[], EngineClient]) -> Server:
+    """Build and return a low-level MCP Server wired with tools and resources.
+
+    Args:
+        engine_factory: Zero-arg callable returning an EngineClient. In production
+            this wraps a lazy SINGLETON (see `__init__.initModule`): the first call
+            constructs one long-lived `WsEngineClient` and every later call returns
+            the same instance, so all handlers here share one client for the life
+            of the process. Concurrent `/mcp` requests therefore multiplex a single
+            underlying `RocketRideClient` WS connection — the client's connect lock
+            only guards the one-time `connect()` race, it does not serialize or
+            correlate concurrent in-flight requests on that connection.
+
+    Returns:
+        A configured mcp.server.lowlevel.Server ready to run.
+    """
+    server: Server = Server('rocketride-mcp')
+
+    registry = ToolRegistry()
+    tools_pkg.register_all(registry)
+    task_registry = TaskRegistry()
+
+    @server.list_tools()
+    async def _list_tools() -> List[types.Tool]:
+        return registry.tools()
+
+    @server.call_tool()
+    async def _call_tool(name: str, arguments: dict) -> List[types.TextContent]:
+        handler = registry.handler(name)
+        if handler is None:
+            result = {
+                'ok': False,
+                'error_type': 'UnknownTool',
+                'message': f'Unknown tool: {name}',
+                'hint': f'Call list_tools to see the {len(registry.names())} available tool(s).',
+            }
+        else:
+            try:
+                result = await handler(engine_factory(), task_registry, arguments)
+            except HardError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - normalized below
+                logger.exception('Unhandled exception in MCP tool %r', name)
+                result = normalize_error(exc)
+        return [types.TextContent(type='text', text=json.dumps(result, default=str))]
+
+    @server.list_resources()
+    async def _list_resources() -> List[types.Resource]:
+        return resources_mod.list_resources()
+
+    @server.read_resource()
+    async def _read_resource(uri: types.AnyUrl) -> str:
+        return await resources_mod.read_resource(engine_factory(), str(uri))
+
+    return server
