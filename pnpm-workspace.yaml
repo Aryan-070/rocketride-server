@@ -41,6 +41,7 @@ packages:
   - 'apps/monitor-ui'
   - 'apps/profiler-ui'
   - 'apps/shell-ui'
+  - 'apps/test-ui'
   - 'apps/vscode'
   - 'apps/world-ui'
 
