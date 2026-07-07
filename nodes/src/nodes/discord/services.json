@@ -29,7 +29,7 @@
 		"discord.botToken": {
 			"type": "string",
 			"title": "Bot Token",
-			"description": "Discord bot token from the Developer Portal (keep this secret — do not share)",
+			"description": "Discord bot token from the Developer Portal (keep this secret - do not share)",
 			"optional": false,
 			"secure": true,
 			"ui": {

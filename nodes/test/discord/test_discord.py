@@ -255,7 +255,7 @@ class TestDiscordServicesJsonSchema:
         """Test that services.json is valid JSON."""
         services_path = self._get_services_json_path()
 
-        with open(services_path, 'r') as f:
+        with open(services_path, 'r', encoding='utf-8') as f:
             schema = json.load(f)
 
         # Verify required top-level keys
@@ -269,7 +269,7 @@ class TestDiscordServicesJsonSchema:
         """Test that services.json defines all Discord-specific fields."""
         services_path = self._get_services_json_path()
 
-        with open(services_path, 'r') as f:
+        with open(services_path, 'r', encoding='utf-8') as f:
             schema = json.load(f)
 
         required_fields = [
@@ -291,7 +291,7 @@ class TestDiscordServicesJsonSchema:
         """Test that services.json defines correct lanes."""
         services_path = self._get_services_json_path()
 
-        with open(services_path, 'r') as f:
+        with open(services_path, 'r', encoding='utf-8') as f:
             schema = json.load(f)
 
         lanes = schema['lanes']['_source']
