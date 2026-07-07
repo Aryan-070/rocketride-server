@@ -180,6 +180,9 @@ def test_guard_trips_when_no_tool_invoked():
     assert payload['stack'][0]['name'] == 'tool_call_required'
     # The narrated (ungrounded) content must not be delivered.
     assert 'it is sunny' not in payload['content'].lower()
+    # ...but the rejected framework output is retained on the stack for diagnosis.
+    raw_entries = [s for s in payload['stack'] if s['kind'] == 'RocketRide.agent.raw.v1']
+    assert raw_entries and raw_entries[0]['payload'] == {'raw': 'narrated'}
 
 
 def test_guard_passes_when_a_tool_is_invoked():

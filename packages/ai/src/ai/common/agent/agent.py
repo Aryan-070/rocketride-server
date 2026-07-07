@@ -159,9 +159,10 @@ class AgentBase(ABC):
                 return safe_str(value)
 
         task_id = None
-        # Bound before the try so the generic error handler can read the tool
-        # tally even if a failure occurs before the context is built.
+        # Bound before the try so the guard/error handlers can read them even if
+        # a failure occurs before the context is built or `_run` returns.
         context = None
+        raw = None
         try:
             # Add any global instructions from the config
             for inst in self._instructions:
@@ -258,7 +259,10 @@ class AgentBase(ABC):
                         'kind': 'RocketRide.agent.guard.v1',
                         'name': 'tool_call_required',
                         'payload': {'guard': 'require_tool_call', 'message': guard_message},
-                    }
+                    },
+                    # Keep the rejected framework output for diagnosis — an operator
+                    # investigating a tripped guard wants to see what was narrated.
+                    {'kind': 'RocketRide.agent.raw.v1', 'name': 'framework.output', 'payload': _json_safe(raw)},
                 ],
             }
 

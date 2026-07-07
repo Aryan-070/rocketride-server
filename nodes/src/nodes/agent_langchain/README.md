@@ -99,7 +99,7 @@ Smaller or weaker planning models occasionally **narrate** a multi-step tool cha
 prose instead of actually calling the tools, producing a plausible-looking but ungrounded
 answer. The optional **Require tool call** (`require_tool_call`) config field guards against
 this: when enabled, any run that produces an answer without invoking at least one tool fails
-with a `RocketRide.agent.guard` error instead of delivering the ungrounded text. It is off by
+with a `RocketRide.agent.guard.v1` error instead of delivering the ungrounded text. It is off by
 default; enable it for determinism-critical pipelines. The guard counts real tool invocations
 only — internal/local reads (for example the wave agent’s `memory.peek`) do not satisfy it.
 
