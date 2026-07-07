@@ -33,12 +33,31 @@ from chromadb.config import Settings
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
 from ai.common.config import Config
-from rocketlib import debug
 import uuid
 import numpy as np
 import json
 import sys
 import re
+
+
+# Minimum Chroma *server* major version this client supports. Older servers speak an
+# incompatible API and fail cryptically (e.g. KeyError('_type')) instead of indexing.
+_MIN_CHROMA_MAJOR = 1
+
+
+def _check_server_version(version: str) -> None:
+    """
+    Raise a clear error if the connected Chroma server is too old.
+
+    Lenient by design: if the version string can't be parsed we do not block the
+    connection (the connect-time wrapper still surfaces any hard incompatibility).
+    """
+    match = re.match(r'\s*v?(\d+)', version or '')
+    if match and int(match.group(1)) < _MIN_CHROMA_MAJOR:
+        raise Exception(
+            f'Chroma server version {version} is too old; RocketRide requires '
+            f'Chroma >= {_MIN_CHROMA_MAJOR}.0. Please upgrade your Chroma server.'
+        )
 
 
 class Store(DocumentStoreBase):
@@ -89,17 +108,33 @@ class Store(DocumentStoreBase):
         else:
             raise Exception('The metric you provided in the config.json does not match required chroma configurations')
 
-        if profile == 'local':
-            self.client = chromadb.HttpClient(host=self.host, port=self.port)
-        else:
-            self.client = chromadb.HttpClient(
-                host=self.host,
-                port=self.port,
-                settings=Settings(
-                    chroma_client_auth_provider='chromadb.auth.token_authn.TokenAuthClientProvider',
-                    chroma_client_auth_credentials=self.apikey,
-                ),
-            )
+        # Construct the client and probe the server version in one place. The Chroma
+        # client connects eagerly (identity/tenant validation on construction), so an
+        # incompatible/old server surfaces here as a cryptic error (e.g. KeyError('_type')).
+        # Wrap it so the user gets an actionable message instead of a silent failure.
+        try:
+            if profile == 'local':
+                self.client = chromadb.HttpClient(host=self.host, port=self.port)
+            else:
+                self.client = chromadb.HttpClient(
+                    host=self.host,
+                    port=self.port,
+                    settings=Settings(
+                        chroma_client_auth_provider='chromadb.auth.token_authn.TokenAuthClientProvider',
+                        chroma_client_auth_credentials=self.apikey,
+                    ),
+                )
+            server_version = self.client.get_version()
+        except Exception as e:
+            self.client = None
+            raise Exception(
+                f'Failed to connect to Chroma at {self.host}:{self.port}. This often means '
+                f'the Chroma server is too old or incompatible with the client (RocketRide '
+                f'requires Chroma server >= {_MIN_CHROMA_MAJOR}.0). Original error: {e}'
+            ) from e
+
+        # Server reachable: enforce the supported version floor with a precise message.
+        _check_server_version(server_version)
         return
 
     def __del__(self):
@@ -157,8 +192,11 @@ class Store(DocumentStoreBase):
         """
         if self.client is None:
             return False
+        # Normalize across client versions: list_collections() returns collection *names*
+        # (strings) on some versions and Collection *objects* (with a .name) on others.
         collections = self.client.list_collections()
-        if self.collection in collections:
+        names = [c if isinstance(c, str) else getattr(c, 'name', c) for c in collections]
+        if self.collection in names:
             if self.collectionObj is None:
                 self.collectionObj = self.client.get_collection(name=self.collection)
             return True
@@ -183,8 +221,11 @@ class Store(DocumentStoreBase):
             return True
 
         except Exception as e:
-            debug(f'Error creating collection: {e}')
-            return False
+            # Surface the real cause instead of swallowing it into a transient trace.
+            # The only caller (base createCollection) ignores the return value, so a
+            # bare `return False` here left collectionObj as None and produced a cryptic
+            # "'NoneType' object has no attribute 'delete'" crash downstream in flush().
+            raise Exception(f'Error creating Chroma collection: {e}') from e
 
     def _convertFilter(self, docFilter: DocFilter) -> Dict[str, Any]:
         filters = []
@@ -415,6 +456,14 @@ class Store(DocumentStoreBase):
 
         def flush():
             nonlocal ids, embeddings, metadatas, documents
+            # Defense in depth: never index against a missing collection. Surface a clear,
+            # actionable error instead of a cryptic "'NoneType' object has no attribute
+            # 'delete'" if the collection was not created (e.g. a failed/incompatible server).
+            if self.collectionObj is None:
+                raise Exception(
+                    'Chroma collection is not available (creation may have failed); cannot '
+                    'index documents. Check the Chroma server connection and version.'
+                )
             if object_ids_to_delete:
                 if len(object_ids_to_delete) > 1:
                     filter_condition = {'$or': [{'objectId': object_id} for object_id in object_ids_to_delete]}
