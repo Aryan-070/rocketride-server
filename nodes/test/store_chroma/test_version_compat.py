@@ -83,9 +83,9 @@ def _load_module() -> ModuleType:
 # --- _check_server_version ---------------------------------------------------
 
 
-@pytest.mark.parametrize('version', ['0.5.18', '0.6.0', '0.4.24'])
+@pytest.mark.parametrize('version', ['0.5.18', '0.5.99', '0.4.24'])
 def test_check_server_version_rejects_old_servers(version: str) -> None:
-    """Servers older than the supported major floor must raise a clear, actionable error."""
+    """Servers below the supported floor (< 0.6) must raise a clear, actionable error."""
     module = _load_module()
     with pytest.raises(Exception) as exc:
         module._check_server_version(version)
@@ -93,18 +93,49 @@ def test_check_server_version_rejects_old_servers(version: str) -> None:
     assert version in str(exc.value)
 
 
-@pytest.mark.parametrize('version', ['1.0.0', '1.5.9', 'v2.0.1', '3.2.2'])
+@pytest.mark.parametrize('version', ['0.6.0', '0.6.3', '1.0.0', '1.5.9', 'v2.0.1', '3.2.2'])
 def test_check_server_version_accepts_supported_servers(version: str) -> None:
-    """Servers at or above the supported major floor must pass without raising."""
+    """Servers at or above the floor pass — including 0.6.x (the project's own test infra)."""
     module = _load_module()
     module._check_server_version(version)  # must not raise
 
 
-@pytest.mark.parametrize('version', ['', 'garbage', None])
+@pytest.mark.parametrize('version', ['', 'garbage', '1', None])
 def test_check_server_version_is_lenient_on_unparseable(version: object) -> None:
-    """Unparseable version strings must not block the connection (connect wrapper covers it)."""
+    """Unparseable/partial version strings must not block the connection (wrapper covers it)."""
     module = _load_module()
     module._check_server_version(version)  # must not raise
+
+
+# --- _getServerVersion is defensive (thin clients may lack get_version) -------
+
+
+def test_get_server_version_returns_none_when_method_absent() -> None:
+    """A client without get_version must yield None, not raise (the bug that broke CI)."""
+    module = _load_module()
+    store = module.Store.__new__(module.Store)
+    store.client = SimpleNamespace()  # no get_version attribute
+    assert store._getServerVersion() is None
+
+
+def test_get_server_version_returns_value_when_available() -> None:
+    """When get_version exists, its return value is used."""
+    module = _load_module()
+    store = module.Store.__new__(module.Store)
+    store.client = SimpleNamespace(get_version=lambda: '0.6.3')
+    assert store._getServerVersion() == '0.6.3'
+
+
+def test_get_server_version_returns_none_when_probe_raises() -> None:
+    """A failing get_version must be swallowed to None, not surface as a connection error."""
+    module = _load_module()
+    store = module.Store.__new__(module.Store)
+
+    def _boom() -> str:
+        raise RuntimeError("KeyError('_type')")
+
+    store.client = SimpleNamespace(get_version=_boom)
+    assert store._getServerVersion() is None
 
 
 # --- _doesCollectionExist normalization --------------------------------------

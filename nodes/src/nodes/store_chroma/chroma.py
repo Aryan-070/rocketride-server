@@ -33,6 +33,7 @@ from chromadb.config import Settings
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
 from ai.common.config import Config
+from rocketlib import debug
 import uuid
 import numpy as np
 import json
@@ -40,23 +41,27 @@ import sys
 import re
 
 
-# Minimum Chroma *server* major version this client supports. Older servers speak an
-# incompatible API and fail cryptically (e.g. KeyError('_type')) instead of indexing.
-_MIN_CHROMA_MAJOR = 1
+# Minimum Chroma *server* version this client supports, as (major, minor). The v2
+# tenant/database API the modern client requires landed in Chroma 0.6.0; older servers
+# (e.g. 0.5.18) fail cryptically (KeyError('_type')) instead of indexing. The project's
+# own test infra runs chromadb/chroma:0.6.3, which works.
+_MIN_CHROMA_VERSION = (0, 6)
 
 
 def _check_server_version(version: str) -> None:
     """
     Raise a clear error if the connected Chroma server is too old.
 
-    Lenient by design: if the version string can't be parsed we do not block the
-    connection (the connect-time wrapper still surfaces any hard incompatibility).
+    Lenient by design: if the version string can't be parsed (or has no minor component)
+    we do not block the connection (the connect-time wrapper still surfaces any hard
+    incompatibility).
     """
-    match = re.match(r'\s*v?(\d+)', version or '')
-    if match and int(match.group(1)) < _MIN_CHROMA_MAJOR:
+    match = re.match(r'\s*v?(\d+)\.(\d+)', version or '')
+    if match and (int(match.group(1)), int(match.group(2))) < _MIN_CHROMA_VERSION:
+        floor = f'{_MIN_CHROMA_VERSION[0]}.{_MIN_CHROMA_VERSION[1]}'
         raise Exception(
             f'Chroma server version {version} is too old; RocketRide requires '
-            f'Chroma >= {_MIN_CHROMA_MAJOR}.0. Please upgrade your Chroma server.'
+            f'Chroma >= {floor}. Please upgrade your Chroma server.'
         )
 
 
@@ -108,10 +113,10 @@ class Store(DocumentStoreBase):
         else:
             raise Exception('The metric you provided in the config.json does not match required chroma configurations')
 
-        # Construct the client and probe the server version in one place. The Chroma
-        # client connects eagerly (identity/tenant validation on construction), so an
-        # incompatible/old server surfaces here as a cryptic error (e.g. KeyError('_type')).
-        # Wrap it so the user gets an actionable message instead of a silent failure.
+        # The Chroma client connects eagerly (identity/tenant validation on construction),
+        # so an incompatible/old server surfaces here as a cryptic error (e.g.
+        # KeyError('_type')). Wrap it so the user gets an actionable message instead of a
+        # silent failure.
         try:
             if profile == 'local':
                 self.client = chromadb.HttpClient(host=self.host, port=self.port)
@@ -124,17 +129,21 @@ class Store(DocumentStoreBase):
                         chroma_client_auth_credentials=self.apikey,
                     ),
                 )
-            server_version = self.client.get_version()
         except Exception as e:
             self.client = None
+            floor = f'{_MIN_CHROMA_VERSION[0]}.{_MIN_CHROMA_VERSION[1]}'
             raise Exception(
                 f'Failed to connect to Chroma at {self.host}:{self.port}. This often means '
                 f'the Chroma server is too old or incompatible with the client (RocketRide '
-                f'requires Chroma server >= {_MIN_CHROMA_MAJOR}.0). Original error: {e}'
+                f'requires Chroma server >= {floor}). Original error: {e}'
             ) from e
 
-        # Server reachable: enforce the supported version floor with a precise message.
-        _check_server_version(server_version)
+        # Best-effort server-version floor check. get_version() is not present on every
+        # chromadb client build, so treat its absence/failure as "unknown" rather than a
+        # connection error — the wrapper above and the index-path guards cover hard incompat.
+        server_version = self._getServerVersion()
+        if server_version:
+            _check_server_version(server_version)
         return
 
     def __del__(self):
@@ -185,6 +194,22 @@ class Store(DocumentStoreBase):
             debug(f'chroma: port {parsed} is out of range 1-65535; using default {default}')
             return default
         return parsed
+
+    def _getServerVersion(self) -> str | None:
+        """
+        Return the Chroma server version string, or None if it can't be determined.
+
+        Defensive: get_version() is not present on every chromadb client build (the thin
+        `chromadb-client` has shipped client shapes without it), so its absence or failure
+        must not be mistaken for a connection error.
+        """
+        getter = getattr(self.client, 'get_version', None)
+        if not callable(getter):
+            return None
+        try:
+            return getter()
+        except Exception:
+            return None
 
     def _doesCollectionExist(self) -> bool:
         """
