@@ -36,7 +36,60 @@ def _load_text_utils():
 text_utils = _load_text_utils()
 chunk_message = text_utils.chunk_message
 guess_media_type = text_utils.guess_media_type
+should_process_message = text_utils.should_process_message
 DISCORD_MESSAGE_CHAR_LIMIT = text_utils.DISCORD_MESSAGE_CHAR_LIMIT
+
+
+def _gate(**overrides):
+    """Build should_process_message kwargs with permissive defaults."""
+    kwargs = dict(
+        author_id=1,
+        bot_user_id=999,
+        author_is_bot=False,
+        ignore_bots=True,
+        guild_id=10,
+        channel_id=20,
+        allowed_guild_ids=[],
+        allowed_channel_ids=[],
+        require_mention=False,
+        is_mentioned=False,
+    )
+    kwargs.update(overrides)
+    return should_process_message(**kwargs)
+
+
+class TestShouldProcessMessage:
+    """Test the real gating predicate."""
+
+    def test_default_message_passes(self):
+        assert _gate() is True
+
+    def test_own_message_skipped(self):
+        assert _gate(author_id=999, bot_user_id=999) is False
+
+    def test_bot_message_skipped_when_ignore_bots(self):
+        assert _gate(author_is_bot=True, ignore_bots=True) is False
+
+    def test_bot_message_allowed_when_not_ignoring(self):
+        assert _gate(author_is_bot=True, ignore_bots=False) is True
+
+    def test_guild_allowlist_blocks_other_guilds(self):
+        assert _gate(guild_id=10, allowed_guild_ids=['77']) is False
+        assert _gate(guild_id=77, allowed_guild_ids=['77']) is True
+
+    def test_guild_allowlist_blocks_dms(self):
+        assert _gate(guild_id=None, allowed_guild_ids=['77']) is False
+
+    def test_channel_allowlist(self):
+        assert _gate(channel_id=20, allowed_channel_ids=['21']) is False
+        assert _gate(channel_id=21, allowed_channel_ids=['21']) is True
+
+    def test_require_mention_gate(self):
+        assert _gate(require_mention=True, is_mentioned=False) is False
+        assert _gate(require_mention=True, is_mentioned=True) is True
+
+    def test_empty_allowlists_allow_all(self):
+        assert _gate(allowed_guild_ids=[], allowed_channel_ids=[]) is True
 
 
 class TestChunkMessage:

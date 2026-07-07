@@ -48,7 +48,7 @@ depends(requirements)
 import discord
 from discord.ext import commands
 
-from .text_utils import chunk_message, guess_media_type
+from .text_utils import chunk_message, guess_media_type, should_process_message
 
 
 class IEndpoint(IEndpointBase):
@@ -262,16 +262,19 @@ class IEndpoint(IEndpointBase):
             None
         """
         try:
-            # Never process our own messages (prevents reply loops).
-            if self._bot.user is not None and message.author.id == self._bot.user.id:
-                return
-            if self._ignore_bots and message.author.bot:
-                return
-            if self._guild_ids and (message.guild is None or str(message.guild.id) not in self._guild_ids):
-                return
-            if self._channel_ids and str(message.channel.id) not in self._channel_ids:
-                return
-            if self._require_mention and self._bot.user is not None and not self._bot.user.mentioned_in(message):
+            bot_user = self._bot.user
+            if not should_process_message(
+                author_id=message.author.id,
+                bot_user_id=bot_user.id if bot_user is not None else None,
+                author_is_bot=message.author.bot,
+                ignore_bots=self._ignore_bots,
+                guild_id=message.guild.id if message.guild is not None else None,
+                channel_id=message.channel.id,
+                allowed_guild_ids=self._guild_ids,
+                allowed_channel_ids=self._channel_ids,
+                require_mention=self._require_mention,
+                is_mentioned=bool(bot_user is not None and bot_user.mentioned_in(message)),
+            ):
                 return
 
             task = asyncio.create_task(self._process_message(message))
@@ -283,10 +286,12 @@ class IEndpoint(IEndpointBase):
     async def _process_message(self, message: discord.Message):
         """Route a message to the pipeline and send back the first answer.
 
-        Text content is routed to the text lane; each attachment is downloaded
-        (subject to the size cap) and routed to the image/audio/video/tags lane
-        by MIME type. The first non-empty pipeline answer is sent back to
-        Discord per the configured reply mode.
+        Text content and attachments are ingested independently: the text is
+        routed to the text lane, and each attachment is downloaded (subject to
+        the size cap) and routed to the image/audio/video/tags lane by MIME
+        type. Attachments are processed in order and iteration stops once one
+        produces a non-empty answer. The first non-empty answer overall — text
+        first, then attachments — is sent back per the configured reply mode.
 
         Args:
             message (discord.Message): The message to process.
@@ -298,17 +303,21 @@ class IEndpoint(IEndpointBase):
             reply = ''
 
             if message.content:
-                reply = await self._run_with_optional_typing(
+                text_reply = await self._run_with_optional_typing(
                     message,
                     lambda: asyncio.to_thread(self._run_text_pipeline, message.content, message.channel.id, message.id),
                 )
+                if text_reply:
+                    reply = text_reply
 
-            if not reply and message.attachments:
-                for attachment in message.attachments:
-                    att_reply = await self._process_attachment(message, attachment)
-                    if att_reply:
+            # Attachments are ingested even when the text produced a reply (e.g.
+            # captioned uploads). Stop at the first attachment that answers.
+            for attachment in message.attachments:
+                att_reply = await self._process_attachment(message, attachment)
+                if att_reply:
+                    if not reply:
                         reply = att_reply
-                        break
+                    break
 
             if reply and self._send_responses:
                 await self._send_response(message, reply)
@@ -461,7 +470,9 @@ class IEndpoint(IEndpointBase):
 
         Long answers are chunked at Discord's 2000-character limit. discord.py
         transparently handles most 429s; if it surfaces a ``RateLimited`` the
-        send is retried once after the reported ``retry_after`` delay.
+        send is retried once after the reported ``retry_after`` delay. If a send
+        is still unrecoverable, the remaining chunks are abandoned (rather than
+        silently sending a reply with a hole in the middle).
 
         Args:
             message (discord.Message): The originating message.
@@ -482,9 +493,11 @@ class IEndpoint(IEndpointBase):
                 try:
                     thread = await self._send_chunk(message, chunk, thread)
                 except Exception as e2:
-                    debug(f'Discord: send retry failed: {e2}')
+                    debug(f'Discord: send retry failed, abandoning remaining chunks: {e2}')
+                    return
             except Exception as e:
-                debug(f'Discord _send_response: EXCEPTION {e}')
+                debug(f'Discord: send failed, abandoning remaining chunks: {e}')
+                return
 
     async def _send_chunk(self, message: discord.Message, chunk: str, thread):
         """Send a single chunk using the configured reply mode.

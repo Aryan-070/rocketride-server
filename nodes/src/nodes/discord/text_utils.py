@@ -28,7 +28,7 @@ directly without a Gateway connection or the discord.py package installed.
 """
 
 import re
-from typing import List
+from typing import List, Optional
 
 DISCORD_MESSAGE_CHAR_LIMIT: int = 2000  # Discord's per-message cap
 
@@ -112,6 +112,54 @@ def chunk_message(text: str, max_length: int = DISCORD_MESSAGE_CHAR_LIMIT) -> Li
         chunks.append(current.rstrip())
 
     return [c for c in chunks if c.strip()]
+
+
+def should_process_message(
+    *,
+    author_id: int,
+    bot_user_id: Optional[int],
+    author_is_bot: bool,
+    ignore_bots: bool,
+    guild_id: Optional[int],
+    channel_id: int,
+    allowed_guild_ids: List[str],
+    allowed_channel_ids: List[str],
+    require_mention: bool,
+    is_mentioned: bool,
+) -> bool:
+    """Decide whether an incoming message should be routed to the pipeline.
+
+    Pure predicate (no discord.py types) so the gating rules can be unit-tested
+    in isolation. ``_on_message`` extracts the relevant primitives from the
+    Gateway message and delegates the decision here.
+
+    Args:
+        author_id: The message author's user id.
+        bot_user_id: This bot's own user id, or None if not yet known.
+        author_is_bot: Whether the author is a bot account.
+        ignore_bots: Whether messages from other bots should be ignored.
+        guild_id: The originating guild id, or None for DMs.
+        channel_id: The originating channel id.
+        allowed_guild_ids: Guild allowlist (empty means all guilds).
+        allowed_channel_ids: Channel allowlist (empty means all channels).
+        require_mention: Whether the bot must be @mentioned to respond.
+        is_mentioned: Whether the bot is mentioned in this message.
+
+    Returns:
+        bool: True if the message passes every gate and should be processed.
+    """
+    # Never process our own messages (prevents reply loops).
+    if bot_user_id is not None and author_id == bot_user_id:
+        return False
+    if ignore_bots and author_is_bot:
+        return False
+    if allowed_guild_ids and (guild_id is None or str(guild_id) not in allowed_guild_ids):
+        return False
+    if allowed_channel_ids and str(channel_id) not in allowed_channel_ids:
+        return False
+    if require_mention and not is_mentioned:
+        return False
+    return True
 
 
 def guess_media_type(filename: str, content_type: str = '') -> str:

@@ -78,7 +78,7 @@ If the pipeline produces no answers, nothing is sent.
 ### Limits & behavior
 
 - **2000 character limit**: Discord's per-message limit. Long answers are split into multiple messages.
-- **10 attachments per message**: If a user sends 10 images, each is downloaded and routed to the pipeline independently.
+- **Multiple attachments per message**: A message may carry up to 10 attachments. They are processed in order and iteration stops once an attachment produces a non-empty pipeline answer, so only the attachments up to that point are routed.
 - **Attachment download limit**: Configurable via `maxAttachmentBytes`. Files exceeding this limit are skipped with a debug log entry.
 - **One answer per message** (as sent): Only the first pipeline answer is returned to the channel; additional answers are discarded.
 - **Missing token**: If `botToken` is empty, the node reports `Discord Bot: missing bot token` in the monitor and stays idle.
