@@ -1,0 +1,584 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
+
+import argparse
+import asyncio
+import json
+import os
+import re
+import sys
+from typing import Any, Callable, Dict, List, Optional
+
+from rocketlib import (
+    IEndpointBase,
+    monitorOther,
+    monitorStatus,
+    monitorCompleted,
+    monitorFailed,
+    debug,
+    getObject,
+    AVI_ACTION,
+)
+from ai.web import WebServer
+
+from depends import depends  # type: ignore
+
+requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
+depends(requirements)
+
+import discord
+from discord.ext import commands
+
+
+class IEndpoint(IEndpointBase):
+    """
+    IEndpoint for the Discord Bot source node.
+
+    Connects to the Discord Gateway via discord.py, routes each incoming
+    message (text plus image/audio/video/document attachments) to the matching
+    pipeline lane, and sends the pipeline's answer back to the originating
+    channel, message, or thread.
+
+    Mirrors the Telegram node's architecture: a blocking WebServer keeps the
+    endpoint process alive, and the Discord Gateway client runs as a background
+    task started from the WebServer's async startup hook.
+    """
+
+    _DISCORD_MESSAGE_CHAR_LIMIT: int = 2000  # Discord's per-message cap
+
+    target: IEndpointBase | None = None
+    _server: WebServer | None = None
+    _bot: Optional[commands.Bot] = None
+    _bot_task: asyncio.Task | None = None
+    _bot_token: str = ''
+    _guild_ids: List[str] = []
+    _channel_ids: List[str] = []
+    _ignore_bots: bool = True
+    _require_mention: bool = False
+    _reply_mode: str = 'reply'
+    _show_typing: bool = True
+    _max_attachment_bytes: int = 26214400
+    _send_responses: bool = True
+    _inflight: set
+
+    def _get_discord_config(self) -> Dict[str, Any]:
+        """Read the Discord config block from serviceConfig parameters.
+
+        The engine strips the field namespace prefix ('discord.') before
+        storing values, so they arrive nested under a 'discord' dict.
+
+        Returns:
+            Dict[str, Any]: The Discord configuration dictionary, or an empty
+                dict if the config block is missing or cannot be read.
+        """
+        try:
+            parameters = self.endpoint.serviceConfig['parameters']
+            return parameters.get('discord', parameters)
+        except Exception as e:
+            debug(f'Discord _get_discord_config: EXCEPTION {e}')
+            return {}
+
+    # -------------------------------------------------------------------------
+    # Server lifecycle
+    # -------------------------------------------------------------------------
+
+    def scanObjects(self, _path: str, _scanCallback: Callable[[Dict[str, Any]], None]):
+        """Entry point called by the RocketRide engine to start the node.
+
+        Stores the engine-provided target endpoint, then delegates to _run()
+        which starts the WebServer (blocking). The _path and _scanCallback
+        arguments are part of the IEndpointBase interface but are unused here
+        because this source receives data via the Discord Gateway push rather
+        than by scanning a filesystem path.
+
+        Args:
+            _path (str): Unused. Provided by the engine as the scan root path.
+            _scanCallback (Callable): Unused. Provided by the engine as the
+                callback for discovered objects.
+
+        Returns:
+            None
+        """
+        self.target = self.endpoint.target
+        self._run()
+
+    def _run(self):
+        """Bootstrap the WebServer and cache configuration.
+
+        Parses ``--data_host`` and ``--data_port`` from sys.argv, reads and
+        caches the Discord config, creates the WebServer with startup/shutdown
+        hooks, and starts it (blocking until shutdown). The Gateway client is
+        launched from the async _startup hook.
+
+        Returns:
+            None
+        """
+        parser = argparse.ArgumentParser(add_help=False)
+        parser.add_argument('--data_host', type=str, default='localhost')
+        parser.add_argument('--data_port', type=int, default=5567)
+        parsed_args, _ = parser.parse_known_args(sys.argv)
+
+        config = self._get_discord_config()
+        self._bot_token = config.get('botToken', '')
+        self._guild_ids = [str(g) for g in (config.get('guildIds') or [])]
+        self._channel_ids = [str(c) for c in (config.get('channelIds') or [])]
+        self._ignore_bots = config.get('ignoreBots', True)
+        self._require_mention = config.get('requireMention', False)
+        self._reply_mode = config.get('replyMode', 'reply')
+        self._show_typing = config.get('showTyping', True)
+        self._max_attachment_bytes = config.get('maxAttachmentBytes', 26214400)
+        self._send_responses = config.get('sendResponses', True)
+        debug(f'Discord _run: token_present={bool(self._bot_token)} reply_mode={self._reply_mode!r}')
+
+        self._server = WebServer(
+            config={
+                'port': parsed_args.data_port,
+                'host': parsed_args.data_host,
+            },
+            on_startup=self._startup,
+            on_shutdown=self._shutdown,
+        )
+        self._server.app.state.target = self.target
+        self._server.run()
+
+    async def _startup(self):
+        """Initialize the Discord Gateway client and start it as a background task.
+
+        Called by the WebServer on startup (inside its event loop). Validates
+        the token, builds the bot with the required intents, registers the
+        on_ready / on_message handlers, and launches bot.start() concurrently.
+
+        Returns:
+            None
+        """
+        self._inflight = set()
+
+        if not self._bot_token:
+            monitorStatus('Discord Bot: missing bot token')
+            return
+
+        intents = discord.Intents.default()
+        intents.message_content = True
+        intents.guilds = True
+
+        self._bot = commands.Bot(command_prefix='!', intents=intents)
+
+        @self._bot.event
+        async def on_ready():
+            info = {
+                'url-text': 'Discord Bot',
+                'url-link': 'https://discord.com/',
+                'auth-text': 'Bot Token (last 6 chars)',
+                'auth-key': f'...{self._bot_token[-6:]}' if len(self._bot_token) >= 6 else '(set)',
+            }
+            monitorOther('usr', json.dumps([info]))
+            monitorStatus(f'Discord Bot ready - logged in as {self._bot.user}')
+
+        @self._bot.event
+        async def on_message(message: discord.Message):
+            await self._on_message(message)
+
+        self._bot_task = asyncio.create_task(self._bot_runner())
+        monitorStatus('Discord Bot: connecting to Gateway...')
+
+    async def _bot_runner(self):
+        """Run the Gateway client, reporting a clear status on failure."""
+        try:
+            await self._bot.start(self._bot_token)
+        except discord.LoginFailure:
+            monitorStatus('Discord Bot: login failed (invalid token)')
+        except discord.PrivilegedIntentsRequired:
+            monitorStatus('Discord Bot: enable Message Content Intent in the Developer Portal')
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            debug(f'Discord _bot_runner: EXCEPTION {e}')
+            monitorStatus(f'Discord Bot: gateway error - {e}')
+
+    async def _shutdown(self):
+        """Gracefully tear down the Gateway client.
+
+        Awaits in-flight message handlers, closes the bot connection, and
+        cancels the background task. Clears the monitor user-info panel.
+
+        Returns:
+            None
+        """
+        if self._inflight:
+            await asyncio.gather(*self._inflight, return_exceptions=True)
+
+        if self._bot is not None:
+            try:
+                await self._bot.close()
+            except Exception as e:
+                debug(f'Discord _shutdown: close error {e}')
+
+        if self._bot_task is not None:
+            self._bot_task.cancel()
+            try:
+                await self._bot_task
+            except asyncio.CancelledError:
+                pass
+            self._bot_task = None
+
+        monitorOther('usr')
+
+    # -------------------------------------------------------------------------
+    # Message handling
+    # -------------------------------------------------------------------------
+
+    async def _on_message(self, message: discord.Message):
+        """Filter an incoming message and dispatch it for processing.
+
+        Applies bot-loop prevention, the guild/channel allowlists, and the
+        optional @mention gate before scheduling _process_message as a tracked
+        background task.
+
+        Args:
+            message (discord.Message): The incoming Gateway message.
+
+        Returns:
+            None
+        """
+        try:
+            # Never process our own messages (prevents reply loops).
+            if self._bot.user is not None and message.author.id == self._bot.user.id:
+                return
+            if self._ignore_bots and message.author.bot:
+                return
+            if self._guild_ids and (message.guild is None or str(message.guild.id) not in self._guild_ids):
+                return
+            if self._channel_ids and str(message.channel.id) not in self._channel_ids:
+                return
+            if self._require_mention and self._bot.user is not None and not self._bot.user.mentioned_in(message):
+                return
+
+            task = asyncio.create_task(self._process_message(message))
+            self._inflight.add(task)
+            task.add_done_callback(self._inflight.discard)
+        except Exception as e:
+            debug(f'Discord _on_message: EXCEPTION {e}')
+
+    async def _process_message(self, message: discord.Message):
+        """Route a message to the pipeline and send back the first answer.
+
+        Text content is routed to the text lane; each attachment is downloaded
+        (subject to the size cap) and routed to the image/audio/video/tags lane
+        by MIME type. The first non-empty pipeline answer is sent back to
+        Discord per the configured reply mode.
+
+        Args:
+            message (discord.Message): The message to process.
+
+        Returns:
+            None
+        """
+        try:
+            reply = ''
+
+            if message.content:
+                reply = await self._run_with_optional_typing(
+                    message,
+                    lambda: asyncio.to_thread(self._run_text_pipeline, message.content, message.channel.id, message.id),
+                )
+
+            if not reply and message.attachments:
+                for attachment in message.attachments:
+                    att_reply = await self._process_attachment(message, attachment)
+                    if att_reply and not reply:
+                        reply = att_reply
+
+            if reply and self._send_responses:
+                await self._send_response(message, reply)
+        except Exception as e:
+            debug(f'Discord _process_message: EXCEPTION {e}')
+
+    async def _run_with_optional_typing(self, message: discord.Message, coro_factory):
+        """Run an awaitable, optionally showing the Discord typing indicator.
+
+        Args:
+            message (discord.Message): The message whose channel shows typing.
+            coro_factory (Callable): Zero-arg callable returning the awaitable.
+
+        Returns:
+            Any: The awaited result.
+        """
+        if self._show_typing:
+            try:
+                async with message.channel.typing():
+                    return await coro_factory()
+            except Exception as e:
+                debug(f'Discord: typing indicator failed: {e}')
+        return await coro_factory()
+
+    async def _process_attachment(self, message: discord.Message, attachment: discord.Attachment) -> str:
+        """Download one attachment and route it to the matching lane.
+
+        Args:
+            message (discord.Message): The parent message (for entry URL).
+            attachment (discord.Attachment): The attachment to download.
+
+        Returns:
+            str: The first pipeline answer, or '' if skipped or none produced.
+        """
+        try:
+            if attachment.size > self._max_attachment_bytes:
+                debug(
+                    f'Discord: skipping {attachment.filename} ({attachment.size} > {self._max_attachment_bytes} bytes)'
+                )
+                return ''
+            mime_type = self._guess_media_type(attachment.filename, attachment.content_type or '')
+            file_data = await attachment.read()
+            if not file_data:
+                return ''
+            return await self._run_with_optional_typing(
+                message,
+                lambda: asyncio.to_thread(
+                    self._run_binary_pipeline, file_data, mime_type, attachment.id, message.channel.id
+                ),
+            )
+        except Exception as e:
+            debug(f'Discord: attachment {attachment.filename} error: {e}')
+            return ''
+
+    def _guess_media_type(self, filename: str, content_type: str) -> str:
+        """Guess a MIME type from Discord's content_type or the file extension.
+
+        Args:
+            filename (str): The attachment filename.
+            content_type (str): Discord's reported content type, if any.
+
+        Returns:
+            str: A MIME type string, defaulting to 'application/octet-stream'.
+        """
+        if content_type:
+            return content_type.split(';')[0].strip()
+
+        ext_to_type = {
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png',
+            '.gif': 'image/gif',
+            '.webp': 'image/webp',
+            '.mp3': 'audio/mpeg',
+            '.wav': 'audio/wav',
+            '.ogg': 'audio/ogg',
+            '.mp4': 'video/mp4',
+            '.webm': 'video/webm',
+            '.mov': 'video/quicktime',
+            '.pdf': 'application/pdf',
+            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            '.zip': 'application/zip',
+        }
+        filename_lower = filename.lower()
+        for ext, mime_type in ext_to_type.items():
+            if filename_lower.endswith(ext):
+                return mime_type
+        return 'application/octet-stream'
+
+    # -------------------------------------------------------------------------
+    # Pipeline execution
+    # -------------------------------------------------------------------------
+
+    def _run_text_pipeline(self, text: str, channel_id: int, message_id: int) -> str:
+        """Push a text message through the pipeline on the text lane.
+
+        Blocking; must be called via asyncio.to_thread.
+
+        Args:
+            text (str): The message text.
+            channel_id (int): The originating channel id (entry URL).
+            message_id (int): The originating message id (entry URL).
+
+        Returns:
+            str: The first pipeline answer, or '' on error / no answers.
+        """
+        entry = getObject(obj={'url': f'discord://{channel_id}/{message_id}', 'name': text[:200]})
+        pipe = self.target.getPipe()
+        try:
+            pipe.open(entry)
+            pipe.writeText(text)
+            pipe.close()
+            results = entry.response.toDict()
+            answers = results.get('answers', [])
+            monitorCompleted(len(text.encode('utf-8')))
+            return answers[0] if answers else ''
+        except Exception as e:
+            monitorFailed(len(text.encode('utf-8')))
+            debug(f'Discord: text pipeline error: {e}')
+            return ''
+        finally:
+            self.target.putPipe(pipe)
+
+    def _run_binary_pipeline(self, file_data: bytes, mime_type: str, attachment_id: int, channel_id: int) -> str:
+        """Push binary attachment data through the matching pipeline lane.
+
+        Blocking; must be called via asyncio.to_thread.
+
+        Args:
+            file_data (bytes): The raw attachment bytes.
+            mime_type (str): The attachment MIME type (selects the lane).
+            attachment_id (int): The attachment id (entry URL / name).
+            channel_id (int): The originating channel id (entry URL).
+
+        Returns:
+            str: The first pipeline answer, or '' on error / no answers.
+        """
+        entry = getObject(
+            obj={
+                'url': f'discord://{channel_id}/{attachment_id}',
+                'name': str(attachment_id),
+                'size': len(file_data),
+                'mimeType': mime_type,
+            }
+        )
+        pipe = self.target.getPipe()
+        try:
+            pipe.open(entry)
+            if mime_type.startswith('image/'):
+                pipe.writeImage(AVI_ACTION.BEGIN, mime_type)
+                pipe.writeImage(AVI_ACTION.WRITE, mime_type, file_data)
+                pipe.writeImage(AVI_ACTION.END, mime_type)
+            elif mime_type.startswith('audio/'):
+                pipe.writeAudio(AVI_ACTION.BEGIN, mime_type)
+                pipe.writeAudio(AVI_ACTION.WRITE, mime_type, file_data)
+                pipe.writeAudio(AVI_ACTION.END, mime_type)
+            elif mime_type.startswith('video/'):
+                pipe.writeVideo(AVI_ACTION.BEGIN, mime_type)
+                pipe.writeVideo(AVI_ACTION.WRITE, mime_type, file_data)
+                pipe.writeVideo(AVI_ACTION.END, mime_type)
+            else:
+                pipe.writeTagBeginObject()
+                pipe.writeTagBeginStream()
+                pipe.writeTagData(file_data)
+                pipe.writeTagEndStream()
+                pipe.writeTagEndObject()
+            pipe.close()
+            results = entry.response.toDict()
+            answers = results.get('answers', [])
+            monitorCompleted(len(file_data))
+            return answers[0] if answers else ''
+        except Exception as e:
+            monitorFailed(len(file_data))
+            debug(f'Discord: binary pipeline error ({mime_type}): {e}')
+            return ''
+        finally:
+            self.target.putPipe(pipe)
+
+    # -------------------------------------------------------------------------
+    # Replies
+    # -------------------------------------------------------------------------
+
+    def _chunk_message(self, text: str, max_length: int = _DISCORD_MESSAGE_CHAR_LIMIT) -> List[str]:
+        """Split text into chunks within Discord's per-message character limit.
+
+        Splits on newline boundaries first, then on sentence boundaries for any
+        single line that still exceeds the limit.
+
+        Args:
+            text (str): The reply text.
+            max_length (int): The maximum chunk length.
+
+        Returns:
+            List[str]: Non-empty chunks, each <= max_length characters.
+        """
+        if len(text) <= max_length:
+            return [text]
+
+        chunks: List[str] = []
+        current = ''
+        for line in text.split('\n'):
+            if len(current) + len(line) + 1 <= max_length:
+                current += line + '\n'
+            else:
+                if current:
+                    chunks.append(current.rstrip())
+                    current = ''
+                if len(line) > max_length:
+                    sentence = ''
+                    for part in re.split(r'(?<=[.!?])\s+', line):
+                        if len(sentence) + len(part) + 1 <= max_length:
+                            sentence += part + ' '
+                        else:
+                            if sentence:
+                                chunks.append(sentence.rstrip())
+                            sentence = part + ' '
+                    if sentence:
+                        chunks.append(sentence.rstrip())
+                else:
+                    current = line + '\n'
+        if current.strip():
+            chunks.append(current.rstrip())
+        return [c for c in chunks if c.strip()]
+
+    async def _send_response(self, message: discord.Message, response: str):
+        """Send the pipeline answer back to Discord per the configured mode.
+
+        Long answers are chunked at Discord's 2000-character limit. On a 429
+        rate-limit response the send is retried once after the Retry-After delay.
+
+        Args:
+            message (discord.Message): The originating message.
+            response (str): The pipeline answer text.
+
+        Returns:
+            None
+        """
+        chunks = self._chunk_message(response)
+        thread = None
+        for chunk in chunks:
+            try:
+                thread = await self._send_chunk(message, chunk, thread)
+            except discord.HTTPException as e:
+                retry_after = getattr(e, 'retry_after', None) or 1.0
+                debug(f'Discord: send failed ({e.status}); retrying after {retry_after}s')
+                await asyncio.sleep(float(retry_after))
+                try:
+                    thread = await self._send_chunk(message, chunk, thread)
+                except Exception as e2:
+                    debug(f'Discord: send retry failed: {e2}')
+            except Exception as e:
+                debug(f'Discord _send_response: EXCEPTION {e}')
+
+    async def _send_chunk(self, message: discord.Message, chunk: str, thread):
+        """Send a single chunk using the configured reply mode.
+
+        Args:
+            message (discord.Message): The originating message.
+            chunk (str): The chunk text (already within the char limit).
+            thread: The thread created for a prior chunk, or None.
+
+        Returns:
+            The thread used (for 'thread' mode) so later chunks reuse it, else None.
+        """
+        if self._reply_mode == 'reply':
+            await message.reply(chunk, mention_author=False)
+            return None
+        if self._reply_mode == 'thread':
+            if thread is None:
+                thread = await message.create_thread(name='Pipeline Response')
+            await thread.send(chunk)
+            return thread
+        await message.channel.send(chunk)
+        return None
