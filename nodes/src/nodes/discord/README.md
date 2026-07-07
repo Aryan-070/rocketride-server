@@ -14,7 +14,7 @@ The node uses **discord.py** to maintain a resilient Gateway connection with aut
 
 ### Lanes
 
-The node is a pipeline source. Its `_source` lane emits to `text`, `image`, `audio`, `video`, and `tags`. Each Discord message type maps to one output lane:
+The node is a pipeline source. Its `_source` lane emits to `text`, `image`, `audio`, `video`, and `Data`. Each Discord message type maps to one output lane:
 
 | Discord message | Output lane | Notes |
 |-----------------|-------------|-------|
@@ -22,7 +22,7 @@ The node is a pipeline source. Its `_source` lane emits to `text`, `image`, `aud
 | Image attachment | `image` | Downloaded and routed with MIME type (e.g., `image/png`). |
 | Audio attachment | `audio` | Downloaded with MIME type (e.g., `audio/mpeg`). |
 | Video attachment | `video` | Downloaded with MIME type (e.g., `video/mp4`). |
-| Document (PDF, Word, archive, etc.) | `tags` | Downloaded as tagged stream data; connect a Parser node downstream. |
+| Document (PDF, Word, archive, etc.) | `Data` | Downloaded as tagged stream data; connect a Parser node downstream. |
 
 Entry URLs are built as `discord://<channel_id>/<message_id>` for text and `discord://<channel_id>/<attachment_id>` for files.
 
@@ -95,7 +95,7 @@ If the pipeline produces no answers, nothing is sent.
 2. The node receives the `MESSAGE_CREATE` event from the Gateway.
 3. For each attachment, the node checks its size against `maxAttachmentBytes`.
 4. If under the limit, the node downloads the file concurrently via the Discord CDN.
-5. The file is routed to the appropriate lane (image, audio, video, or tags based on MIME type).
+5. The file is routed to the appropriate lane (image, audio, video, or Data based on MIME type).
 6. On failure (network, size, or permission), the attachment is skipped with a debug log and `monitorFailed()` call.
 
 ### MIME type detection
@@ -174,9 +174,6 @@ Paste the token into the `discord.botToken` field.
 ## Dependencies
 
 - `discord.py` `>=2.4.0`
-- `aiohttp` `>=3.14.1`
-- `requests`
-- `fastapi`
 
 ## Source
 

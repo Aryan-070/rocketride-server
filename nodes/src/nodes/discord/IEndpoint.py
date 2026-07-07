@@ -25,7 +25,6 @@ import argparse
 import asyncio
 import json
 import os
-import re
 import sys
 from typing import Any, Callable, Dict, List, Optional
 
@@ -49,6 +48,8 @@ depends(requirements)
 import discord
 from discord.ext import commands
 
+from .text_utils import chunk_message, guess_media_type
+
 
 class IEndpoint(IEndpointBase):
     """
@@ -64,15 +65,15 @@ class IEndpoint(IEndpointBase):
     task started from the WebServer's async startup hook.
     """
 
-    _DISCORD_MESSAGE_CHAR_LIMIT: int = 2000  # Discord's per-message cap
-
     target: IEndpointBase | None = None
     _server: WebServer | None = None
     _bot: Optional[commands.Bot] = None
     _bot_task: asyncio.Task | None = None
     _bot_token: str = ''
-    _guild_ids: List[str] = []
-    _channel_ids: List[str] = []
+    # _guild_ids / _channel_ids are populated per-instance in _run(); declared
+    # as annotations only to avoid a mutable list shared across instances.
+    _guild_ids: List[str]
+    _channel_ids: List[str]
     _ignore_bots: bool = True
     _require_mention: bool = False
     _reply_mode: str = 'reply'
@@ -305,8 +306,9 @@ class IEndpoint(IEndpointBase):
             if not reply and message.attachments:
                 for attachment in message.attachments:
                     att_reply = await self._process_attachment(message, attachment)
-                    if att_reply and not reply:
+                    if att_reply:
                         reply = att_reply
+                        break
 
             if reply and self._send_responses:
                 await self._send_response(message, reply)
@@ -347,7 +349,7 @@ class IEndpoint(IEndpointBase):
                     f'Discord: skipping {attachment.filename} ({attachment.size} > {self._max_attachment_bytes} bytes)'
                 )
                 return ''
-            mime_type = self._guess_media_type(attachment.filename, attachment.content_type or '')
+            mime_type = guess_media_type(attachment.filename, attachment.content_type or '')
             file_data = await attachment.read()
             if not file_data:
                 return ''
@@ -360,42 +362,6 @@ class IEndpoint(IEndpointBase):
         except Exception as e:
             debug(f'Discord: attachment {attachment.filename} error: {e}')
             return ''
-
-    def _guess_media_type(self, filename: str, content_type: str) -> str:
-        """Guess a MIME type from Discord's content_type or the file extension.
-
-        Args:
-            filename (str): The attachment filename.
-            content_type (str): Discord's reported content type, if any.
-
-        Returns:
-            str: A MIME type string, defaulting to 'application/octet-stream'.
-        """
-        if content_type:
-            return content_type.split(';')[0].strip()
-
-        ext_to_type = {
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.png': 'image/png',
-            '.gif': 'image/gif',
-            '.webp': 'image/webp',
-            '.mp3': 'audio/mpeg',
-            '.wav': 'audio/wav',
-            '.ogg': 'audio/ogg',
-            '.mp4': 'video/mp4',
-            '.webm': 'video/webm',
-            '.mov': 'video/quicktime',
-            '.pdf': 'application/pdf',
-            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            '.zip': 'application/zip',
-        }
-        filename_lower = filename.lower()
-        for ext, mime_type in ext_to_type.items():
-            if filename_lower.endswith(ext):
-                return mime_type
-        return 'application/octet-stream'
 
     # -------------------------------------------------------------------------
     # Pipeline execution
@@ -490,53 +456,12 @@ class IEndpoint(IEndpointBase):
     # Replies
     # -------------------------------------------------------------------------
 
-    def _chunk_message(self, text: str, max_length: int = _DISCORD_MESSAGE_CHAR_LIMIT) -> List[str]:
-        """Split text into chunks within Discord's per-message character limit.
-
-        Splits on newline boundaries first, then on sentence boundaries for any
-        single line that still exceeds the limit.
-
-        Args:
-            text (str): The reply text.
-            max_length (int): The maximum chunk length.
-
-        Returns:
-            List[str]: Non-empty chunks, each <= max_length characters.
-        """
-        if len(text) <= max_length:
-            return [text]
-
-        chunks: List[str] = []
-        current = ''
-        for line in text.split('\n'):
-            if len(current) + len(line) + 1 <= max_length:
-                current += line + '\n'
-            else:
-                if current:
-                    chunks.append(current.rstrip())
-                    current = ''
-                if len(line) > max_length:
-                    sentence = ''
-                    for part in re.split(r'(?<=[.!?])\s+', line):
-                        if len(sentence) + len(part) + 1 <= max_length:
-                            sentence += part + ' '
-                        else:
-                            if sentence:
-                                chunks.append(sentence.rstrip())
-                            sentence = part + ' '
-                    if sentence:
-                        chunks.append(sentence.rstrip())
-                else:
-                    current = line + '\n'
-        if current.strip():
-            chunks.append(current.rstrip())
-        return [c for c in chunks if c.strip()]
-
     async def _send_response(self, message: discord.Message, response: str):
         """Send the pipeline answer back to Discord per the configured mode.
 
-        Long answers are chunked at Discord's 2000-character limit. On a 429
-        rate-limit response the send is retried once after the Retry-After delay.
+        Long answers are chunked at Discord's 2000-character limit. discord.py
+        transparently handles most 429s; if it surfaces a ``RateLimited`` the
+        send is retried once after the reported ``retry_after`` delay.
 
         Args:
             message (discord.Message): The originating message.
@@ -545,15 +470,15 @@ class IEndpoint(IEndpointBase):
         Returns:
             None
         """
-        chunks = self._chunk_message(response)
         thread = None
-        for chunk in chunks:
+        for chunk in chunk_message(response):
             try:
                 thread = await self._send_chunk(message, chunk, thread)
-            except discord.HTTPException as e:
-                retry_after = getattr(e, 'retry_after', None) or 1.0
-                debug(f'Discord: send failed ({e.status}); retrying after {retry_after}s')
-                await asyncio.sleep(float(retry_after))
+            except discord.RateLimited as e:
+                # RateLimited (not HTTPException) is the exception that carries
+                # retry_after in discord.py.
+                debug(f'Discord: rate limited; retrying after {e.retry_after}s')
+                await asyncio.sleep(float(e.retry_after))
                 try:
                     thread = await self._send_chunk(message, chunk, thread)
                 except Exception as e2:
