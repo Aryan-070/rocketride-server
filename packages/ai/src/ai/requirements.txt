@@ -10,3 +10,4 @@ tenacity
 nvidia-ml-py
 croniter
 filetype
+mcp>=1.9.0
