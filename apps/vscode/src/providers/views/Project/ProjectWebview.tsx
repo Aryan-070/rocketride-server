@@ -237,8 +237,8 @@ const ProjectWebview: React.FC = () => {
 	);
 
 	const handlePipelineAction = useCallback(
-		(action: 'run' | 'stop' | 'restart', source?: string) => {
-			sendMessage({ type: 'status:pipelineAction', action, source });
+		(action: 'run' | 'stop' | 'restart', source?: string, options?: { ttl?: number }) => {
+			sendMessage({ type: 'status:pipelineAction', action, source, ttl: options?.ttl });
 		},
 		[sendMessage]
 	);

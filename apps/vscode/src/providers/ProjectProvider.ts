@@ -420,6 +420,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				case 'status:pipelineAction': {
 					const action = data.action as 'run' | 'stop' | 'restart';
 					const source = data.source as string | undefined;
+					const ttl = data.ttl as number | undefined;
 					if (action === 'run' || action === 'restart') {
 						// Gate: check connection before running
 						const runClient = this.connectionManager.getClient();
@@ -439,7 +440,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 							await this.saveDocument(document, document.getText());
 							const parsed = JSON.parse(document.getText());
 							const pipeName = path.basename(document.uri.fsPath, '.pipe');
-							await this.runPipeline({ pipeline: { ...parsed, source: source ?? parsed.source } }, pipeName);
+							await this.runPipeline({ pipeline: { ...parsed, source: source ?? parsed.source } }, pipeName, ttl);
 						} catch (error: unknown) {
 							const message = error instanceof Error ? error.message : String(error);
 							vscode.window.showErrorMessage(`Failed to run pipeline: ${message}`);
@@ -684,7 +685,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	// PIPELINE EXECUTION
 	// =========================================================================
 
-	private async runPipeline(document: { pipeline: PipelineConfig }, name?: string): Promise<void> {
+	private async runPipeline(document: { pipeline: PipelineConfig }, name?: string, ttl?: number): Promise<void> {
 		try {
 			const client = this.connectionManager.getClient();
 			if (!client) throw new Error('Not connected to server');
@@ -697,6 +698,9 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				pipelineTraceLevel: 'full',
 				args: ConfigManager.getInstance().getEngineArgs('development'),
 				name,
+				// Only send ttl when the user picked one — otherwise the engine
+				// applies its default. ttl:0 means "no timeout".
+				...(ttl !== undefined ? { ttl } : {}),
 			});
 		} catch (error: unknown) {
 			const message = error instanceof Error ? error.message : String(error);

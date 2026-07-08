@@ -30,6 +30,7 @@ import Errors from '../../components/errors/Errors';
 import { commonStyles } from '../../themes/styles';
 
 import PipelineActions from '../../components/pipeline-actions/PipelineActions';
+import TtlSettingsDialog from './TtlSettingsDialog';
 import { extractPipelineEnvVars } from '../../components/canvas/util/extractEnvVars';
 import type { ProjectViewMode, ViewState, TaskStatus, TraceEvent, TraceRow } from './types';
 
@@ -69,8 +70,8 @@ export interface IProjectViewProps {
 	onContentChanged?: (project: any) => void;
 	/** Called to validate a pipeline. Host returns validation result as a Promise. */
 	onValidate?: (pipeline: any) => Promise<any>;
-	/** Called for pipeline run/stop/restart actions. */
-	onPipelineAction?: (action: 'run' | 'stop' | 'restart', source?: string) => void;
+	/** Called for pipeline run/stop/restart actions. `options.ttl` carries the idle-timeout (seconds) for run/restart when the user set one. */
+	onPipelineAction?: (action: 'run' | 'stop' | 'restart', source?: string, options?: { ttl?: number }) => void;
 	/** Called when view state changes (mode, flowViewMode, viewport). */
 	onViewStateChange?: (viewState: ViewState) => void;
 	/** Called when user preferences change (e.g. panel widths, toggles). */
@@ -81,8 +82,6 @@ export interface IProjectViewProps {
 	onSave?: () => void;
 	/** SaaS-only: export/download the current pipeline. Forwarded to the canvas. */
 	onExport?: () => void;
-	/** Called when the user opens pipeline settings (e.g. idle timeout) from the canvas toolbar. Omitted hosts hide the button. */
-	onOpenSettings?: () => void;
 	/** Called when the user clears the trace log. */
 	onTraceClear?: () => void;
 	/** When true, the canvas is fully read-only: editing, saving, and run/stop are disabled. */
@@ -176,7 +175,7 @@ interface SourceInfo {
 // COMPONENT
 // =============================================================================
 
-const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isConnected, isSubscribed = true, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, initialPrefs, traceEvents = [], onContentChanged, onValidate, onPipelineAction, onViewStateChange, onPrefsChange, onOpenLink, onSave, onExport, onOpenSettings, onTraceClear, isReadonly = false, envKeys, onMissingEnvVars }) => {
+const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isConnected, isSubscribed = true, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, initialPrefs, traceEvents = [], onContentChanged, onValidate, onPipelineAction, onViewStateChange, onPrefsChange, onOpenLink, onSave, onExport, onTraceClear, isReadonly = false, envKeys, onMissingEnvVars }) => {
 	// --- Local view state (initialized from props, managed locally) -----------
 
 	const [viewState, setViewState] = useState<ViewState>(() => ({
@@ -236,6 +235,29 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 		});
 	}, []);
 
+	// --- Idle-timeout (TTL) settings ------------------------------------------
+	// Persisted per-pipeline in prefs (`pipelineTtl` map keyed by project_id),
+	// riding the host's existing prefs persistence. undefined = server default.
+
+	const [ttlDialogOpen, setTtlDialogOpen] = useState(false);
+	const ttlProjectId: string = project?.project_id ?? '';
+	const ttlByProject = (prefs?.pipelineTtl as Record<string, number> | undefined) ?? {};
+	const projectTtl: number | undefined = ttlProjectId ? ttlByProject[ttlProjectId] : undefined;
+
+	const openTtlSettings = useCallback(() => setTtlDialogOpen(true), []);
+	const handleTtlConfirm = useCallback((ttl: number | undefined) => {
+		setTtlDialogOpen(false);
+		if (!ttlProjectId) return;
+		setPrefs((prev) => {
+			const map = { ...((prev?.pipelineTtl as Record<string, number> | undefined) ?? {}) };
+			if (ttl === undefined) delete map[ttlProjectId];
+			else map[ttlProjectId] = ttl;
+			const next = { ...prev, pipelineTtl: map };
+			onPrefsChangeRef.current?.(next);
+			return next;
+		});
+	}, [ttlProjectId]);
+
 	const { rows: traceRows, clearTrace } = useTraceState(traceEvents);
 
 	// --- Validate callback for Canvas ----------------------------------------
@@ -281,9 +303,9 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 					return;
 				}
 			}
-			onPipelineAction?.('run', source);
+			onPipelineAction?.('run', source, projectTtl !== undefined ? { ttl: projectTtl } : undefined);
 		},
-		[onPipelineAction, onMissingEnvVars, envKeys]
+		[onPipelineAction, onMissingEnvVars, envKeys, projectTtl]
 	);
 
 	const handleStopPipeline = useCallback(
@@ -340,9 +362,9 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 
 	const handlePipelineAction = useCallback(
 		(action: 'run' | 'stop' | 'restart', source?: string) => {
-			onPipelineAction?.(action, source);
+			onPipelineAction?.(action, source, action !== 'stop' && projectTtl !== undefined ? { ttl: projectTtl } : undefined);
 		},
-		[onPipelineAction]
+		[onPipelineAction, projectTtl]
 	);
 
 	// --- Viewport change -----------------------------------------------------
@@ -353,7 +375,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 
 	const panels = {
 		design: {
-			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl="" project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={isReadonly ? undefined : handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={isReadonly ? undefined : handleRunPipeline} onStopPipeline={isReadonly ? undefined : handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} getPreference={getPreference} setPreference={setPreference} initialViewport={viewState.viewport} isDirty={isReadonly ? false : isDirty} isNew={isReadonly ? false : isNew} onSave={isReadonly ? undefined : handleSave} onExport={isReadonly ? undefined : onExport} onOpenSettings={isReadonly ? undefined : onOpenSettings} isReadonly={isReadonly} envKeys={envKeys} />}</div>,
+			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl="" project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={isReadonly ? undefined : handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={isReadonly ? undefined : handleRunPipeline} onStopPipeline={isReadonly ? undefined : handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} getPreference={getPreference} setPreference={setPreference} initialViewport={viewState.viewport} isDirty={isReadonly ? false : isDirty} isNew={isReadonly ? false : isNew} onSave={isReadonly ? undefined : handleSave} onExport={isReadonly ? undefined : onExport} onOpenSettings={isReadonly ? undefined : openTtlSettings} isReadonly={isReadonly} envKeys={envKeys} />}</div>,
 		},
 		status: {
 			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceStatusPane key={src.id} source={src} taskStatus={statusMap[src.id]} isConnected={isConnected} isSubscribed={isSubscribed} onPipelineAction={isReadonly ? undefined : handlePipelineAction} onOpenLink={handleOpenLink} serverHost={serverHost} />) : <div style={commonStyles.empty}>No source components found</div>}</div>,
@@ -410,6 +432,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 	return (
 		<div style={styles.container}>
 			<TabPanel tabs={tabs} activeTab={viewState.mode} onTabChange={handleModeChange} panels={panels} />
+			{ttlDialogOpen && <TtlSettingsDialog ttlSeconds={projectTtl} onConfirm={handleTtlConfirm} onCancel={() => setTtlDialogOpen(false)} />}
 			{!isConnected && (
 				<div style={styles.disconnectOverlay}>
 					<button type="button" style={styles.disconnectButton} disabled>
