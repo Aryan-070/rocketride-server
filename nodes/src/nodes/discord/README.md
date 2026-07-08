@@ -100,7 +100,7 @@ If the pipeline produces no answers, nothing is sent.
 
 ### MIME type detection
 
-The node guesses the MIME type from the file extension (e.g., `.pdf` → `application/pdf`) and falls back to Discord's reported `content_type` if available. Unknown extensions default to `application/octet-stream`.
+The node uses Discord's reported `content_type` first (with any parameters such as `; charset=utf-8` stripped), and falls back to guessing from the file extension (e.g., `.pdf` → `application/pdf`) when no content type is reported. Anything unrecognized defaults to `application/octet-stream`.
 
 ---
 
