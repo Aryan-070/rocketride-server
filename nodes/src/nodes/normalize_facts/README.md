@@ -63,7 +63,7 @@ Output:
       "op": "normalize_facts",
       "value_normalized": 1234.5,
       "currency": "USD",
-      "currency_source": "value_symbol",
+      "currency_source": "label_symbol",
       "scale_factor": 1000000,
       "scale_unit": "millions",
       "scale_source": "label",

@@ -36,7 +36,7 @@ class IInstance(IInstanceBase):
     # kind == 'text' for pass-through text. See writeAnswers/closing.
     pending: list = None
 
-    def open(self, object: Entry):
+    def open(self, obj: Entry):
         self.pending = []
 
     def writeAnswers(self, answer: Answer):
