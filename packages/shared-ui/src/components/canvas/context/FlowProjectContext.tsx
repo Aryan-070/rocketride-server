@@ -161,6 +161,9 @@ export interface IFlowProjectContext {
 	onSave?: () => void;
 	onExport?: () => void;
 
+	/** Called when the user opens pipeline settings (e.g. idle timeout) from the canvas toolbar. */
+	onOpenSettings?: () => void;
+
 	/** Available ROCKETRIDE_* environment variable key names for autocomplete in config fields. */
 	envKeys?: string[];
 }
@@ -220,6 +223,9 @@ export interface IFlowProjectProviderProps {
 	onSave?: () => void;
 	onExport?: () => void;
 
+	/** Called when the user opens pipeline settings (e.g. idle timeout) from the canvas toolbar. */
+	onOpenSettings?: () => void;
+
 	/** Available ROCKETRIDE_* environment variable key names for autocomplete in config fields. */
 	envKeys?: string[];
 }
@@ -235,7 +241,7 @@ export interface IFlowProjectProviderProps {
  * The host application passes props that are tunneled through this context
  * so deeply nested components can access them without prop drilling.
  */
-export function FlowProjectProvider({ children, project: currentProject, isReadonly = false, taskStatuses, componentPipeCounts, totalPipes, servicesJson: rawServicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, envKeys }: IFlowProjectProviderProps): ReactElement {
+export function FlowProjectProvider({ children, project: currentProject, isReadonly = false, taskStatuses, componentPipeCounts, totalPipes, servicesJson: rawServicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, onOpenSettings, envKeys }: IFlowProjectProviderProps): ReactElement {
 	// --- Toolchain state ---------------------------------------------------
 
 	const [toolchainState, setToolchainState] = useState<IToolchainState>(DEFAULT_TOOLCHAIN_STATE);
@@ -292,6 +298,7 @@ export function FlowProjectProvider({ children, project: currentProject, isReado
 		isNew,
 		onSave,
 		onExport,
+		onOpenSettings,
 		envKeys,
 	}), [
 		currentProject, toolchainState, patchToolchainState, toggleDevMode,
@@ -300,7 +307,7 @@ export function FlowProjectProvider({ children, project: currentProject, isReado
 		handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo,
 		oauth2RootUrl, onOpenLink, googlePickerDeveloperKey, googlePickerClientId,
 		onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected,
-		isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, envKeys,
+		isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, onOpenSettings, envKeys,
 	]);
 
 	return <FlowProjectContext.Provider value={value}>{children}</FlowProjectContext.Provider>;
