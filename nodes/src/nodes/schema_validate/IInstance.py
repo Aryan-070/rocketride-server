@@ -35,7 +35,7 @@ class IInstance(IInstanceBase):
     # Each entry is (expectJson: bool, payload) — see writeAnswers/closing.
     pending: list = None
 
-    def open(self, object: Entry):
+    def open(self, obj: Entry):
         self.pending = []
 
     def writeAnswers(self, answer: Answer):
