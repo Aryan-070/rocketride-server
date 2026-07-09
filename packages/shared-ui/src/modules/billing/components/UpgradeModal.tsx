@@ -141,6 +141,12 @@ export interface UpgradeModalProps {
 	currentPriceId: string;
 	/** Human-readable name of the current plan (e.g. "Pro Monthly"). */
 	currentPlanName: string | null;
+	/**
+	 * Optional Stripe price_* to preselect on open (e.g. the plan a user clicked
+	 * on the pricing page), so they land on the proration summary ready to
+	 * confirm. Ignored if it equals the current plan. Defaults to no selection.
+	 */
+	preselectedPriceId?: string;
 	/** Called when the user confirms the plan change. */
 	onUpgrade: (newPriceId: string) => Promise<void>;
 	/** Called when the modal is dismissed. */
@@ -158,40 +164,63 @@ export interface UpgradeModalProps {
  * selects a new plan and clicks Confirm to trigger the server-side
  * Stripe subscription modification with proration.
  */
+/**
+ * Whether a plan may appear in the upgrade picker: not a top-up pack, not a
+ * hidden promo-base plan, not action-only, and not deactivated. Applied to
+ * both the picker grid and preselected plans so a hidden plan can never be
+ * reached via `preselectedPriceId`.
+ */
+const isVisibleSubscriptionPlan = (p: CheckoutPlan): boolean =>
+	p.metadata?.kind !== 'topup' &&
+	p.metadata?.kind !== 'promo_base' &&
+	!p.metadata?.action &&
+	p.isActive !== false;
+
 export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 	plans,
 	currentPriceId,
 	currentPlanName,
+	preselectedPriceId,
 	onUpgrade,
 	onClose,
 }) => {
-	const [selectedPlan, setSelectedPlan] = useState<CheckoutPlan | null>(null);
+	const [selectedPlan, setSelectedPlan] = useState<CheckoutPlan | null>(
+		() => (preselectedPriceId && preselectedPriceId !== currentPriceId
+			? plans.find((p) => p.stripePriceId === preselectedPriceId && isVisibleSubscriptionPlan(p)) ?? null
+			: null),
+	);
 	const [upgrading, setUpgrading] = useState(false);
 	const [success, setSuccess] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
-	// Filter out top-up packs and action-only plans, keep subscription plans
+	// Filter out top-up packs, hidden promo-base plans, and action-only plans
 	const subscriptionPlans = useMemo(
-		() => plans.filter((p) => p.metadata?.kind !== 'topup' && !p.metadata?.action && p.isActive !== false),
+		() => plans.filter(isVisibleSubscriptionPlan),
 		[plans],
 	);
 
 	/** Whether the selected plan differs from the current plan. */
 	const isValidSelection = selectedPlan && selectedPlan.stripePriceId !== currentPriceId;
 
-	/** Normalize amount to monthly cost for comparison across intervals. */
-	const monthlyAmount = (plan: CheckoutPlan) => {
-		if (plan.interval === 'year') return plan.amountCents / 12;
-		return plan.amountCents;
-	};
+	/**
+	 * When opened with a preselected plan (e.g. from the pricing page), show a
+	 * focused confirmation of that plan instead of the full plan picker.
+	 */
+	const compact = !!preselectedPriceId && isValidSelection;
 
-	/** Determine if the selected plan is an upgrade or downgrade. */
+	/**
+	 * Determine if the selected plan is an upgrade or downgrade. Matches the
+	 * server (change_subscription_plan), which compares RAW price amounts: a
+	 * higher amount is an immediate prorated upgrade, a lower one is scheduled
+	 * for the next renewal. (Comparing normalized monthly cost mislabels
+	 * cross-interval switches, e.g. monthly→annual.)
+	 */
 	const changeDirection = useMemo(() => {
 		if (!selectedPlan) return null;
 		const currentPlan = subscriptionPlans.find((p) => p.stripePriceId === currentPriceId);
 		if (!currentPlan) return 'change';
-		if (monthlyAmount(selectedPlan) > monthlyAmount(currentPlan)) return 'upgrade';
-		if (monthlyAmount(selectedPlan) < monthlyAmount(currentPlan)) return 'downgrade';
+		if (selectedPlan.amountCents > currentPlan.amountCents) return 'upgrade';
+		if (selectedPlan.amountCents < currentPlan.amountCents) return 'downgrade';
 		return 'change';
 	}, [selectedPlan, currentPriceId, subscriptionPlans]);
 
@@ -245,20 +274,34 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 					</div>
 				) : (
 					<>
-						{/* Current plan info */}
-						<div style={S.currentPlan}>
-							<span style={S.currentLabel}>Current</span>
-							<span style={{ color: 'var(--rr-text-primary)', fontWeight: 600 }}>
-								{currentPlanName ?? 'Unknown plan'}
-							</span>
-						</div>
+						{compact && selectedPlan ? (
+							/* Focused confirmation: caller preselected the plan, so summarise
+							   it instead of re-showing the picker. */
+							<div style={S.currentPlan}>
+								<span style={S.currentLabel}>Switch to</span>
+								<span style={{ color: 'var(--rr-text-primary)', fontWeight: 600 }}>
+									{selectedPlan.nickname} &middot; {planAmount(selectedPlan)}
+								</span>
+							</div>
+						) : (
+							<>
+								{/* Current plan info */}
+								<div style={S.currentPlan}>
+									<span style={S.currentLabel}>Current</span>
+									<span style={{ color: 'var(--rr-text-primary)', fontWeight: 600 }}>
+										{currentPlanName ?? 'Unknown plan'}
+									</span>
+								</div>
 
-						{/* Plan picker -- reuses the same card grid */}
-						<PlanPicker
-							plans={subscriptionPlans}
-							selectedPlan={selectedPlan}
-							onSelectPlan={handleSelect}
-						/>
+								{/* Plan picker -- reuses the same card grid */}
+								<PlanPicker
+									plans={subscriptionPlans}
+									selectedPlan={selectedPlan}
+									onSelectPlan={handleSelect}
+									currentPriceId={currentPriceId}
+								/>
+							</>
+						)}
 
 						{/* Proration info -- explains what happens on upgrade vs downgrade */}
 						{isValidSelection && changeDirection === 'upgrade' && (
