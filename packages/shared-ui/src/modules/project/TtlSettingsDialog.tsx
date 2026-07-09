@@ -109,11 +109,36 @@ const TtlSettingsDialog: React.FC<ITtlSettingsDialogProps> = ({ ttlSeconds, onCo
 		ttlSeconds !== undefined && TTL_PRESETS.every((p) => p.value !== ttlSeconds) ? String(Math.round(ttlSeconds / 60)) : ''
 	);
 	const selectRef = useRef<HTMLSelectElement>(null);
+	const dialogRef = useRef<HTMLDivElement>(null);
 
 	const isCustom = selected === CUSTOM_OPTION;
 
 	// Focus the select on open — unless the custom input is showing (it autofocuses).
 	useEffect(() => { if (!isCustom) selectRef.current?.focus(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+	// Restore focus to the element that opened the dialog when it closes.
+	useEffect(() => {
+		const opener = document.activeElement as HTMLElement | null;
+		return () => { opener?.focus?.(); };
+	}, []);
+
+	// Trap Tab focus inside the dialog while it is open.
+	const handleTrapKeyDown = useCallback((e: React.KeyboardEvent) => {
+		if (e.key !== 'Tab') return;
+		const root = dialogRef.current;
+		if (!root) return;
+		const focusables = root.querySelectorAll<HTMLElement>('select:not([disabled]), input:not([disabled]), button:not([disabled])');
+		if (!focusables.length) return;
+		const first = focusables[0];
+		const last = focusables[focusables.length - 1];
+		if (e.shiftKey && document.activeElement === first) {
+			e.preventDefault();
+			last.focus();
+		} else if (!e.shiftKey && document.activeElement === last) {
+			e.preventDefault();
+			first.focus();
+		}
+	}, []);
 
 	const parsedMinutes = Number(customMinutes);
 	const customValid = customMinutes.trim() !== '' && Number.isInteger(parsedMinutes) && parsedMinutes >= 1;
@@ -130,7 +155,7 @@ const TtlSettingsDialog: React.FC<ITtlSettingsDialogProps> = ({ ttlSeconds, onCo
 
 	return createPortal(
 		<div style={commonStyles.modalOverlay} onClick={onCancel}>
-			<div role="dialog" aria-modal="true" aria-label="Pipeline Settings" style={styles.dialog} onClick={(e) => e.stopPropagation()}>
+			<div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Pipeline Settings" style={styles.dialog} onClick={(e) => e.stopPropagation()} onKeyDown={handleTrapKeyDown}>
 
 				<div style={styles.header}>Pipeline Settings</div>
 
