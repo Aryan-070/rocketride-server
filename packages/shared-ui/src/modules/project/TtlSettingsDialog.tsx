@@ -130,7 +130,7 @@ const TtlSettingsDialog: React.FC<ITtlSettingsDialogProps> = ({ ttlSeconds, onCo
 
 	return createPortal(
 		<div style={commonStyles.modalOverlay} onClick={onCancel}>
-			<div style={styles.dialog} onClick={(e) => e.stopPropagation()}>
+			<div role="dialog" aria-modal="true" aria-label="Pipeline Settings" style={styles.dialog} onClick={(e) => e.stopPropagation()}>
 
 				<div style={styles.header}>Pipeline Settings</div>
 

@@ -417,7 +417,7 @@ export default function Canvas(): ReactElement {
 					<BxIcon d={BX_EXPORT} size={16} />
 				</ToolbarButton>
 			)}
-			{onOpenSettings && (
+			{onOpenSettings && !isLocked && (
 				<>
 					<ToolbarDivider />
 					<ToolbarButton title="Pipeline settings" onClick={onOpenSettings}>
