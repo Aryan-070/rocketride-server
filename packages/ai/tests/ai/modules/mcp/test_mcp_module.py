@@ -31,6 +31,7 @@ async def test_build_mcp_server_lists_tools_from_real_registry(fake_engine):
         'validate_pipeline',
         'describe_pipeline',
         'run_pipeline',
+        'run_dropper_pipe',
         'send_data',
         'terminate',
         'send_files',

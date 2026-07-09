@@ -18,6 +18,8 @@ class FakeEngineClient:
         service_defs=None,
         validate_result=None,
         task_statuses=None,
+        public_token='pub-1',
+        base_url='http://localhost:5565',
     ):
         self._tasks = (
             tasks
@@ -29,6 +31,8 @@ class FakeEngineClient:
         self._nodes = nodes if nodes is not None else [{'type': 'parse'}]
         self._token = token
         self._result = result
+        self._public_token = public_token
+        self.base_url = base_url
         self.sent = []
         self.used = []
         self.terminated = []
@@ -103,7 +107,7 @@ class FakeEngineClient:
 
     async def use(self, **kwargs):
         self.used.append(kwargs)
-        return {'token': self._token, **kwargs}
+        return {'token': self._token, 'publicToken': self._public_token, **kwargs}
 
     async def terminate(self, token):
         self.terminated.append(token)

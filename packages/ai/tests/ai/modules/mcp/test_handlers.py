@@ -124,6 +124,7 @@ async def test_list_tools_reflects_real_register_all(fake_engine):
         'validate_pipeline',
         'describe_pipeline',
         'run_pipeline',
+        'run_dropper_pipe',
         'send_data',
         'terminate',
         'send_files',

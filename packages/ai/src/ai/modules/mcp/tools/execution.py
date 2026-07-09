@@ -1,6 +1,6 @@
 # Copyright 2026 Aparavi Software AG. MIT License.
-"""Token-based execution tools: `run_pipeline`, `send_data`, `terminate`,
-`send_files`.
+"""Token-based execution tools: `run_pipeline`, `run_dropper_pipe`, `send_data`,
+`terminate`, `send_files`.
 
 Token-based execution, no sessions: `use()` returns a task token -- the
 single run identity -- and the server-owned `TaskRegistry` (`registry.py`)
@@ -45,6 +45,19 @@ _RUN_PIPELINE_SCHEMA = {
         'pipeline': {'type': 'object', 'description': 'Inline pipeline definition'},
         'filepath': {'type': 'string', 'description': 'Path to a pipeline file (JSON, JSON5, or .pipe)'},
         'inputs': {'type': 'string', 'description': 'Data to send to the pipeline immediately after starting it'},
+        'ttl': {'type': 'integer', 'description': 'Task time-to-live in seconds; 0 = no timeout'},
+        'use_existing': {'type': 'boolean', 'description': 'Reuse an existing task instead of starting a new one'},
+        'source': {'type': 'string', 'description': 'Optional source label forwarded to use()'},
+        'threads': {'type': 'integer', 'description': 'Optional thread count forwarded to use()'},
+    },
+    'anyOf': [{'required': ['pipeline']}, {'required': ['filepath']}],
+}
+
+_RUN_DROPPER_PIPE_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'pipeline': {'type': 'object', 'description': 'Inline pipeline definition'},
+        'filepath': {'type': 'string', 'description': 'Path to a pipeline file (JSON, JSON5, or .pipe)'},
         'ttl': {'type': 'integer', 'description': 'Task time-to-live in seconds; 0 = no timeout'},
         'use_existing': {'type': 'boolean', 'description': 'Reuse an existing task instead of starting a new one'},
         'source': {'type': 'string', 'description': 'Optional source label forwarded to use()'},
@@ -139,6 +152,48 @@ async def _run_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
     return result_payload
 
 
+async def _run_dropper_pipe(client, tasks, args: Dict[str, Any]) -> dict:
+    """Start a pipeline and return a self-contained upload URL.
+
+    Bytes cannot ride the MCP tool call (transport payload limits), so this
+    tool returns an HTTP endpoint an out-of-band uploader POSTs files to. The
+    URL embeds both the task token (routing) and the task's public auth key
+    (``pk_``, credential) so it needs no ``Authorization`` header. Unlike
+    ``run_pipeline`` there is no inline-send path.
+    """
+    pipeline = args.get('pipeline')
+    filepath = args.get('filepath')
+    if not pipeline and not filepath:
+        return _bad('pipeline or filepath is required', 'pass an inline pipeline object or a filepath')
+
+    kwargs: Dict[str, Any] = {'filepath': filepath} if filepath else {'pipeline': pipeline}
+    for key in _OPTIONAL_USE_KWARGS:
+        if args.get(key) is not None:
+            kwargs[key] = args[key]
+
+    try:
+        started = await asyncio.wait_for(client.use(**kwargs), timeout=DEFAULT_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        return _timeout(
+            'run_dropper_pipe timed out waiting for the engine to start the task',
+            'the task may still be starting; call monitor once a task_token is known, or retry',
+        )
+
+    started = started or {}
+    token = started.get('token')
+    public_token = started.get('publicToken')
+    if not token or not public_token:
+        return _bad(
+            'engine did not return a task token and public auth for the dropper URL',
+            'the pipeline may lack a data-ingress source, or the engine response was malformed',
+        )
+    tasks.add(token, pipeline_ref=filepath or '<inline>')
+
+    upload_url = f'{client.base_url}/task/data?token={token}&auth={public_token}'
+    dropper_url = f'{client.base_url}/dropper?auth={public_token}'
+    return {'ok': True, 'task_token': token, 'upload_url': upload_url, 'dropper_url': dropper_url}
+
+
 async def _send_data(client, tasks, args: Dict[str, Any]) -> dict:
     token = args.get('task_token') or args.get('token')
     data = args.get('input')
@@ -202,13 +257,22 @@ async def _send_files(client, tasks, args: Dict[str, Any]) -> dict:
 
 
 def register(registry: ToolRegistry) -> None:
-    """Register the 4 token-based execution tools against ``registry``."""
+    """Register the 5 token-based execution tools against ``registry``."""
     registry.register(
         'run_pipeline',
         'Start a RocketRide pipeline from an inline definition or filepath, returning a task_token. '
         'Pass inputs to also send data immediately and get a result back in the same call.',
         _RUN_PIPELINE_SCHEMA,
     )(_run_pipeline)
+
+    registry.register(
+        'run_dropper_pipe',
+        'Start a RocketRide pipeline and return two self-contained URLs for getting files in over a '
+        'separate HTTP data channel (file bytes cannot ride the MCP tool call): upload_url for a '
+        'programmatic multipart POST, and dropper_url for a human to drag-drop files in a browser. '
+        'Same inputs as run_pipeline, minus the inline-send path.',
+        _RUN_DROPPER_PIPE_SCHEMA,
+    )(_run_dropper_pipe)
 
     registry.register(
         'send_data',

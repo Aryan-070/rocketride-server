@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 @runtime_checkable
 class EngineClient(Protocol):
+    @property
+    def base_url(self) -> str: ...
     async def list_tasks(self) -> List[dict]: ...
     async def list_nodes(self) -> List[dict]: ...
     async def send(
@@ -57,8 +59,23 @@ class WsEngineClient:
         from rocketride import RocketRideClient  # deferred import; SDK on the engine env
 
         self._client = RocketRideClient(uri=uri, auth=auth)
+        self._uri = uri
         self._connected = False
         self._connect_lock = asyncio.Lock()
+
+    @property
+    def base_url(self) -> str:
+        """HTTP(S) base for the engine REST surface, derived from the WS/HTTP uri.
+
+        The data-ingress endpoint (`/task/data`) is HTTP, but ``ROCKETRIDE_URI``
+        may be a ``ws://`` URL. Normalize the scheme and strip any trailing slash.
+        """
+        uri = self._uri
+        if uri.startswith('ws://'):
+            uri = 'http://' + uri[len('ws://') :]
+        elif uri.startswith('wss://'):
+            uri = 'https://' + uri[len('wss://') :]
+        return uri.rstrip('/')
 
     async def _ensure_connected(self) -> None:
         if self._connected:

@@ -432,7 +432,11 @@ class RequestProcessing:
 async def task_Data(
     request: Request,
     token: Optional[str] = Query(None, description='Token returned from task execute'),
-    authorization: str = Header(..., description='Bearer API key in the Authorization header'),
+    authorization: Optional[str] = Header(
+        None,
+        description='Credential via Authorization header. Optional: may instead be supplied as the '
+        '?auth= query param, which AuthMiddleware also accepts.',
+    ),
 ) -> Response:
     r"""
     Process data uploads through RocketRide pipelines.
@@ -502,7 +506,11 @@ async def task_Data(
 async def task_Process(
     request: Request,
     token: Optional[str] = Query(None, description='Token returned from task execute'),
-    authorization: str = Header(..., description='Bearer API key in the Authorization header'),
+    authorization: Optional[str] = Header(
+        None,
+        description='Credential via Authorization header. Optional: may instead be supplied as the '
+        '?auth= query param, which AuthMiddleware also accepts.',
+    ),
 ) -> DataResult:
     r"""
     Process data uploads through RocketRide pipelines.

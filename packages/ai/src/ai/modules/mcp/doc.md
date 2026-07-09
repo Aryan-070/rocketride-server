@@ -11,7 +11,7 @@ like every other module and mounted at:
 /mcp
 ```
 
-This module exposes a static, 16-tool RocketRide authoring/execution surface served
+This module exposes a static, 17-tool RocketRide authoring/execution surface served
 over HTTP from inside the running engine process — no separate process or transport
 bridge required. It supersedes the earlier 2-tool port, which exposed a dynamic
 per-pipeline `{filepath}` tool plus a `RocketRide_Document_Processor` convenience
@@ -50,7 +50,7 @@ tool; both are removed (see "History" below).
 Config key `mcp_dev_no_auth` (bool, in the module `config` dict passed to `initModule`)
 is the config-driven equivalent of `MCP_DEV_NO_AUTH=1`; either one enables the bypass.
 
-## The 16 tools
+## The 17 tools
 
 Dispatch is registry-based: `tooling.ToolRegistry` holds `{name -> (description,
 inputSchema, handler)}`; `tools/__init__.register_all(registry)` populates one shared
@@ -72,11 +72,12 @@ per-pipeline tool generation and no `filepath`-shaped convenience tool.
 | `validate_pipeline` | Validate a pipeline against the engine's own rules (engine-authoritative, zero client-side drift). | `pipeline` or `filepath` |
 | `describe_pipeline` | Statically describe a pipeline's source and components (id, provider, title, classType, inputs); synthesized client-side, no backing SDK method. | `pipeline` or `filepath` |
 
-**Execution (3)** — `tools/execution.py`, token-based, no sessions:
+**Execution (4)** — `tools/execution.py`, token-based, no sessions:
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
 | `run_pipeline` | Start a pipeline (inline or filepath), returning a `task_token`; optionally send `inputs` in the same call and get a result back. | `pipeline`/`filepath`, `inputs`, `ttl`, `use_existing`, `source`, `threads` |
+| `run_dropper_pipe` | Start a pipeline (inline or filepath) and return two self-contained URLs for getting files in over a separate HTTP data channel — file bytes cannot ride the MCP tool call: `upload_url` for programmatic POSTing and `dropper_url` for a human to drag-drop files in a browser. Same inputs as `run_pipeline` minus `inputs` (no inline-send path). `upload_url` is `POST {base}/task/data?token=<tk_>&auth=<pk_>` (multipart or raw body); `dropper_url` is `GET {base}/dropper?auth=<pk_>` (a browser page whose UI then POSTs to `/task/data`). Both embed the routing token and task's public auth key so no `Authorization` header is required. | `pipeline`/`filepath`, `ttl`, `use_existing`, `source`, `threads` |
 | `send_data` | Send data to a running task by `task_token`, return its result. | `task_token`, `input` |
 | `terminate` | Tear down a running task by `task_token` — also the stop-runaway-task path. | `task_token` |
 
@@ -144,7 +145,7 @@ prompt templates from the earlier port were removed along with their tests.
 ## The `EngineClient` seam
 
 `engine.py` defines one `Protocol`, `EngineClient`, with the ~19 async methods needed
-by the 16-tool surface (task lifecycle, services/validation, env, store/templates,
+by the 17-tool surface (task lifecycle, services/validation, env, store/templates,
 deployments — see the `Protocol` definition in `engine.py` for exact signatures). All
 tool/resource code depends only on this interface — never on a concrete client — so
 the implementation is swappable.
@@ -245,7 +246,7 @@ This module originally shipped as a 2-tool port of the standalone stdio MCP serv
 one dynamic tool generated per pipeline file (a raw caller-supplied `{filepath}` read
 off the local filesystem with no sandboxing) plus a `RocketRide_Document_Processor`
 convenience tool, 3 `rocketride://` resources, and 3 MCP prompts. That surface has
-been fully replaced by the 16-tool static/typed surface described above, ported from
+been fully replaced by the 17-tool static/typed surface described above, ported from
 the design in `claude/tasks/rocketride-mcp-server/` via
 `claude/tasks/http-mcp-tools-port/`. The dynamic per-pipeline tools, the convenience
 tool, `rocketride://nodes`, and all 3 prompts are removed.

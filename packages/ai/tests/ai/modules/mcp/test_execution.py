@@ -266,3 +266,75 @@ async def test_send_files_calls_seam_with_files_then_token_order(fake_engine):
 
     assert result == {'ok': True, 'result': {'uploaded': 2}}
     assert fake_engine.sent_files == [{'files': files, 'token': 'tok-1'}]
+
+
+# --- run_dropper_pipe --------------------------------------------------------
+
+
+def test_register_all_includes_run_dropper_pipe():
+    registry = ToolRegistry()
+    register_all(registry)
+    assert 'run_dropper_pipe' in set(registry.names())
+
+
+@pytest.mark.asyncio
+async def test_run_dropper_pipe_requires_pipeline_or_filepath(fake_engine):
+    registry = ToolRegistry()
+    execution.register(registry)
+    tasks = TaskRegistry()
+
+    result = await registry.handler('run_dropper_pipe')(fake_engine, tasks, {})
+
+    assert result['ok'] is False
+    assert result['error_type'] == 'BadRequest'
+    assert fake_engine.used == []
+
+
+@pytest.mark.asyncio
+async def test_run_dropper_pipe_returns_self_contained_upload_url(fake_engine):
+    registry = ToolRegistry()
+    execution.register(registry)
+    tasks = TaskRegistry()
+
+    result = await registry.handler('run_dropper_pipe')(fake_engine, tasks, {'filepath': 'p.pipe'})
+
+    assert result['ok'] is True
+    assert result['task_token'] == fake_engine._token
+    assert result['upload_url'] == (
+        f'{fake_engine.base_url}/task/data?token={fake_engine._token}&auth={fake_engine._public_token}'
+    )
+    assert result['dropper_url'] == (f'{fake_engine.base_url}/dropper?auth={fake_engine._public_token}')
+    # token tracked so monitor/terminate work against it
+    assert tasks.get(fake_engine._token) is not None
+
+
+@pytest.mark.asyncio
+async def test_run_dropper_pipe_forwards_kwargs_and_never_inline_sends(fake_engine):
+    registry = ToolRegistry()
+    execution.register(registry)
+    tasks = TaskRegistry()
+
+    await registry.handler('run_dropper_pipe')(
+        fake_engine,
+        tasks,
+        {'filepath': 'p.pipe', 'ttl': 30, 'use_existing': True, 'source': 'src', 'threads': 4, 'inputs': 'ignored'},
+    )
+
+    # `inputs` is NOT forwarded and NO send() happens -- this tool never inline-sends.
+    assert fake_engine.used == [{'filepath': 'p.pipe', 'ttl': 30, 'use_existing': True, 'source': 'src', 'threads': 4}]
+    assert fake_engine.sent == []
+
+
+@pytest.mark.asyncio
+async def test_run_dropper_pipe_bad_request_when_engine_omits_public_token(fake_engine):
+    registry = ToolRegistry()
+    execution.register(registry)
+    tasks = TaskRegistry()
+    fake_engine._public_token = None  # simulate an engine response missing publicToken
+
+    result = await registry.handler('run_dropper_pipe')(fake_engine, tasks, {'filepath': 'p.pipe'})
+
+    assert result['ok'] is False
+    assert result['error_type'] == 'BadRequest'
+    # no null-keyed task leaked into the registry
+    assert tasks.get(None) is None

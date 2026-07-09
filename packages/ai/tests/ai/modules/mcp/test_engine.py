@@ -395,3 +395,11 @@ async def test_get_task_status_calls_sdk_with_token(monkeypatch):
 
     assert fake.get_task_status_calls == ['tok-3']
     assert result == {'state': 5, 'completed': True}
+
+
+def test_base_url_normalizes_scheme_and_strips_trailing_slash():
+    from ai.modules.mcp.engine import WsEngineClient
+
+    assert WsEngineClient(uri='ws://localhost:5565/', auth='k').base_url == 'http://localhost:5565'
+    assert WsEngineClient(uri='wss://host/', auth='k').base_url == 'https://host'
+    assert WsEngineClient(uri='http://localhost:5565', auth='k').base_url == 'http://localhost:5565'
