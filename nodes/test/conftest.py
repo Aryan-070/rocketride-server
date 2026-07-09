@@ -215,10 +215,30 @@ def _missing_libs_skip_mark(config):
     )
 
 
+# Nodes that load a heavy model in-process but carry no 'gpu' capability tag
+# (CPU model-download nodes). Supplements the capability signal — keep small.
+_HEAVY_TEST_NODES = {'audio_transcribe', 'audio_tts'}
+
+
+def _is_heavy_node(config) -> bool:
+    """Whether a node loads a heavy model in-process.
+
+    True for the 'gpu' capability (mirrors the existing `'debug' in capabilities`
+    check) or a known CPU heavy-model node. Such tests are pinned to one xdist
+    worker so their model loads run serially instead of exhausting RAM/VRAM.
+    """
+    return 'gpu' in config.capabilities or config.node_name in _HEAVY_TEST_NODES
+
+
 def _build_parametrize_list(configs, skip_nodes=None, include_skip=None):
     """Build pytest.param entries for (config, profile) pairs, applying skip_nodes.
 
     A config with missing `requiresLibs` is still emitted, but marked skip.
+    Heavy (model-loading) configs also get an `xdist_group('gpu')` mark so that,
+    under `--dist loadgroup`, all their tests run on one worker (serially) and don't
+    OOM-crash workers. The mark is applied here at parametrize time — not in
+    `pytest_collection_modifyitems` — because xdist reads the group during its own
+    collection pass and would miss a marker added by a later hook.
     """
     params = []
     for config in configs:
@@ -231,8 +251,13 @@ def _build_parametrize_list(configs, skip_nodes=None, include_skip=None):
         if not config.has_required_env_vars():
             continue
 
+        marks = []
         skip_mark = _missing_libs_skip_mark(config)
-        marks = (skip_mark,) if skip_mark else ()
+        if skip_mark:
+            marks.append(skip_mark)
+        if _is_heavy_node(config):
+            marks.append(pytest.mark.xdist_group('gpu'))
+        marks = tuple(marks)
 
         if not config.profiles:
             params.append(pytest.param((config, None), id=config.get_test_id(), marks=marks))
@@ -257,12 +282,17 @@ def pytest_generate_tests(metafunc):
         # excluded because they pull large libraries, use heavy models, or depend on local
         # services, which would cause CI timeouts or OOM. Opt-in via ROCKETRIDE_INCLUDE_SKIP:
         #   ROCKETRIDE_INCLUDE_SKIP=embedding_image pytest nodes/test/test_dynamic.py -v -k embedding_image
-        # Groups: ML/heavy (anonymize, ocr, ner, embedding_image); image/video (image_cleanup, frame_grabber); LLM/local (llm_anthropic, llm_ollama); audio/TTS (audio_tts).
+        # Groups: ML/heavy (anonymize, ocr, ner, embedding_image, embedding_transformer, embedding_video); image/video (image_cleanup, frame_grabber); LLM/local (llm_anthropic, llm_ollama); audio/TTS (audio_tts).
         skip_nodes = {
             'anonymize',
             'ocr',
             'ner',
             'embedding_image',
+            # Download model weights from huggingface.co at test time, so they turn the
+            # required CI check red whenever the HF hub is unreachable/rate-limited — on
+            # PRs unrelated to embeddings (RR-1120). Same class as embedding_image above.
+            'embedding_transformer',  # sentence-transformers (miniLM)
+            'embedding_video',  # CLIP (openai-patch16)
             'image_cleanup',
             'frame_grabber',
             'audio_transcribe',  # it downloads faster-whisper model (1.5GB)
