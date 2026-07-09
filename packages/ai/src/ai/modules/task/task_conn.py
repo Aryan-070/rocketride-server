@@ -305,7 +305,16 @@ class TaskConn(
         args = message.get('arguments') or {}
         raw_ctx = args.pop('_ctx', None)
 
-        if raw_ctx:
+        # A forwarded _ctx replaces the caller's identity, so it is only honoured
+        # on a connection that itself authenticated as an internal pod service
+        # (the Orchestrator). An ordinary authenticated client could otherwise set
+        # arguments._ctx to run as a forged user/admin. The key is already popped
+        # above, so an untrusted forward simply falls through to the
+        # connection-derived context below.
+        conn_account = self._account_info
+        conn_is_internal = bool(conn_account and 'internal' in (getattr(conn_account, 'sysPermissions', None) or []))
+
+        if raw_ctx and conn_is_internal:
             # Pod mode: orchestrator forwarded the caller's identity. Guard the
             # account_info lookup — a malformed/pre-auth forward without it must
             # not raise KeyError out of on_receive (which would silently drop the

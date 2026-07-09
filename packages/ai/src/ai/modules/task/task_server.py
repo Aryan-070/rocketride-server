@@ -743,9 +743,22 @@ class TaskServer(DAPBase):
         if not account_info:
             raise PermissionError('Not authenticated')
 
-        # pk_ and tk_ auth are already scoped to their task
+        # tk_ auth is already scoped to its own private task token — but only to
+        # THAT task. A tk_ for another task must not authorize this control.
         auth = getattr(account_info, 'auth', '')
-        if auth.startswith(('pk_', 'tk_')):
+        if auth.startswith('tk_'):
+            if auth != control.token:
+                raise PermissionError('Access denied: scoped token does not match this task')
+            return
+
+        # pk_ auth is scoped to its own public task token and to public task
+        # access only (data pipes + SSE monitoring); it never grants control/
+        # debug/store permissions.
+        if auth.startswith('pk_'):
+            if auth != getattr(control, 'public_auth', ''):
+                raise PermissionError('Access denied: scoped token does not match this task')
+            if require and require not in {'task.data', 'task.monitor'}:
+                raise PermissionError(f'Permission {require!r} denied for this task')
             return
 
         # resolve_task_permissions handles sys.admin and internal

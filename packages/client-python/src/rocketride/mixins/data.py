@@ -241,13 +241,17 @@ class DataMixin(DAPClient):
             if not isinstance(buffer, bytes):
                 raise ValueError('Buffer must be bytes')
 
-            # Split into ≤ 512 KB chunks; a single-chunk path has no overhead
-            offset = 0
+            # Split into ≤ 512 KB chunks; a single-chunk path has no overhead.
+            # A zero-length buffer still issues exactly one empty write so the
+            # payload is delivered, matching the pre-chunking single-request path.
             total = len(buffer)
-            while offset < total:
-                chunk = buffer[offset : offset + self._MAX_WRITE_CHUNK]
-                offset += len(chunk)
-
+            if total == 0:
+                chunks = (buffer,)
+            else:
+                chunks = (
+                    buffer[offset : offset + self._MAX_WRITE_CHUNK] for offset in range(0, total, self._MAX_WRITE_CHUNK)
+                )
+            for chunk in chunks:
                 request = self._client.build_request(
                     'rrext_process',
                     arguments={

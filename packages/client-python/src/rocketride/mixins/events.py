@@ -463,7 +463,7 @@ class EventMixin(DAPClient):
                     pass  # Best-effort — server may have already cleared
         self._monitor_keys.clear()
 
-    async def identify(self, app_name: str) -> None:
+    async def identify(self, app_name: Optional[str] = None, *, client_name: Optional[str] = None) -> None:
         """Set the app-level display name for this connection.
 
         Useful when an app plugin loads and wants the server monitor to show
@@ -473,7 +473,12 @@ class EventMixin(DAPClient):
 
         Args:
             app_name: The app-level display name for this connection.
+            client_name: Deprecated alias for ``app_name`` (pre-rename callers).
         """
+        if app_name is None:
+            if client_name is None:
+                raise TypeError("identify() missing required argument: 'app_name'")
+            app_name = client_name
         self._app_name = app_name
         if getattr(self, '_authenticated', False):
             # Send both appName (new) and clientName (legacy) for back-compat

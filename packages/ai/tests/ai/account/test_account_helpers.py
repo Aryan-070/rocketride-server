@@ -299,6 +299,20 @@ def test_resolve_team_permissions_grants_internal_without_membership():
     assert resolve_team_permissions(_acct(sys_perms=['internal']), 'team-x') == list(_FULL_TEAM_PERMISSIONS)
 
 
+def test_resolve_task_permissions_grants_sys_admin_without_membership():
+    """The task-scoped resolver applies the same sys.admin bypass."""
+    from ai.account.models import _FULL_TEAM_PERMISSIONS, resolve_task_permissions
+
+    assert resolve_task_permissions(_acct(sys_perms=['sys.admin']), 'team-x') == list(_FULL_TEAM_PERMISSIONS)
+
+
+def test_resolve_task_permissions_grants_internal_without_membership():
+    """The task-scoped resolver also honours the pod 'internal' service credential."""
+    from ai.account.models import _FULL_TEAM_PERMISSIONS, resolve_task_permissions
+
+    assert resolve_task_permissions(_acct(sys_perms=['internal']), 'team-x') == list(_FULL_TEAM_PERMISSIONS)
+
+
 def test_resolve_team_permissions_raises_for_normal_user_without_membership():
     """A normal caller with no membership in the team still raises (unchanged)."""
     from ai.account.models import resolve_team_permissions

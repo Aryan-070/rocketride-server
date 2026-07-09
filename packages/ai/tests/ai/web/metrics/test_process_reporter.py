@@ -63,9 +63,14 @@ def fake_rocketlib(monkeypatch):
 @pytest.fixture(autouse=True)
 def fake_platform_reads(monkeypatch):
     """Stub the OS resource reads so ``_sample()`` runs on any platform."""
+    # _sample() mutates the shared metrics singleton (cpu_compute/cpu_memory);
+    # reset it around each test so values don't leak between tests.
+    pr_mod.metrics.reset()
     monkeypatch.setattr(pr_mod, '_read_cpu_times', lambda: (0.0, 0.0))
     monkeypatch.setattr(pr_mod, '_read_rss_mb', lambda: 100.0)
     monkeypatch.setattr(pr_mod, '_read_gpu_vram_mb', lambda: 0.0)
+    yield
+    pr_mod.metrics.reset()
 
 
 def _usg_calls(fake_rocketlib) -> list:

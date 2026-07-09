@@ -119,11 +119,13 @@ class TaskMetrics:
         # billing.  Captured at/after service-up (see set_service_up).
         self._baselines: dict[str, float] = {}
 
-        # At the service-up instant _subprocess_usage may still be empty — the
-        # first ``>USG*`` (a periodic billing-cadence emit from ProcessReporter,
-        # or an object boundary) may not have arrived yet.  Snapshotting an empty
-        # baseline would bill all of startup, so when it is empty this flag
-        # defers the baseline capture to the first ``>USG*`` after service-up.
+        # Safety net for the (now rare) case where service-up fires before any
+        # ``>USG*`` has arrived.  ProcessReporter emits its first ``>USG*`` on its
+        # very first sample (~1s after task start), so by the time the pipeline is
+        # ready _subprocess_usage is normally already populated and the baseline
+        # is captured directly at service-up.  If service-up still beats the first
+        # snapshot, this flag defers baseline capture to the first ``>USG*`` after
+        # service-up (snapshotting an empty baseline would bill all of startup).
         self._baseline_pending: bool = False
 
     def set_service_up(self, value: bool) -> None:
@@ -196,10 +198,11 @@ class TaskMetrics:
         values = payload.get('values', {})
         self._subprocess_usage = {str(k): float(v) for k, v in values.items()}
 
-        # Complete a deferred baseline: if service-up fired before any >USG*
-        # arrived, this first post-service-up cumulative snapshot IS the
-        # startup delta, so it is excluded from billing (this first report
-        # nets to zero; subsequent reports bill value − baseline).
+        # Complete a deferred baseline (rare — see _baseline_pending): only when
+        # service-up beat the reporter's first >USG* is this first post-service-up
+        # cumulative snapshot treated as the startup delta and excluded from
+        # billing (this first report nets to zero; subsequent reports bill
+        # value − baseline).
         if self._baseline_pending and not self._billing_gated:
             self._baselines = dict(self._subprocess_usage)
             self._baseline_pending = False

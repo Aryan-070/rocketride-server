@@ -49,7 +49,7 @@ Architecture:
 - Proxies to engine subprocesses via the same path as cmd_data.py
 """
 
-from typing import TYPE_CHECKING, Dict, Any
+from typing import TYPE_CHECKING, Optional
 from ai.account.models import RequestContext
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.cprofile_manager import profiler
@@ -106,7 +106,9 @@ class CProfileCommands(DAPConn):
         """Build the owner identifier for this connection."""
         return f'task:{self._connection_id}'
 
-    async def _proxy_to_task(self, request: Dict[str, Any], target: str, ctx=None) -> Dict[str, Any]:
+    async def _proxy_to_task(
+        self, request: DAPRequest, target: str, ctx: Optional[RequestContext] = None
+    ) -> DAPResponse:
         """
         Forward a cProfile command to a pipeline's engine subprocess.
 

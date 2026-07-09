@@ -49,6 +49,7 @@ from .types.account import (
 
 if TYPE_CHECKING:
     from .client import RocketRideClient
+    from .types.client import AppManifestEntry
 
 
 class AccountApi:
@@ -105,7 +106,7 @@ class AccountApi:
         """Permanently delete the current user's account."""
         await self._client.call('rrext_account_me', subcommand='delete')
 
-    async def get_desktop(self) -> list:
+    async def get_desktop(self) -> list[AppManifestEntry]:
         """
         Fetch the authenticated user's desktop apps with subscription status.
 
@@ -114,7 +115,7 @@ class AccountApi:
         ``onDesktop``, ``features``, and full manifest fields.
 
         Returns:
-            list: List of AppManifestEntry dicts for apps on the user's desktop.
+            list[AppManifestEntry]: Apps on the user's desktop.
         """
         body = await self._client.call('rrext_account_me', subcommand='desktop')
         return body.get('apps', [])

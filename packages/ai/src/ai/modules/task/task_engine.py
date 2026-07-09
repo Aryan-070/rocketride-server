@@ -739,17 +739,16 @@ class Task(DAPBase):
             self._status.state = TASK_STATE.CANCELLED.value
             self.debug_message(f'Task terminated abnormally with exit code {exit_code}')
 
-        # Zero metrics after stop_monitoring() has audited them.
-        # The audit in stop_monitoring() freezes the final token totals
-        # for billing. Now clear the metrics so the client chart shows
-        # zero after task completion instead of stale values.
+        # Zero the live point-in-time metrics after stop_monitoring() has audited
+        # them. The audit in stop_monitoring() freezes the final token totals for
+        # billing. Clearing the live values makes the client chart read zero after
+        # completion instead of showing stale values. The peak_* watermarks are
+        # left intact so the terminal status still reports the task's lifetime
+        # resource peaks.
         try:
             self._status.metrics.cpu_percent = 0.0
             self._status.metrics.cpu_memory_mb = 0.0
             self._status.metrics.gpu_memory_mb = 0.0
-            self._status.metrics.peak_cpu_percent = 0.0
-            self._status.metrics.peak_cpu_memory_mb = 0.0
-            self._status.metrics.peak_gpu_memory_mb = 0.0
         except Exception:
             pass
 

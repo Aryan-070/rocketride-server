@@ -207,12 +207,18 @@ export class DataPipe {
 			throw new Error('Buffer must be Uint8Array');
 		}
 
-		// Split into ≤ 512 KB chunks; a single-chunk path has no overhead.
-		let offset = 0;
-		while (offset < buffer.length) {
-			const chunk = buffer.subarray(offset, offset + DataPipe.MAX_WRITE_CHUNK);
-			offset += chunk.length;
+		// Split into ≤ 512 KB chunks; a single-chunk path has no overhead. A
+		// zero-length buffer still issues exactly one empty write so the payload
+		// is delivered, matching the pre-chunking single-request path.
+		const chunks =
+			buffer.length === 0
+				? [buffer]
+				: Array.from({ length: Math.ceil(buffer.length / DataPipe.MAX_WRITE_CHUNK) }, (_, index) => {
+						const offset = index * DataPipe.MAX_WRITE_CHUNK;
+						return buffer.subarray(offset, offset + DataPipe.MAX_WRITE_CHUNK);
+					});
 
+		for (const chunk of chunks) {
 			const request = this._client.buildRequest('rrext_process', {
 				arguments: {
 					subcommand: 'write',
@@ -894,9 +900,21 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async connect(credential?: string | { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
 		this._currentReconnectDelay = 250;
+		// Handle a URI change up front — detach() resets _desiredState to
+		// 'detached', so it must run before we set the authenticated target
+		// below. Doing it here also means attach()/login() never re-run the
+		// detach/re-attach dance and clobber the authenticated intent (leaving a
+		// failed persist-mode reconnect stuck at 'attached', never re-logging in).
+		if (options?.uri) {
+			const normalised = this._getWebsocketUri(options.uri);
+			if (normalised !== this._uri) {
+				if (this.isAttached()) await this.detach();
+				this._setUri(options.uri);
+			}
+		}
 		this._desiredState = 'authenticated';
-		await this.attach(options?.uri, { timeout: options?.timeout });
-		return this.login(credential, options);
+		await this.attach(undefined, { timeout: options?.timeout });
+		return this.login(credential, { timeout: options?.timeout });
 	}
 
 	/**

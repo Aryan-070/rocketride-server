@@ -117,16 +117,21 @@ class DASHBOARD_REQUEST(TypedDict, total=False):
     connections: DASHBOARD_PAGE_PARAMS
 
 
-class DASHBOARD_RESPONSE(TypedDict, total=False):
+class _DASHBOARD_RESPONSE_BASE(TypedDict):
+    """Required keys of the rrext_dashboard response (always present)."""
+
+    overview: DASHBOARD_OVERVIEW
+
+
+class DASHBOARD_RESPONSE(_DASHBOARD_RESPONSE_BASE, total=False):
     """
     Complete response from the rrext_dashboard command.
 
-    ``tasks`` / ``connections`` are omitted when that section's ``limit`` is 0;
-    ``tasks_total`` / ``connections_total`` give the row counts matching the
-    (state-)filtered set, for the pagination UI.
+    ``overview`` is always present. ``tasks`` / ``connections`` are omitted when
+    that section's ``limit`` is 0; ``tasks_total`` / ``connections_total`` give
+    the row counts matching the (state-)filtered set, for the pagination UI.
     """
 
-    overview: DASHBOARD_OVERVIEW
     tasks: List[DASHBOARD_TASK]
     tasks_total: int
     connections: List[DASHBOARD_CONNECTION]

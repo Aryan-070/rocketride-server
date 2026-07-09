@@ -83,12 +83,23 @@ def _sort_key(value: Any):
     """
     Build a total-ordering sort key that tolerates mixed / missing values.
 
-    Returning ``(value is None, value)`` groups ``None`` values together
-    without ever comparing ``None`` against a real value (which would raise
-    ``TypeError``). Within a single dashboard field the real values are
-    homogeneous, so the second element only compares like-typed values.
+    ``sort_by`` comes straight from the request, so a caller can sort by any
+    field — including dict/list columns (``clientInfo``, ``monitors``,
+    ``metrics``) or a column whose rows mix scalar types. A naive ``(value is
+    None, value)`` key would then raise ``TypeError`` when Python tried to
+    compare unlike values. The first tuple element separates ``None`` from real
+    values, the second buckets by type, and only the third (like-typed within a
+    bucket) is ever compared — so no ``TypeError`` is possible.
     """
-    return (value is None, value)
+    if value is None:
+        return (1, 0, '')
+    if isinstance(value, bool):
+        return (0, 0, int(value))
+    if isinstance(value, (int, float)):
+        return (0, 1, value)
+    if isinstance(value, str):
+        return (0, 2, value.casefold())
+    return (0, 3, repr(value))
 
 
 def _paginate(items: List[Dict[str, Any]], params: Dict[str, Any]) -> tuple:
@@ -617,6 +628,12 @@ class MonitorCommands(DAPConn):
         Raises:
             PermissionError: If the caller lacks the required permission.
         """
+        # NONE removes a subscription. Removal must always be allowed — a caller
+        # whose team access was revoked still needs to clear its stale monitor,
+        # otherwise the entry lingers in _monitors and keeps receiving events.
+        if event_type == EVENT_TYPE.NONE:
+            return
+
         perms = resolve_task_permissions(self._account_info, team_id)
         if not perms:
             raise PermissionError('Access denied: no permissions for this task')

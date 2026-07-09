@@ -25,7 +25,7 @@
 Metrics collection singleton for pipeline billing and monitoring.
 
 Provides a flat, thread-safe metrics accumulator.  Multiple pipe threads
-can call ``timer()``, ``add_time()``, ``counter()``, and ``event()``
+can call ``timer()``, ``add_value()``, ``counter()``, and ``event()``
 concurrently — each method acquires the lock only briefly.
 
 Accumulated metrics are emitted to the parent process via the ``>MET*``
@@ -40,7 +40,7 @@ Architecture:
     - All mutations are protected by a single threading.Lock.
     - ``timer()`` captures perf_counter locally; only touches shared
       state under the lock on exit — safe for concurrent pipe threads.
-    - ``add_time()`` accepts a dict of timer values, used by ModelClient
+    - ``add_value()`` accepts a dict of values, used by ModelClient
       to record server-reported perf counters in a single lock acquisition.
     - ``report()`` returns a snapshot (shallow copies) without clearing.
 
@@ -103,7 +103,10 @@ class MetricsManager:
     owns the ``>MET*`` output, so no task_id tracking is needed here.
 
     Attributes:
-        _timers: Accumulated milliseconds per named timer (e.g. 'gpu').
+        _values: Named float accumulators. ``timer``/``add_value`` add into a
+            key (additive); ``set_value`` overwrites it with an absolute
+            cumulative total (e.g. getrusage/RSS). Both semantics share this
+            dict — the key's producer decides which applies.
         _counters: Accumulated integer values per named counter.
         _events: List of structured event dicts.
         _lock: Threading lock protecting all shared state.
@@ -111,8 +114,9 @@ class MetricsManager:
 
     def __init__(self):
         """Initialize empty accumulators and the thread lock."""
-        # Timer accumulators — values are cumulative milliseconds
-        self._timers: Dict[str, float] = {}
+        # Named float accumulators — additive (timer/add_value) or absolute
+        # (set_value), depending on the producer of each key.
+        self._values: Dict[str, float] = {}
 
         # Counter accumulators — values are cumulative integers
         self._counters: Dict[str, int] = {}
@@ -135,7 +139,7 @@ class MetricsManager:
         ensure a clean slate for the new task's metrics.
         """
         with self._lock:
-            self._timers.clear()
+            self._values.clear()
             self._counters.clear()
             self._events.clear()
 
@@ -168,7 +172,7 @@ class MetricsManager:
             # Compute elapsed and accumulate under the lock
             elapsed_ms = (time.perf_counter() - start) * 1000
             with self._lock:
-                self._timers[name] = self._timers.get(name, 0.0) + elapsed_ms
+                self._values[name] = self._values.get(name, 0.0) + elapsed_ms
 
     def add_value(self, values: Dict[str, float]):
         """
@@ -189,7 +193,7 @@ class MetricsManager:
         """
         with self._lock:
             for name, amount in values.items():
-                self._timers[name] = self._timers.get(name, 0.0) + amount
+                self._values[name] = self._values.get(name, 0.0) + amount
 
     def set_value(self, name: str, value: float):
         """
@@ -204,7 +208,7 @@ class MetricsManager:
             value: Absolute cumulative value to set.
         """
         with self._lock:
-            self._timers[name] = value
+            self._values[name] = value
 
     # ========================================================================
     # COUNTERS
@@ -262,7 +266,7 @@ class MetricsManager:
         """
         with self._lock:
             # Merge timers and counters into one flat dict
-            merged = dict(self._timers)
+            merged = dict(self._values)
             for name, count in self._counters.items():
                 merged[name] = merged.get(name, 0.0) + float(count)
             return {

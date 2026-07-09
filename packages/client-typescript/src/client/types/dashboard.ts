@@ -40,7 +40,7 @@ export interface DashboardPageParams {
 	/** Sort direction (default 'desc'). */
 	sort_order?: 'asc' | 'desc';
 	/** State filter for tasks: 'running' | 'completed' | null (all). */
-	state_filter?: string | null;
+	state_filter?: 'running' | 'completed' | null;
 }
 
 /** Request arguments for rrext_dashboard. */

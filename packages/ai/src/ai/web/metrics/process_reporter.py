@@ -265,7 +265,13 @@ class ProcessReporter:
         self._last_utime = utime
         self._last_stime = stime
         self._last_wall = time.monotonic()
-        self._last_usg_wall = self._last_wall
+        # Emit the first >USG* on the very first sample (not one billing interval
+        # later) so the parent receives a real cumulative startup snapshot well
+        # before serviceUp. That lets the parent capture its billing baseline AT
+        # serviceUp from actual usage instead of deferring it to the first object
+        # boundary — which would otherwise fold the first object's work into the
+        # baseline and drop it from billing.
+        self._last_usg_wall = 0.0
 
         # Reset billing accumulators
         self._cumulative_cpu_ms = 0.0
@@ -293,6 +299,11 @@ class ProcessReporter:
         # Signal stop and wait for thread to finish
         self._stopped.set()
         self._thread.join(timeout=3.0)
+        if self._thread.is_alive():
+            # Join timed out. Leave _thread set (so a later start() won't spawn a
+            # second reporter) and skip the final _sample() so we don't race the
+            # daemon's still-in-flight sample.
+            return
         self._thread = None
 
         # Final sample to ensure billing accumulators are up to date
