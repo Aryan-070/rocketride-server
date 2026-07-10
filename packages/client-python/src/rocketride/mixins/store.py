@@ -247,18 +247,13 @@ class StoreMixin(DAPClient):
     # =========================================================================
 
     async def media_open(self, path: str) -> Dict[str, Any]:
-        """Open a produced media artifact for reading over the reliable DAP channel.
-
-        Needs only ``task.data`` (not ``task.store``) and is restricted to the
-        ``outputs/`` prefix server-side. Returns ``{handle, size, complete}``, where
-        ``size`` is what exists *so far* and ``complete`` says whether the producing
-        node has finished.
+        """Open a produced artifact. Needs only ``task.data``, confined to ``outputs/``.
+        Returns ``{handle, size, complete}``; for a live artifact ``size`` is a snapshot.
         """
         return await self.call('rrext_media', subcommand='media_open', path=path)
 
     async def media_read(self, handle: str, offset: int = 0, length: int = MEDIA_CHUNK_SIZE) -> bytes:
-        """Read one chunk. Waits for the producer rather than reporting a premature EOF.
-
+        """Read one chunk, waiting for the producer.
         Empty bytes always mean the stream ended, never "not yet".
         """
         # media_read returns binary in response.arguments (not body); use raw request.
@@ -277,9 +272,7 @@ class StoreMixin(DAPClient):
 
     async def media_chunks(self, path: str) -> AsyncIterator[bytes]:
         """Yield an artifact's chunks as they are produced, stopping at end-of-stream.
-
-        Each read blocks server-side until bytes exist, so this paces itself to the
-        producing node instead of polling.
+        Each read blocks server-side, so this paces itself to the node instead of polling.
         """
         info = await self.media_open(path)
         handle = info['handle']
@@ -292,10 +285,8 @@ class StoreMixin(DAPClient):
             await self.media_close(handle)
 
     async def media_read_bytes(self, path: str) -> bytes:
-        """Pull a whole produced media artifact, waiting for the producer to finish.
-
-        Uses only ``task.data`` — no ``task.store``, no signed URL, no HTTP fetch.
-        The path comes from the response node's artifact announcement (under ``outputs/``).
+        """Pull a whole produced artifact, waiting for the producer to finish.
+        Uses only ``task.data``: no signed URL, no HTTP fetch.
         """
         chunks = [chunk async for chunk in self.media_chunks(path)]
         return b''.join(chunks)

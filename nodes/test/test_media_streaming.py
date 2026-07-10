@@ -1,6 +1,5 @@
-"""Media flows as it is produced: the producers emit chunks, response spools them.
-
-One file, three sides of the same behaviour — audio_tts, video_composer, response.
+"""Media flows as it is produced: producers emit chunks, response spools them.
+Three sides of one behaviour — audio_tts, video_composer, response.
 """
 
 import base64
@@ -450,7 +449,6 @@ def test_composer_close_kills_an_encoder_that_will_not_exit(monkeypatch):
 
 def test_composer_emits_mse_compatible_fragments(monkeypatch):
     """Without default_base_moof, ffmpeg writes a tfhd base-data-offset.
-
     MediaSource rejects that outright, so the video never plays in a browser.
     """
     captured = {}

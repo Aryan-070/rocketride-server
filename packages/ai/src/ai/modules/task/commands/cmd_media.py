@@ -20,16 +20,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-"""
-``rrext_media``: pull produced media over the DAP connection, live or finished.
+"""``rrext_media``: pull produced media over the DAP connection, live or finished.
 
-media_open picks the source — the node's live spool while it still produces, the
-account store once it does not — and the caller cannot tell them apart. A read at
-the end of a live artifact waits for the node, so empty bytes always mean the
-stream ended; ``complete`` in the body says which case it was.
-
-Unlike ``rrext_store``, which needs ``task.store``, this gates on ``task.data`` and
-only reads under ``outputs/``: a consumer gets its own artifacts and nothing else.
+media_open picks the source; a read at the end of a live artifact waits for the node.
+Gated on ``task.data`` (not ``task.store``) and confined to ``outputs/``.
 """
 
 import uuid
@@ -101,8 +95,7 @@ class MediaCommands(DAPConn):
         return self._server.store.get_file_store(self._client_id())
 
     def _require_artifact_path(self, path: Any) -> str:
-        """Confine reads to ``outputs/``, so a task.data consumer cannot read the store.
-
+        """Confine reads to ``outputs/``: a task.data consumer must not read the store.
         The leading separator is stripped so the prefix check cannot be bypassed.
         """
         if not isinstance(path, str) or not path:
@@ -122,9 +115,8 @@ class MediaCommands(DAPConn):
     # =========================================================================
 
     async def _media_open(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Open a produced artifact. For a live one ``size`` is only what exists so far.
-
-        The client reads until an empty chunk, never until it has read ``size``.
+        """Open a produced artifact. For a live one ``size`` is only what exists so far,
+        so the client reads until an empty chunk, never until it has read ``size``.
         """
         path = self._require_artifact_path(args.get('path'))
         self._check_handle_budget()
@@ -146,7 +138,6 @@ class MediaCommands(DAPConn):
 
     async def _media_read(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """Read one chunk, blocking at the end of a live artifact until bytes arrive.
-
         The raw bytes ride in ``arguments.data``; empty means end-of-stream.
         """
         handle = args.get('handle')

@@ -1,8 +1,5 @@
-"""The live media channel: a spool the producer writes and the server reads along.
-
-Both halves in one file — ai.account.live_media and the rrext_media command that
-serves it — because the contract they share is the point: a read at the end of a
-live artifact waits for the producer, so empty bytes only ever mean end-of-stream.
+"""A spool the producer writes and the server reads along, plus the command that serves it.
+The contract they share: a read at the end of a live artifact waits for the producer.
 """
 
 import asyncio
@@ -128,10 +125,8 @@ async def test_rewind_while_still_producing():
 @pytest.mark.skipif(os.name == 'nt', reason='Windows cannot unlink a file held open by a reader')
 @pytest.mark.asyncio
 async def test_reader_survives_the_spool_being_reclaimed():
-    """discard() runs once the artifact is persisted, taking the .done sidecar with it.
-
-    A reader still on the stream must keep reading, and must still find its end —
-    otherwise it waits at the last byte until the read times out.
+    """discard() takes the .done sidecar with it; a reader must still find its end.
+    Otherwise it waits at the last byte until the read times out.
     """
     w = LiveWriter(CLIENT, PATH)
     w.begin()

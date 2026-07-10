@@ -79,9 +79,7 @@ class IGlobal(IGlobalBase):
 
     def _init_file_store(self):
         """Resolve the account FileStore from ROCKETRIDE_CLIENT_ID (best-effort).
-
-        On any failure the store stays None and media writes fall back to the
-        legacy base64-in-result behaviour, so the node never breaks a pipeline.
+        On failure it stays None and media falls back to base64, never breaking a pipeline.
         """
         client_id = os.environ.get('ROCKETRIDE_CLIENT_ID', '').strip()
         if not client_id:

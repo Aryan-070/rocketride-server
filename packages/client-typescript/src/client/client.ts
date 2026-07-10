@@ -40,10 +40,7 @@ let clientId = 0;
 /** Server-side hard cap on one media_read (MAX_CHUNK_SIZE in file_store.py). */
 const MEDIA_CHUNK_SIZE = 4_194_304;
 
-/**
- * The `codecs=` string for an MP4, read from the `avcC` box of its init segment.
- * MediaSource rejects any string that does not match the bytes, so never guess.
- */
+/** The MP4 `codecs=` string, read from its `avcC` box. MediaSource rejects a guess. */
 function mp4CodecFromInitSegment(chunk: Uint8Array): string | undefined {
 	// avcC = AVCDecoderConfigurationRecord: version, profile, constraints, level.
 	for (let i = 0; i + 8 < chunk.length; i++) {
@@ -2337,8 +2334,7 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * Pull a produced media artifact chunk by chunk, yielding each as it arrives.
 	 *
-	 * Each read blocks server-side until bytes exist, so this paces itself to the
-	 * producer. Stops at the first empty chunk.
+	 * Each read blocks server-side until bytes exist; stops at the first empty chunk.
 	 *
 	 * @param path - Artifact path from the `artifact_path` SSE event
 	 */
@@ -2375,10 +2371,8 @@ export class RocketRideClient extends DAPClient {
 	 * A `src` for an `<audio>`/`<video>` element that plays while the media is
 	 * still being produced.
 	 *
-	 * Reads the first chunk before deciding, because for MP4 the codec lives in the init
-	 * segment. If the browser cannot play it progressively, the artifact is pulled whole
-	 * and played from a Blob: slower to start, but it always plays.
-	 *
+	 * Reads the first chunk before deciding: for MP4 the codec lives in the init segment.
+	 * A browser that cannot play it progressively gets the whole artifact as a Blob.
 	 * Revoke the returned URL when the element goes away.
 	 *
 	 * @param path - Artifact path from the `artifact_path` SSE event

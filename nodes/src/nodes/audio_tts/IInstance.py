@@ -26,11 +26,8 @@ class IInstance(IInstanceBase):
         self.writeText(text)
 
     def writeText(self, text: str):
-        """Synthesise ``text`` and emit it as it is produced, one MP3 frame at a time.
-
-        BEGIN goes out before the model has run, so a consumer can open the artifact
-        and start reading; each frame follows as the encoder produces it. END always
-        fires, even on failure, so the downstream stream is never left open.
+        """Synthesise ``text``, emitting one MP3 frame at a time as it is produced.
+        BEGIN precedes the model; END always fires, so no stream is left open.
         """
         value = (text or '').strip()
         if not value:

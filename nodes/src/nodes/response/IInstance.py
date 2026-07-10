@@ -22,10 +22,10 @@
 # =============================================================================
 
 from typing import List
-import asyncio
-import base64
-import mimetypes
 import os
+import base64
+import asyncio
+import mimetypes
 import uuid
 
 from rocketlib import IInstanceBase, warning
@@ -205,9 +205,7 @@ class IInstance(IInstanceBase):
 
     def _write_media(self, lane: str, action: int, mimeType: str, data: bytes):
         """Spool the image/audio/video lanes as they arrive, announcing on BEGIN.
-
-        A consumer opens the artifact before its first byte and reads along behind
-        the producer. END persists the spool; nothing is held whole in memory.
+        A consumer reads along behind the producer; nothing is held whole in memory.
         """
         if action == AVI_ACTION.BEGIN:
             self._begin_media(lane, mimeType)

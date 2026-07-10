@@ -132,12 +132,8 @@ class IGlobal(IGlobalBase):
         return (np.clip(arr, -1.0, 1.0) * _INT16_MAX).astype(np.int16).tobytes()
 
     def _pcm_chunks(self, text: str) -> Iterator[bytes]:
-        """Yield PCM as the model produces it.
-
-        The local pipeline is a generator — one chunk per phrase — so the audio
-        starts flowing before the sentence is finished. The remote model server has
-        no streaming endpoint and answers with a whole WAV, so that path yields its
-        samples once; the encoder downstream does not care which it was.
+        """Yield PCM as the model produces it: the local pipeline is a generator.
+        The remote model server has no streaming endpoint and yields its WAV once.
         """
         if self._remote_client is not None:
             body = self._remote_client.send_command(
@@ -166,10 +162,7 @@ class IGlobal(IGlobalBase):
 
     def synthesize_stream(self, text: str) -> Iterator[bytes]:
         """Synthesise ``text``, yielding MP3 frames as they are encoded.
-
-        Nothing is buffered whole: each PCM chunk the model emits is encoded and
-        handed on, so a listener hears the beginning while the end is still being
-        generated. The final ``flush()`` drains the encoder's last frame.
+        Nothing is buffered whole; the final flush() drains the encoder's last frame.
         """
         encoder = self._encoder()
         for pcm in self._pcm_chunks(text):

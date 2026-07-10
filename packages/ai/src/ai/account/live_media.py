@@ -20,13 +20,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-"""
-Live media artifacts — a producing node's bytes, readable before it finishes.
+"""A producing node's bytes, readable before it finishes.
 
-Nodes run in their own OS process, so the spool file on the shared local disk is
-the channel: the node appends each chunk, the server reads along behind it. A read
-past the current end waits, so empty bytes only ever mean end-of-stream — declared
-by the ``.done`` sidecar, written after the last byte.
+Nodes are separate processes: the spool file is the channel. A read past the end
+waits, so empty bytes only ever mean end-of-stream — declared by ``.done``.
 """
 
 import asyncio
@@ -93,7 +90,6 @@ class LiveWriter:
 
     def finish(self) -> int:
         """Close the spool, then publish the final size.
-
         The sidecar goes last, so a reader that sees it finds every byte on disk.
         """
         if self._fh is not None:
@@ -162,7 +158,6 @@ class LiveReader:
 
     async def read(self, offset: int, length: int, timeout: float = READ_TIMEOUT) -> bytes:
         """Read at ``offset``, waiting for the producer. Empty bytes mean end-of-stream.
-
         Raises TimeoutError so a stalled node cannot hang the connection with it.
         """
         if self._fh is None:

@@ -135,7 +135,6 @@ class IInstance(IInstanceBase):
 
     def writeImage(self, action: AVI_ACTION, mimeType: str, buffer: bytes):
         """Accumulate one image; on END feed it to the encoder and forward its output.
-
         The encoder starts on the first frame, so fragments leave while frames arrive.
         """
         if action == AVI_ACTION.BEGIN:
@@ -168,9 +167,7 @@ class IInstance(IInstanceBase):
 
     def _drain_stdout(self) -> None:
         """Forward what the encoder produced so far, without blocking.
-
-        A thread does the reading (ffmpeg deadlocks if nobody drains stdout), but
-        writeVideo is only ever called from here, on the engine's own thread.
+        A thread reads stdout, but writeVideo only ever runs here, on the engine thread.
         """
         while True:
             try:
