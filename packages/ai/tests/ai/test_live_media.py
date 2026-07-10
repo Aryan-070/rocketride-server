@@ -128,16 +128,23 @@ async def test_rewind_while_still_producing():
 @pytest.mark.skipif(os.name == 'nt', reason='Windows cannot unlink a file held open by a reader')
 @pytest.mark.asyncio
 async def test_reader_survives_the_spool_being_reclaimed():
-    """discard() runs once the artifact is persisted; an open reader keeps working."""
+    """discard() runs once the artifact is persisted, taking the .done sidecar with it.
+
+    A reader still on the stream must keep reading, and must still find its end —
+    otherwise it waits at the last byte until the read times out.
+    """
     w = LiveWriter(CLIENT, PATH)
     w.begin()
     w.append(b'payload')
-    w.finish()
     r = _reader()
     try:
+        w.finish()
         w.discard()
         assert not live_media.is_live(CLIENT, PATH)
+
         assert await r.read(0, 99) == b'payload'
+        assert r.complete()
+        assert await r.read(7, 99, timeout=0.5) == b'', 'end of stream survives the reclaim'
     finally:
         r.close()
 

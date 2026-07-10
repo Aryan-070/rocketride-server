@@ -139,14 +139,23 @@ class LiveReader:
             with open(self._done) as fh:
                 return int(json.load(fh)['size'])
         except (FileNotFoundError, KeyError, ValueError):
-            return None
+            pass
+        # discard() removes the sidecar too, so a reader that outlives the reclaim
+        # would never see its end. A missing spool means the producer finished.
+        return self._reclaimed_size()
 
     def available(self) -> int:
         """Bytes on disk. A reclaimed spool is still readable through our descriptor."""
         try:
             return os.path.getsize(self._part)
         except FileNotFoundError:
-            return os.fstat(self._fh.fileno()).st_size if self._fh else 0
+            return self._reclaimed_size() or 0
+
+    def _reclaimed_size(self) -> Optional[int]:
+        """The size our open descriptor still sees, once the spool file is gone."""
+        if self._fh is None or os.path.exists(self._part):
+            return None
+        return os.fstat(self._fh.fileno()).st_size
 
     def complete(self) -> bool:
         return self.final_size() is not None
