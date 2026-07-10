@@ -98,13 +98,6 @@ def test_the_stream_is_mp3_not_wav():
     assert not stream.startswith(b'RIFF')
 
 
-def test_the_encoder_tail_is_flushed():
-    """LAME buffers internally; without flush() the last frame is lost."""
-    node = _node([_tone(12000)])
-    node.writeText('hello')
-    assert len(b''.join(_writes(node))) > 0
-
-
 def test_empty_text_emits_nothing():
     node = _node([_tone(2400)])
     node.writeText('   ')

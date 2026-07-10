@@ -21,9 +21,8 @@
 # SOFTWARE.
 # =============================================================================
 
-# NOTE: Frames stream straight through ffmpeg — one in on stdin, fragments out on
-# stdout — so peak RAM is a frame plus whatever the encoder has produced but the
-# engine has not yet drained. Neither the frame set nor the video is held whole.
+# Frames stream straight through ffmpeg: one in on stdin, fragments out on stdout.
+# Peak RAM is a frame plus whatever the engine has not yet drained.
 
 import logging
 import queue
@@ -69,15 +68,7 @@ def _plog(msg: str) -> None:
 
 
 class IInstance(IInstanceBase):
-    """Pipeline instance for the video composer node.
-
-    Accumulates incoming image frames in memory and encodes them into an
-    MP4 video via FFmpeg when the object is closed. The encoded video is
-    streamed to downstream nodes via AVI and to the UI client via SSE chunks.
-
-    Attributes:
-        IGlobal: Shared global state providing FFmpeg encoding configuration.
-    """
+    """Encodes incoming image frames into MP4 with FFmpeg, forwarding fragments as they appear."""
 
     IGlobal: IGlobal
 
@@ -142,15 +133,10 @@ class IInstance(IInstanceBase):
                 self._video_open = False
             self._cleanup()
 
-    # ------------------------------------------------------------------
-    # Image stream handling -- accumulate each frame in memory
-    # ------------------------------------------------------------------
-
     def writeImage(self, action: AVI_ACTION, mimeType: str, buffer: bytes):
         """Accumulate one image; on END feed it to the encoder and forward its output.
 
-        The encoder starts with the first frame, not at close(), so MP4 fragments
-        leave this node while the remaining frames are still arriving.
+        The encoder starts on the first frame, so fragments leave while frames arrive.
         """
         if action == AVI_ACTION.BEGIN:
             self._image_buf = bytearray()
@@ -170,10 +156,6 @@ class IInstance(IInstanceBase):
             self._feed_frame(frame)
             self._drain_stdout()
 
-    # ------------------------------------------------------------------
-    # Streaming encoder: frames in on stdin, MP4 fragments out on stdout
-    # ------------------------------------------------------------------
-
     def _feed_frame(self, frame: bytes) -> None:
         """Write one frame to ffmpeg. A dead encoder ends the stream, it never raises."""
         try:
@@ -185,11 +167,10 @@ class IInstance(IInstanceBase):
             self._close_stdin()
 
     def _drain_stdout(self) -> None:
-        """Forward whatever the encoder has produced so far, without blocking.
+        """Forward what the encoder produced so far, without blocking.
 
-        Reading happens on a background thread (ffmpeg deadlocks if nobody drains
-        its stdout while we write stdin), but writeVideo is only ever called from
-        here — the engine's own thread.
+        A thread does the reading (ffmpeg deadlocks if nobody drains stdout), but
+        writeVideo is only ever called from here, on the engine's own thread.
         """
         while True:
             try:
@@ -290,12 +271,8 @@ class IInstance(IInstanceBase):
             str(self._crf),
             '-pix_fmt',
             'yuv420p',
-            # frag_keyframe+empty_moov writes MP4 to a non-seekable stdout, and is
-            # what makes the output playable before the encode finishes: each
-            # fragment stands alone, with no moov atom to rewrite at the end.
-            # default_base_moof addresses each fragment relative to its own moof;
-            # without it ffmpeg writes a tfhd base-data-offset, which MediaSource
-            # rejects outright (CHUNK_DEMUXER_ERROR_APPEND_FAILED).
+            # frag_keyframe+empty_moov: playable before the encode ends, no moov to
+            # rewrite. default_base_moof: MSE rejects a tfhd base-data-offset.
             '-movflags',
             'frag_keyframe+empty_moov+default_base_moof',
             '-f',
@@ -336,10 +313,6 @@ class IInstance(IInstanceBase):
             self._stderr_tail = self._proc.stderr.read()[-_STDERR_TAIL:]
         except (OSError, ValueError):
             pass
-
-    # ------------------------------------------------------------------
-    # Cleanup
-    # ------------------------------------------------------------------
 
     def _cleanup(self) -> None:
         """Reap a leftover encoder and reset per-object state."""

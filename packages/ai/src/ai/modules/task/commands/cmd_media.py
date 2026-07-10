@@ -21,26 +21,15 @@
 # SOFTWARE.
 
 """
-Handles ``rrext_media`` and its ``media_*`` subcommands (open, read, close).
+``rrext_media``: pull produced media over the DAP connection, live or finished.
 
-The reliable, ordered byte channel a consumer uses to pull produced media over the
-DAP connection — no HTTP fetch, no signed URL. It reads from two places, and the
-caller cannot tell them apart:
+media_open picks the source — the node's live spool while it still produces, the
+account store once it does not — and the caller cannot tell them apart. A read at
+the end of a live artifact waits for the node, so empty bytes always mean the
+stream ended; ``complete`` in the body says which case it was.
 
-    still producing  ->  the node's live spool (ai.account.live_media)
-    finished         ->  the artifact persisted in the account store
-
-A read at the end of a live artifact **waits** for the producing node rather than
-reporting EOF, so empty bytes keep their single meaning: the stream ended. The
-client learns which case it is from ``complete`` in the response body, and simply
-loops until an empty chunk arrives.
-
-Why a separate command from ``rrext_store``:
-    ``rrext_store`` gates every subcommand on ``task.store`` (full file-store
-    access). A media consumer only needs the artifacts a task produced, and already
-    holds ``task.data`` (the perm that lets it receive the ``artifact_path``
-    announcement). So this command gates on ``task.data`` and restricts reads to the
-    ``outputs/`` prefix the response node writes to.
+Unlike ``rrext_store``, which needs ``task.store``, this gates on ``task.data`` and
+only reads under ``outputs/``: a consumer gets its own artifacts and nothing else.
 """
 
 import uuid
@@ -54,9 +43,6 @@ if TYPE_CHECKING:
     from ..task_server import TaskServer
 
 
-# Artifacts produced by the response node live under this prefix in the user's
-# store (see nodes/response IInstance._media_path). A task.data consumer is
-# restricted to this subtree so it cannot read the rest of the file store.
 _ARTIFACT_PREFIX = 'outputs/'
 
 
@@ -76,7 +62,6 @@ class MediaCommands(DAPConn):
             'media_read': self._media_read,
             'media_close': self._media_close,
         }
-        # handle id -> LiveReader (live artifact) or store handle id (finished one).
         self._media_live_handles: Dict[str, Any] = {}
         self._media_store_handles: Dict[str, str] = {}
 
@@ -85,9 +70,8 @@ class MediaCommands(DAPConn):
     # =========================================================================
 
     async def on_rrext_media(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Verify ``task.data`` once, then route to the media_* handler."""
+        """Verify ``task.data`` once — deliberately not task.store — then route."""
         try:
-            # The announcement-receiving perm. Deliberately NOT task.store.
             self.verify_permission('task.data')
 
             args = request.get('arguments', {})
@@ -117,11 +101,9 @@ class MediaCommands(DAPConn):
         return self._server.store.get_file_store(self._client_id())
 
     def _require_artifact_path(self, path: Any) -> str:
-        """Validate ``path`` is a non-empty artifact path under ``outputs/``.
+        """Confine reads to ``outputs/``, so a task.data consumer cannot read the store.
 
-        Prevents a task.data-only consumer from reading arbitrary store files.
-        Path traversal ('..') is rejected downstream by FileStore._validate_path;
-        a leading separator is stripped here so the prefix check cannot be bypassed.
+        The leading separator is stripped so the prefix check cannot be bypassed.
         """
         if not isinstance(path, str) or not path:
             raise ValueError('media requires a non-empty "path" string')
@@ -140,11 +122,9 @@ class MediaCommands(DAPConn):
     # =========================================================================
 
     async def _media_open(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Open a produced artifact, live or finished.
+        """Open a produced artifact. For a live one ``size`` is only what exists so far.
 
-        Returns body.handle, body.size and body.complete. For a live artifact
-        ``size`` is what exists *so far* and ``complete`` is false — the client
-        must keep reading until an empty chunk, not until it has read ``size``.
+        The client reads until an empty chunk, never until it has read ``size``.
         """
         path = self._require_artifact_path(args.get('path'))
         self._check_handle_budget()
@@ -159,17 +139,15 @@ class MediaCommands(DAPConn):
                 body={'handle': handle, 'size': reader.available(), 'complete': reader.complete()},
             )
 
-        # Finished: served from the account store, and its size is final.
         result = await self._get_file_store().open_read(path, self._connection_id)
         handle = f'store-{uuid.uuid4()}'
         self._media_store_handles[handle] = result['handle']
         return self.build_response(request, body={'handle': handle, 'size': result['size'], 'complete': True})
 
     async def _media_read(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Read one chunk. Blocks at the end of a live artifact until bytes arrive.
+        """Read one chunk, blocking at the end of a live artifact until bytes arrive.
 
-        Returns body.size (bytes read) and body.complete, with the raw bytes in
-        ``arguments.data``. Empty bytes mean end-of-stream, never "not yet".
+        The raw bytes ride in ``arguments.data``; empty means end-of-stream.
         """
         handle = args.get('handle')
         offset = self._require_non_negative(args.get('offset', 0), 'offset')
@@ -189,7 +167,7 @@ class MediaCommands(DAPConn):
         return response
 
     async def _media_close(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Release a handle. Unknown handles are not an error — close is idempotent."""
+        """Release a handle. Idempotent: an unknown handle is not an error."""
         handle = args.get('handle')
         if reader := self._media_live_handles.pop(handle, None):
             reader.close()

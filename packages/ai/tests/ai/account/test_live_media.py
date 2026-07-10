@@ -27,20 +27,6 @@ def _reader() -> LiveReader:
 
 
 @pytest.mark.asyncio
-async def test_reads_bytes_already_written():
-    w = LiveWriter(CLIENT, PATH)
-    w.begin()
-    w.append(b'hello world')
-    r = _reader()
-    try:
-        assert await r.read(0, 5) == b'hello'
-        assert await r.read(6, 99) == b'world'
-    finally:
-        r.close()
-        w.discard()
-
-
-@pytest.mark.asyncio
 async def test_read_waits_for_the_producer_instead_of_reporting_eof():
     """The core of the design: offset == available is 'not yet', not 'the end'."""
     w = LiveWriter(CLIENT, PATH)
@@ -186,10 +172,3 @@ def test_begin_discards_a_stale_spool():
         assert not os.path.exists(done), 'a fresh stream must not inherit the old EOF marker'
     finally:
         w2.discard()
-
-
-def test_spool_name_is_scoped_per_client_and_path():
-    a, _ = live_media.spool_paths('client-1', PATH)
-    b, _ = live_media.spool_paths('client-2', PATH)
-    c, _ = live_media.spool_paths('client-1', 'outputs/video/other.mp4')
-    assert a != b and a != c

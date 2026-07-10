@@ -41,19 +41,13 @@ let clientId = 0;
 const MEDIA_CHUNK_SIZE = 4_194_304;
 
 /**
- * The exact `codecs=` string for an MP4, read from the `avcC` box of its init segment.
- *
- * MediaSource rejects a codec string that does not match the bytes, and the artifact
- * announcement carries only `video/mp4`. Guessing a profile/level pair breaks on any
- * clip that differs — so read the three bytes ffmpeg wrote: profile, constraints, level.
- *
- * Returns undefined if the box is not in this chunk, leaving the caller to fall back.
+ * The `codecs=` string for an MP4, read from the `avcC` box of its init segment.
+ * MediaSource rejects any string that does not match the bytes, so never guess.
  */
 function mp4CodecFromInitSegment(chunk: Uint8Array): string | undefined {
-	// 'avcC' — the AVCDecoderConfigurationRecord, inside stsd/avc1 of the moov box.
+	// avcC = AVCDecoderConfigurationRecord: version, profile, constraints, level.
 	for (let i = 0; i + 8 < chunk.length; i++) {
 		if (chunk[i] === 0x61 && chunk[i + 1] === 0x76 && chunk[i + 2] === 0x63 && chunk[i + 3] === 0x43) {
-			// Skip the box name, then the configurationVersion byte.
 			const profile = chunk[i + 5];
 			const constraints = chunk[i + 6];
 			const level = chunk[i + 7];
@@ -64,13 +58,7 @@ function mp4CodecFromInitSegment(chunk: Uint8Array): string | undefined {
 	return undefined;
 }
 
-/**
- * The MIME string to hand MediaSource for this artifact, or undefined to fall back.
- *
- * Asks the browser about the codec actually present in the bytes rather than a guess,
- * so a clip whose profile or level we did not anticipate degrades to Blob playback
- * instead of leaving the user with nothing.
- */
+/** The MIME to hand MediaSource, or undefined to fall back to Blob playback. */
 function playableMseType(mime: string, initSegment: Uint8Array): string | undefined {
 	if (typeof MediaSource === 'undefined') return undefined;
 	const base = mime.split(';')[0].trim();
@@ -2311,8 +2299,7 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * Read one chunk from an open media handle.
 	 *
-	 * When the artifact is still being produced, this waits for the node rather than
-	 * returning early: empty bytes always mean the stream ended, never "not yet".
+	 * Waits for the producing node: empty bytes always mean the stream ended.
 	 *
 	 * @param handle - Handle from {@link mediaOpen}
 	 * @param offset - Byte offset to read from
@@ -2324,8 +2311,8 @@ export class RocketRideClient extends DAPClient {
 		offset: number = 0,
 		length: number = MEDIA_CHUNK_SIZE
 	): Promise<{ data: Uint8Array; complete: boolean }> {
-		// Bypass call() which unwraps response.body, losing response.arguments
-		// where the server places the binary data payload (as a Uint8Array).
+		// call() unwraps response.body and would drop response.arguments, where the
+		// server puts the binary payload.
 		const message = this.buildRequest('rrext_media', {
 			arguments: { subcommand: 'media_read', handle, offset, length },
 		});
@@ -2350,10 +2337,8 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * Pull a produced media artifact chunk by chunk, yielding each as it arrives.
 	 *
-	 * Reads sequentially and stops at the first empty chunk. Against an artifact a
-	 * node is still producing, each read blocks server-side until bytes exist, so
-	 * this generator paces itself to the producer — the chunks arrive as they are
-	 * made, not after the fact.
+	 * Each read blocks server-side until bytes exist, so this paces itself to the
+	 * producer. Stops at the first empty chunk.
 	 *
 	 * @param path - Artifact path from the `artifact_path` SSE event
 	 */
@@ -2375,8 +2360,7 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * Pull a produced media artifact and reassemble it into a Blob.
 	 *
-	 * Waits for the whole artifact. Prefer {@link mediaPlaybackUrl} for playback,
-	 * which starts on the first chunk instead.
+	 * Waits for the whole artifact; prefer {@link mediaPlaybackUrl} for playback.
 	 *
 	 * @param path - Artifact path from the `artifact_path` SSE event
 	 * @param mime - MIME type to stamp on the Blob (from the same event)
@@ -2391,11 +2375,9 @@ export class RocketRideClient extends DAPClient {
 	 * A `src` for an `<audio>`/`<video>` element that plays while the media is
 	 * still being produced.
 	 *
-	 * Reads the first chunk before deciding: for MP4 the codec string lives in the init
-	 * segment, and MediaSource rejects any guess that does not match the bytes. If the
-	 * browser can play it progressively we hand back a MediaSource url and keep feeding
-	 * it; otherwise we pull the artifact whole and play it from a Blob — slower to start,
-	 * but it always plays. A MediaSource failure must never cost the user the media.
+	 * Reads the first chunk before deciding, because for MP4 the codec lives in the init
+	 * segment. If the browser cannot play it progressively, the artifact is pulled whole
+	 * and played from a Blob: slower to start, but it always plays.
 	 *
 	 * Revoke the returned URL when the element goes away.
 	 *
@@ -2434,9 +2416,8 @@ export class RocketRideClient extends DAPClient {
 	): Promise<void> {
 		try {
 			const buffer = mediaSource.addSourceBuffer(type);
-			// Our encoders stamp real timestamps: frame_grabber's first frame can land at
-			// t=2s, and the element would sit at t=0 on an empty buffer, showing nothing.
-			// 'sequence' rebases each chunk onto the timeline.
+			// Our encoders stamp real timestamps (a first frame can land at t=2s), and the
+			// element would sit at t=0 on an empty buffer. 'sequence' rebases onto zero.
 			buffer.mode = 'sequence';
 			const appended = () =>
 				new Promise<void>(resolve => buffer.addEventListener('updateend', () => resolve(), { once: true }));

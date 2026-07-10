@@ -59,7 +59,6 @@ export const Message: React.FC<MessageProps> = ({ message }) => {
 							<InlineMediaRenderer
 								path={message.filePath}
 								directUrl={message.mediaUrl}
-								fallbackUrl={message.mediaFallbackUrl}
 								mime={message.mediaMime}
 								name={message.mediaName}
 							/>

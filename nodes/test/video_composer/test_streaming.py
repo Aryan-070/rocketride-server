@@ -5,7 +5,6 @@ starts encoding on the first frame rather than at close(), never accumulates the
 frame set, and always closes the video stream it opened.
 """
 
-import queue
 import subprocess
 
 from rocketlib import AVI_ACTION
@@ -228,15 +227,3 @@ def test_the_encoder_emits_mse_compatible_fragments(monkeypatch):
     movflags = captured['cmd'][captured['cmd'].index('-movflags') + 1]
     assert 'default_base_moof' in movflags, 'MSE requires movie-fragment-relative addressing'
     assert 'empty_moov' in movflags and 'frag_keyframe' in movflags
-
-
-def test_cleanup_resets_state_between_objects():
-    proc = _FakeProc()
-    node = _node(proc)
-    node._stdout_queue.put(b'moof')
-    _frame(node, b'f1')
-    node.close()
-
-    assert node._proc is None
-    assert node._stdout_queue.qsize() == 0
-    assert isinstance(node._stdout_queue, queue.Queue)

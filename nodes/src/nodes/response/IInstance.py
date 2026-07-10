@@ -204,19 +204,10 @@ class IInstance(IInstanceBase):
             self.instance.currentObject.response[key].append(answer.getText())
 
     def _write_media(self, lane: str, action: int, mimeType: str, data: bytes):
-        """Shared handler for the image/audio/video stream lanes.
+        """Spool the image/audio/video lanes as they arrive, announcing on BEGIN.
 
-        The bytes go to a spool file as they arrive, and the artifact is announced on
-        BEGIN — before a single byte exists. A consumer opens it immediately and reads
-        along behind the producer, so playback starts while the node is still writing.
-        On END the spool is persisted to the account store and the result carries the
-        path; nothing is ever held whole in memory.
-
-        Args:
-            lane (str): The media lane — ``'image'``, ``'audio'`` or ``'video'``.
-            action (int): The AVI stream action (BEGIN/WRITE/END).
-            mimeType (str): The media MIME type.
-            data (bytes): A WRITE data chunk (empty on BEGIN/END).
+        A consumer opens the artifact before its first byte and reads along behind
+        the producer. END persists the spool; nothing is held whole in memory.
         """
         if action == AVI_ACTION.BEGIN:
             self._begin_media(lane, mimeType)
@@ -241,16 +232,12 @@ class IInstance(IInstanceBase):
         writer.begin()
         self._media[lane] = {'writer': writer, 'path': path, 'mime': mimeType}
 
-        # Announce only when a consumer could act on it: a live pull needs the
-        # server to resolve the same spool, which it keys by the account id.
+        # A live pull needs the server to resolve the same spool, keyed by account id.
         if self.IGlobal.transmit_media and self.IGlobal.client_id:
             self._announce_artifact(lane, mimeType, path)
 
     def _end_media(self, lane: str, entry: dict) -> dict:
-        """Close the spool, persist it, and build the result item for this media.
-
-        The spool is discarded last, because the base64 fallback reads it back.
-        """
+        """Close and persist the spool. Discarded last: the base64 fallback reads it."""
         writer, path, mime = entry['writer'], entry['path'], entry['mime']
         writer.finish()
         try:
@@ -261,7 +248,6 @@ class IInstance(IInstanceBase):
                 except Exception as e:
                     warning(f'response: persisting {path!r} failed; falling back to base64: {e}')
 
-            # No store, or the write failed: inline the bytes under the legacy lane key.
             return {'mime_type': mime, lane: base64.b64encode(self._read_spool(lane, path)).decode('utf-8')}
         finally:
             writer.discard()
@@ -275,7 +261,6 @@ class IInstance(IInstanceBase):
                 while chunk := fh.read(MAX_CHUNK_SIZE):
                     await store.write_chunk(handle, chunk)
         except BaseException:
-            # Release the handle without masking the original failure.
             try:
                 await store.close_write(handle)
             except Exception:
@@ -298,12 +283,7 @@ class IInstance(IInstanceBase):
             return b''
 
     def _announce_artifact(self, kind: str, mime: str, path: str) -> None:
-        """Emit an ``artifact_path`` SSE event before the media exists.
-
-        Carries no bytes and no URL: the consumer pulls them over ``rrext_media``,
-        whose reads wait for the producer. Best-effort — a transport failure never
-        breaks the pipeline.
-        """
+        """Announce the artifact before it exists. The consumer pulls it over rrext_media."""
         try:
             self.instance.sendSSE(
                 'artifact_path',
@@ -339,12 +319,7 @@ class IInstance(IInstanceBase):
 
 
 def _run_async(coro):
-    """Run an async coroutine from the synchronous AVI write callbacks.
-
-    The engine invokes write* synchronously (no running event loop), so a fresh
-    ``asyncio.run`` is safe. Pre-check to surface a clear error if ever called
-    from a thread that already owns a loop.
-    """
+    """Run a coroutine from the synchronous AVI callbacks, which own no event loop."""
     try:
         asyncio.get_running_loop()
     except RuntimeError:

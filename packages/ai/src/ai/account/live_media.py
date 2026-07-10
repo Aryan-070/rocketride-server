@@ -23,26 +23,10 @@
 """
 Live media artifacts — a producing node's bytes, readable before it finishes.
 
-A node emits media as an AVI stream (BEGIN / WRITE… / END). To let a consumer play
-those bytes as they are produced, the node appends each WRITE to a local spool file
-and the server serves reads from it. Reads past the current end **wait** instead of
-reporting EOF, so an empty chunk keeps meaning "the stream ended" and never "not yet".
-
-The engine runs nodes in their own OS process, so this state cannot live in memory:
-the spool file on the shared local disk *is* the channel between them. A sidecar
-``.done`` file, written after the last byte, carries the final size and is the only
-end-of-stream signal.
-
-    node process                          server process
-    ------------                          --------------
-    begin(client, path)                   reader = LiveReader(client, path)
-    append(chunk)   ->  <key>.part  <-    await reader.read(offset, length)
-    append(chunk)   ->                    (waits when offset == available)
-    finish()        ->  <key>.done  <-    read past final size -> b'' (EOF)
-
-The spool is deleted once the artifact is persisted to the account store. A reader
-that already opened it keeps reading: on POSIX an unlinked file stays alive until
-its last descriptor closes.
+Nodes run in their own OS process, so the spool file on the shared local disk is
+the channel: the node appends each chunk, the server reads along behind it. A read
+past the current end waits, so empty bytes only ever mean end-of-stream — declared
+by the ``.done`` sidecar, written after the last byte.
 """
 
 import asyncio
@@ -53,11 +37,7 @@ import tempfile
 import time
 from typing import Optional
 
-# How long a read waits for the producer before giving up on a growing artifact.
 READ_TIMEOUT = 30.0
-
-# How often a waiting read re-checks the spool for growth. Small enough to feel
-# live, large enough not to spin: at 4 MiB chunks this is never the bottleneck.
 POLL_INTERVAL = 0.02
 
 
@@ -69,10 +49,7 @@ def live_dir() -> str:
 
 
 def _key(client_id: str, path: str) -> str:
-    """Stable spool name for an artifact, derived from its owner and logical path.
-
-    Both processes compute this independently — it is the only thing they share.
-    """
+    """Stable spool name; both processes derive it independently."""
     digest = hashlib.sha256(f'{client_id}\0{path}'.encode()).hexdigest()
     return digest[:32]
 
@@ -90,11 +67,7 @@ def is_live(client_id: str, path: str) -> bool:
 
 
 def sweep_stale_spools(max_age: float = 3600.0) -> int:
-    """Delete spools older than ``max_age``. Returns how many were reclaimed.
-
-    Covers the two cases discard() cannot: a node that crashed mid-stream, and
-    Windows, where unlinking a spool a reader still holds open fails.
-    """
+    """Reclaim spools discard() could not: a crashed node, or Windows holding one open."""
     now = time.time()
     removed = 0
     try:
@@ -142,10 +115,9 @@ class LiveWriter:
         self._written += len(data)
 
     def finish(self) -> int:
-        """Close the spool and publish the final size. Returns the byte count.
+        """Close the spool, then publish the final size.
 
-        The ``.done`` sidecar is written last: a reader that sees it is guaranteed
-        every byte it promises is already on disk.
+        The sidecar goes last, so a reader that sees it finds every byte on disk.
         """
         if self._fh is not None:
             self._fh.flush()
@@ -157,11 +129,7 @@ class LiveWriter:
         return self._written
 
     def discard(self) -> None:
-        """Drop the spool. Called once the artifact is persisted, or on failure.
-
-        Best-effort: Windows refuses to unlink a file a reader still holds open, so
-        the spool may outlive this call. Reclaiming it is sweep_stale_spools()'s job.
-        """
+        """Drop the spool. Best-effort: Windows will not unlink one a reader holds open."""
         if self._fh is not None:
             self._fh.close()
             self._fh = None
@@ -189,7 +157,7 @@ class LiveReader:
             self._fh = None
 
     def final_size(self) -> Optional[int]:
-        """The stream's total length once known, else None while it is still growing."""
+        """Total length once known, else None while the stream still grows."""
         try:
             with open(self._done) as fh:
                 return int(json.load(fh)['size'])
@@ -197,30 +165,27 @@ class LiveReader:
             return None
 
     def available(self) -> int:
-        """Bytes currently on disk."""
+        """Bytes on disk. A reclaimed spool is still readable through our descriptor."""
         try:
             return os.path.getsize(self._part)
         except FileNotFoundError:
-            # Spool already reclaimed; our open descriptor still sees the data.
             return os.fstat(self._fh.fileno()).st_size if self._fh else 0
 
     def complete(self) -> bool:
         return self.final_size() is not None
 
     async def read(self, offset: int, length: int, timeout: float = READ_TIMEOUT) -> bytes:
-        """Read up to ``length`` bytes at ``offset``, waiting for the producer.
+        """Read at ``offset``, waiting for the producer. Empty bytes mean end-of-stream.
 
-        Returns bytes when any are available, or empty bytes at true end-of-stream.
-        Raises TimeoutError if the producer writes nothing before ``timeout`` — a
-        stalled node must not hang the connection forever.
+        Raises TimeoutError so a stalled node cannot hang the connection with it.
         """
         if self._fh is None:
             raise RuntimeError('LiveReader.read before open')
 
         deadline = asyncio.get_running_loop().time() + timeout
         while True:
-            # Read `available` before `final_size`: finish() writes the bytes first
-            # and the sidecar last, so this ordering can never miss a trailing chunk.
+            # available before final_size: finish() writes bytes first, sidecar last,
+            # so this order can never miss the trailing chunk.
             available = self.available()
             if offset < available:
                 self._fh.seek(offset)

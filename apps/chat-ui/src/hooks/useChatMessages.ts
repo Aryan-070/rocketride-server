@@ -91,18 +91,14 @@ export const useChatMessages = () => {
 				token: authToken,
 				question: question,
 				onSSE: async (type: string, data: Record<string, unknown>) => {
-					// Media artifact announced live by the response node. The bytes are
-					// pulled as chunks over rrext_media (task.data only); the signed `url`
-					// it ships is kept strictly as a fallback for when that pull fails.
+					// The response node announces the artifact before its first byte exists.
 					if (type === 'artifact_path' && typeof data.path === 'string') {
-						const url = typeof data.url === 'string' && data.url ? data.url : undefined;
 						setMessages(prev => [...prev, {
 							id: Date.now(),
 							text: '',
 							sender: 'bot',
 							timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
 							filePath: data.path as string,
-							mediaFallbackUrl: url,
 							mediaMime: typeof data.mime_type === 'string' ? data.mime_type : undefined,
 							mediaName: typeof data.name === 'string' ? data.name : undefined
 						}]);

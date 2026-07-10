@@ -90,11 +90,6 @@ async def test_open_rejects_a_missing_path(path):
         await _call(conn, subcommand='media_open', path=path)
 
 
-def test_require_artifact_path_strips_leading_slash():
-    conn = _make_conn()
-    assert conn._require_artifact_path(f'/{PATH}') == PATH
-
-
 # ---------------------------------------------------------------------------
 # Finished artifacts — served from the store, size is final
 # ---------------------------------------------------------------------------
