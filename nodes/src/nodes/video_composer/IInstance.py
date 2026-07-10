@@ -293,8 +293,11 @@ class IInstance(IInstanceBase):
             # frag_keyframe+empty_moov writes MP4 to a non-seekable stdout, and is
             # what makes the output playable before the encode finishes: each
             # fragment stands alone, with no moov atom to rewrite at the end.
+            # default_base_moof addresses each fragment relative to its own moof;
+            # without it ffmpeg writes a tfhd base-data-offset, which MediaSource
+            # rejects outright (CHUNK_DEMUXER_ERROR_APPEND_FAILED).
             '-movflags',
-            'frag_keyframe+empty_moov',
+            'frag_keyframe+empty_moov+default_base_moof',
             '-f',
             'mp4',
             'pipe:1',

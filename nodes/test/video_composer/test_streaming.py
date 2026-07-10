@@ -50,6 +50,16 @@ class _FakeProc:
     def kill(self):
         self.killed = True
 
+    # imageio_ffmpeg also reaches for subprocess.Popen, as a context manager.
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def communicate(self, *args, **kwargs):
+        return b'', b''
+
 
 class _Inst:
     def __init__(self):
@@ -195,6 +205,29 @@ def test_close_kills_an_encoder_that_will_not_exit(monkeypatch):
 
     assert proc.killed
     assert _actions(node)[-1] == AVI_ACTION.END, 'the stream is closed even when ffmpeg hangs'
+
+
+def test_the_encoder_emits_mse_compatible_fragments(monkeypatch):
+    """Without default_base_moof, ffmpeg writes a tfhd base-data-offset.
+
+    MediaSource rejects that outright (CHUNK_DEMUXER_ERROR_APPEND_FAILED), so the
+    video never plays in a browser — the flag is not optional.
+    """
+    captured = {}
+
+    def _popen(cmd, **kwargs):
+        captured['cmd'] = cmd
+        return _FakeProc()
+
+    monkeypatch.setattr(subprocess, 'Popen', _popen)
+    node = _node()
+    node.beginInstance()
+    node.open(_Obj())
+    assert node._start_encode()
+
+    movflags = captured['cmd'][captured['cmd'].index('-movflags') + 1]
+    assert 'default_base_moof' in movflags, 'MSE requires movie-fragment-relative addressing'
+    assert 'empty_moov' in movflags and 'frag_keyframe' in movflags
 
 
 def test_cleanup_resets_state_between_objects():
