@@ -190,6 +190,10 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 				setActiveTab('tables');
 			} else if (results.images.length > 0) {
 				setActiveTab('images');
+			} else if (results.videos.length > 0) {
+				setActiveTab('videos');
+			} else if (results.audios.length > 0) {
+				setActiveTab('audios');
 			} else {
 				setActiveTab('results');
 			}

@@ -37,6 +37,27 @@ import { AuthenticationException, ConnectionException, PipeException } from './e
 // Global counter for generating unique client IDs
 let clientId = 0;
 
+/** Server-side hard cap on one media_read (MAX_CHUNK_SIZE in file_store.py). */
+const MEDIA_CHUNK_SIZE = 4_194_304;
+
+/**
+ * MediaSource rejects a bare `video/mp4`: it wants the codec named. The artifact
+ * announcement carries only the container MIME, so probe the codecs our encoders
+ * actually emit — libx264 high/baseline for MP4, and MP3 as-is.
+ */
+const MSE_CANDIDATES: Record<string, string[]> = {
+	'video/mp4': ['video/mp4; codecs="avc1.640028"', 'video/mp4; codecs="avc1.42E01E"', 'video/mp4'],
+	'audio/mpeg': ['audio/mpeg'],
+};
+
+/** The first MediaSource-supported MIME string for this artifact, if any. */
+function supportedMseType(mime: string): string | undefined {
+	if (typeof MediaSource === 'undefined') return undefined;
+	const base = mime.split(';')[0].trim();
+	const candidates = MSE_CANDIDATES[base] ?? [mime];
+	return candidates.find(candidate => MediaSource.isTypeSupported(candidate));
+}
+
 /**
  * Streaming data pipe for sending large datasets to RocketRide pipelines.
  *
@@ -1350,7 +1371,8 @@ export class RocketRideClient extends DAPClient {
 			objinfo?: Record<string, unknown>;
 			mimetype?: string;
 		}>,
-		token: string
+		token: string,
+		onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>
 	): Promise<UPLOAD_RESULT[]> {
 		const results: UPLOAD_RESULT[] = new Array(files.length);
 
@@ -1397,7 +1419,7 @@ export class RocketRideClient extends DAPClient {
 
 			try {
 				// Step 1: Create and open pipe (waits for server to allocate)
-				pipe = await this.pipe(token, this._objinfoWithSize({ name: file.name, ...objinfo }, fileSize), finalMimetype);
+				pipe = await this.pipe(token, this._objinfoWithSize({ name: file.name, ...objinfo }, fileSize), finalMimetype, undefined, onSSE);
 				await pipe.open();
 
 				// Step 2: Send status update AFTER we have the pipe
@@ -2243,6 +2265,154 @@ export class RocketRideClient extends DAPClient {
 			download_name: downloadName,
 		});
 		return (body as any).url;
+	}
+
+	// ============================================================================
+	// MEDIA STREAMING (reliable chunk pull for consumers without task.store)
+	// ============================================================================
+
+	/**
+	 * Open a produced media artifact for reading over the reliable DAP channel.
+	 *
+	 * Unlike {@link fsOpen}, this requires only `task.data` (the same permission
+	 * that receives the `artifact_path` announcement) and is restricted to the
+	 * `outputs/` prefix server-side — so a consumer without `task.store` can pull
+	 * its own produced media.
+	 *
+	 * @param path - Artifact path from the `artifact_path` SSE event (under `outputs/`)
+	 * @returns `handle`, the bytes available *so far*, and whether the producer finished
+	 */
+	async mediaOpen(path: string): Promise<{ handle: string; size: number; complete: boolean }> {
+		return this.call('rrext_media', { subcommand: 'media_open', path });
+	}
+
+	/**
+	 * Read one chunk from an open media handle.
+	 *
+	 * When the artifact is still being produced, this waits for the node rather than
+	 * returning early: empty bytes always mean the stream ended, never "not yet".
+	 *
+	 * @param handle - Handle from {@link mediaOpen}
+	 * @param offset - Byte offset to read from
+	 * @param length - Max bytes to read (default and max 4 MiB)
+	 * @returns The bytes read, and whether the producer has finished
+	 */
+	async mediaRead(
+		handle: string,
+		offset: number = 0,
+		length: number = MEDIA_CHUNK_SIZE
+	): Promise<{ data: Uint8Array; complete: boolean }> {
+		// Bypass call() which unwraps response.body, losing response.arguments
+		// where the server places the binary data payload (as a Uint8Array).
+		const message = this.buildRequest('rrext_media', {
+			arguments: { subcommand: 'media_read', handle, offset, length },
+		});
+		this._onTrace?.(TraceType.Request, message);
+		const response = await this.request(message);
+		if (response.success === false) {
+			this._onTrace?.(TraceType.Error, response);
+			throw new Error(response.message ?? 'media_read failed');
+		}
+		this._onTrace?.(TraceType.Success, response);
+		return {
+			data: ((response as any).arguments?.data as Uint8Array) || new Uint8Array(0),
+			complete: Boolean((response as any).body?.complete),
+		};
+	}
+
+	/** Close a media read handle. */
+	async mediaClose(handle: string): Promise<void> {
+		await this.call('rrext_media', { subcommand: 'media_close', handle });
+	}
+
+	/**
+	 * Pull a produced media artifact chunk by chunk, yielding each as it arrives.
+	 *
+	 * Reads sequentially and stops at the first empty chunk. Against an artifact a
+	 * node is still producing, each read blocks server-side until bytes exist, so
+	 * this generator paces itself to the producer — the chunks arrive as they are
+	 * made, not after the fact.
+	 *
+	 * @param path - Artifact path from the `artifact_path` SSE event
+	 */
+	async *mediaChunks(path: string): AsyncGenerator<Uint8Array, void, void> {
+		const { handle } = await this.mediaOpen(path);
+		try {
+			let offset = 0;
+			for (;;) {
+				const { data } = await this.mediaRead(handle, offset);
+				if (data.length === 0) return;
+				offset += data.length;
+				yield data;
+			}
+		} finally {
+			await this.mediaClose(handle).catch(() => undefined);
+		}
+	}
+
+	/**
+	 * Pull a produced media artifact and reassemble it into a Blob.
+	 *
+	 * Waits for the whole artifact. Prefer {@link mediaPlaybackUrl} for playback,
+	 * which starts on the first chunk instead.
+	 *
+	 * @param path - Artifact path from the `artifact_path` SSE event
+	 * @param mime - MIME type to stamp on the Blob (from the same event)
+	 */
+	async mediaFetchBlob(path: string, mime?: string): Promise<Blob> {
+		const chunks: Uint8Array[] = [];
+		for await (const chunk of this.mediaChunks(path)) chunks.push(chunk);
+		return new Blob(chunks as BlobPart[], mime ? { type: mime } : undefined);
+	}
+
+	/**
+	 * A `src` for an `<audio>`/`<video>` element that plays while the media is
+	 * still being produced.
+	 *
+	 * Uses MediaSource so the first chunk starts playing immediately. MediaSource
+	 * needs a MIME string it recognises — for MP4 that means naming the codec, which
+	 * the announcement does not carry — so we probe a few candidates. When none is
+	 * supported (Safari does not do MSE for MP3), the whole artifact is pulled and
+	 * played from a Blob: still reliable, just not progressive.
+	 *
+	 * Revoke the returned URL when the element goes away.
+	 *
+	 * @param path - Artifact path from the `artifact_path` SSE event
+	 * @param mime - MIME type from the same event
+	 */
+	async mediaPlaybackUrl(path: string, mime?: string): Promise<string> {
+		const mseType = mime ? supportedMseType(mime) : undefined;
+		if (!mseType || typeof MediaSource === 'undefined') {
+			return URL.createObjectURL(await this.mediaFetchBlob(path, mime));
+		}
+
+		const mediaSource = new MediaSource();
+		const url = URL.createObjectURL(mediaSource);
+
+		mediaSource.addEventListener(
+			'sourceopen',
+			() => {
+				const buffer = mediaSource.addSourceBuffer(mseType);
+				void this.pumpIntoSourceBuffer(path, mediaSource, buffer);
+			},
+			{ once: true }
+		);
+		return url;
+	}
+
+	/** Feed each chunk into the SourceBuffer, one at a time, until the stream ends. */
+	private async pumpIntoSourceBuffer(path: string, mediaSource: MediaSource, buffer: SourceBuffer): Promise<void> {
+		const appended = () => new Promise<void>(resolve => buffer.addEventListener('updateend', () => resolve(), { once: true }));
+		try {
+			for await (const chunk of this.mediaChunks(path)) {
+				// appendBuffer is asynchronous; a second call before updateend throws.
+				buffer.appendBuffer(chunk as BufferSource);
+				await appended();
+			}
+			if (mediaSource.readyState === 'open') mediaSource.endOfStream();
+		} catch {
+			if (mediaSource.readyState === 'open') mediaSource.endOfStream('network');
+		}
 	}
 
 	// ============================================================================

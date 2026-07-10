@@ -97,29 +97,20 @@ const processTableData = (data: any): string[] => {
 	return results;
 };
 
+
 /**
- * Processes image content
+ * Extract playable sources from a media lane (image/audio/video).
+ *
+ * The response node emits `{mime_type, path}` when a FileStore persisted the
+ * bytes — those arrive live over SSE and are merged in the hook, so they are
+ * skipped here. Without a store it falls back to `{mime_type, <kind>: base64}`,
+ * which never announces; turn those into a data URL so they still render.
  */
-const processImageData = (data: any): string[] => {
-	const imageUrls: string[] = [];
-
-	if (Array.isArray(data)) {
-		data.forEach(item => {
-			if (typeof item === 'object' && item.image && item.mime_type) {
-				const dataUrl = `data:${item.mime_type};base64,${item.image}`;
-				imageUrls.push(dataUrl);
-			} else if (typeof item === 'string' && item.trim()) {
-				imageUrls.push(item);
-			}
-		});
-	} else if (typeof data === 'object' && data.image && data.mime_type) {
-		const dataUrl = `data:${data.mime_type};base64,${data.image}`;
-		imageUrls.push(dataUrl);
-	} else if (typeof data === 'string' && data.trim()) {
-		imageUrls.push(data);
-	}
-
-	return imageUrls;
+const processMediaData = (fieldData: any, kind: string): string[] => {
+	if (!Array.isArray(fieldData)) return [];
+	return fieldData
+		.filter(entry => entry && typeof entry === 'object' && typeof entry[kind] === 'string')
+		.map(entry => `data:${entry.mime_type || 'application/octet-stream'};base64,${entry[kind]}`);
 };
 
 // ============================================================================
@@ -152,23 +143,25 @@ const groupByFilename = (items: Array<{ filename: string; content: any; fieldNam
 // MAIN PARSER
 // ============================================================================
 
-export const parseDropperResults = (uploadResults: UPLOAD_RESULT[]): ProcessedResults => {
+export const parseDropperResults = async (uploadResults: UPLOAD_RESULT[]): Promise<ProcessedResults> => {
 	// Use 'any' for content type since it can be string or object
 	const textItems: Array<{ filename: string; content: any; fieldName: string }> = [];
 	const documentItems: Array<{ filename: string; content: any; fieldName: string }> = [];
 	const tableItems: Array<{ filename: string; content: any; fieldName: string }> = [];
-	const imageItems: Array<{ filename: string; content: any; fieldName: string }> = [];
 	const questionItems: Array<{ filename: string; content: any; fieldName: string }> = [];
 	const answerItems: Array<{ filename: string; content: any; fieldName: string }> = [];
+	const imageItems: Array<{ filename: string; content: any; fieldName: string }> = [];
+	const audioItems: Array<{ filename: string; content: any; fieldName: string }> = [];
+	const videoItems: Array<{ filename: string; content: any; fieldName: string }> = [];
 
 	// Process each upload result
-	uploadResults.forEach((uploadResult) => {
+	for (const uploadResult of uploadResults) {
 		const filename = uploadResult.filepath;
 		const pipelineResult = uploadResult.result;
 
 		// Skip results without proper structure
 		if (!pipelineResult || !pipelineResult.result_types) {
-			return;
+			continue;
 		}
 
 		// Process each field based on its declared type
@@ -199,18 +192,27 @@ export const parseDropperResults = (uploadResults: UPLOAD_RESULT[]): ProcessedRe
 					});
 					break;
 
+				// Persisted media (`path`) arrives live over SSE ('artifact_path') and is
+				// merged in the hook; only the store-less base64 fallback is read here.
 				case 'image':
 				case 'images':
-					// Process image content (data URLs)
-					const imageUrls = processImageData(fieldData);
-					if (imageUrls.length > 0) {
-						// Join multiple images with delimiter for later splitting
-						imageItems.push({
-							filename,
-							content: imageUrls.join('|||'),
-							fieldName
-						});
-					}
+					processMediaData(fieldData, 'image').forEach(content => {
+						imageItems.push({ filename, content, fieldName });
+					});
+					break;
+
+				case 'audio':
+				case 'audios':
+					processMediaData(fieldData, 'audio').forEach(content => {
+						audioItems.push({ filename, content, fieldName });
+					});
+					break;
+
+				case 'video':
+				case 'videos':
+					processMediaData(fieldData, 'video').forEach(content => {
+						videoItems.push({ filename, content, fieldName });
+					});
 					break;
 
 				case 'question':
@@ -234,7 +236,7 @@ export const parseDropperResults = (uploadResults: UPLOAD_RESULT[]): ProcessedRe
 					console.warn('Unknown field type in pipeline result:', fieldType);
 			}
 		}
-	});
+	}
 
 	// Group content by filename and return organized structure
 	return {
@@ -243,6 +245,8 @@ export const parseDropperResults = (uploadResults: UPLOAD_RESULT[]): ProcessedRe
 		documents: groupByFilename(documentItems),
 		tables: groupByFilename(tableItems),
 		images: groupByFilename(imageItems),
+		videos: groupByFilename(videoItems),
+		audios: groupByFilename(audioItems),
 		questions: groupByFilename(questionItems),
 		answers: groupByFilename(answerItems)
 	};

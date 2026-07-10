@@ -6,9 +6,51 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { RocketRideClient, UPLOAD_RESULT } from 'rocketride';
-import { UploadedFile, ProcessedResults } from '../types/dropper.types';
+import { UploadedFile, ProcessedResults, GroupedContent } from '../types/dropper.types';
 import { parseDropperResults, generateFileId } from '../utils/dropperUtils';
 import { subscribeToClient } from './clientSingleton';
+
+/** Empty results structure used to seed media merges before a parse exists. */
+const emptyResults = (): ProcessedResults => ({
+	rawJson: [],
+	textContent: [],
+	documents: [],
+	tables: [],
+	images: [],
+	questions: [],
+	answers: [],
+	videos: [],
+	audios: []
+});
+
+/** Map an artifact kind to its ProcessedResults list key. */
+const listKeyForKind = (kind: string): 'images' | 'videos' | 'audios' =>
+	kind === 'video' ? 'videos' : kind === 'audio' ? 'audios' : 'images';
+
+/**
+ * Merge a media artifact (received live over SSE) into the results, appending a
+ * resolved URL under the matching list (images/videos/audios).
+ */
+const mergeArtifact = (prev: ProcessedResults | null, kind: string, filename: string, url: string): ProcessedResults => {
+	const base = prev ? { ...prev } : emptyResults();
+	const key = listKeyForKind(kind);
+	const list: GroupedContent[] = (base[key] as GroupedContent[]).map(g => ({ ...g, contents: [...g.contents] }));
+	const existing = list.find(g => g.filename === filename);
+	if (existing) {
+		existing.contents.push({ content: url, fieldName: kind });
+	} else {
+		list.push({ filename, contents: [{ content: url, fieldName: kind }] });
+	}
+	return { ...base, [key]: list };
+};
+
+/** Keep SSE-delivered media when a (media-less) parse result arrives. */
+const withPreservedMedia = (parsed: ProcessedResults, prev: ProcessedResults | null): ProcessedResults => ({
+	...parsed,
+	images: prev?.images?.length ? prev.images : parsed.images,
+	videos: prev?.videos?.length ? prev.videos : parsed.videos,
+	audios: prev?.audios?.length ? prev.audios : parsed.audios
+});
 
 /**
  * useFileProcessing - React hook for managing file upload and processing workflow
@@ -185,8 +227,7 @@ export const useFileProcessing = (
 		if (isProcessing && remainingFiles === 0 && uploadedFiles.length > 0) {
 			// Parse results if we have any
 			if (uploadResults.length > 0) {
-				const parsedResults = parseDropperResults(uploadResults);
-				setResults(parsedResults);
+				parseDropperResults(uploadResults).then(parsed => setResults(prev => withPreservedMedia(parsed, prev)));
 			}
 			setIsProcessing(false);
 		}
@@ -224,8 +265,27 @@ export const useFileProcessing = (
 				mimetype: file.type || 'application/octet-stream'
 			}));
 
+			// The response node announces an artifact on BEGIN — before its first byte
+			// exists. mediaPlaybackUrl returns immediately with a MediaSource url, and
+			// the player starts on the first chunk while the node is still producing.
+			// A browser without MediaSource for this MIME falls back to a whole Blob.
+			const onSSE = async (type: string, data: Record<string, unknown>) => {
+				if (type === 'artifact_path' && typeof data.path === 'string') {
+					const path = data.path;
+					const kind = typeof data.kind === 'string' ? data.kind : '';
+					const name = typeof data.name === 'string' ? data.name : 'media';
+					const mime = typeof data.mime_type === 'string' ? data.mime_type : undefined;
+					try {
+						const content = await client.mediaPlaybackUrl(path, mime);
+						setResults(prev => mergeArtifact(prev, kind, name, content));
+					} catch (err) {
+						console.error('Failed to resolve media artifact:', err);
+					}
+				}
+			};
+
 			// Send files to pipeline (results will come via events)
-			await client.sendFiles(filesWithMimeTypes, authToken);
+			await client.sendFiles(filesWithMimeTypes, authToken, onSSE);
 		} catch (error) {
 			console.error('Error sending files to pipeline:', error);
 			throw error;
@@ -352,8 +412,7 @@ export const useFileProcessing = (
 
 		// Re-parse remaining results or clear if none remain
 		if (updatedUploadResults.length > 0) {
-			const parsedResults = parseDropperResults(updatedUploadResults);
-			setResults(parsedResults);
+			parseDropperResults(updatedUploadResults).then(parsed => setResults(prev => withPreservedMedia(parsed, prev)));
 		} else {
 			setResults(null);
 		}

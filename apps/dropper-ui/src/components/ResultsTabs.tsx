@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { Database, FileText, Table, Image, File, HelpCircle, MessageSquare } from 'lucide-react';
+import { Database, FileText, Table, Image, Video, Music, File, HelpCircle, MessageSquare } from 'lucide-react';
 import { TabType, ProcessedResults } from '../types/dropper.types';
 
 interface ResultsTabsProps {
@@ -35,6 +35,10 @@ export const ResultsTabs: React.FC<ResultsTabsProps> = ({
 				return results.tables.some(group => group.contents.length > 1);
 			case 'images':
 				return results.images.some(group => group.contents.length > 1);
+			case 'videos':
+				return results.videos.some(group => group.contents.length > 1);
+			case 'audios':
+				return results.audios.some(group => group.contents.length > 1);
 			case 'documents':
 				return results.documents.some(group => group.contents.length > 1);
 			case 'questions':
@@ -99,6 +103,32 @@ export const ResultsTabs: React.FC<ResultsTabsProps> = ({
 					<Image className="w-4 h-4" />
 					<span>Images</span>
 					<span className="tab-badge">{results.images.length}</span>
+				</button>
+			)}
+
+			{/* Videos Tab */}
+			{results.videos.length > 0 && (
+				<button
+					onClick={() => onTabChange('videos')}
+					className={`tab-btn ${activeTab === 'videos' ? 'active' : ''}`}
+					type="button"
+				>
+					<Video className="w-4 h-4" />
+					<span>Videos</span>
+					<span className="tab-badge">{results.videos.length}</span>
+				</button>
+			)}
+
+			{/* Audios Tab */}
+			{results.audios.length > 0 && (
+				<button
+					onClick={() => onTabChange('audios')}
+					className={`tab-btn ${activeTab === 'audios' ? 'active' : ''}`}
+					type="button"
+				>
+					<Music className="w-4 h-4" />
+					<span>Audio</span>
+					<span className="tab-badge">{results.audios.length}</span>
 				</button>
 			)}
 

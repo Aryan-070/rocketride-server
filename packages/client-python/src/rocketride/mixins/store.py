@@ -29,7 +29,11 @@ open/close internally.
 """
 
 import json
-from typing import Dict, Any, Optional
+from typing import AsyncIterator, Dict, Any, Optional
+
+# Server-side hard cap on one media_read (MAX_CHUNK_SIZE in file_store.py).
+MEDIA_CHUNK_SIZE = 4_194_304
+
 from ..core import DAPClient
 
 
@@ -241,6 +245,60 @@ class StoreMixin(DAPClient):
     # =========================================================================
     # Convenience Wrappers (text/JSON over binary)
     # =========================================================================
+
+    async def media_open(self, path: str) -> Dict[str, Any]:
+        """Open a produced media artifact for reading over the reliable DAP channel.
+
+        Needs only ``task.data`` (not ``task.store``) and is restricted to the
+        ``outputs/`` prefix server-side. Returns ``{handle, size, complete}``, where
+        ``size`` is what exists *so far* and ``complete`` says whether the producing
+        node has finished.
+        """
+        return await self.call('rrext_media', subcommand='media_open', path=path)
+
+    async def media_read(self, handle: str, offset: int = 0, length: int = MEDIA_CHUNK_SIZE) -> bytes:
+        """Read one chunk. Waits for the producer rather than reporting a premature EOF.
+
+        Empty bytes always mean the stream ended, never "not yet".
+        """
+        # media_read returns binary in response.arguments (not body); use raw request.
+        request = self.build_request(
+            command='rrext_media',
+            arguments={'subcommand': 'media_read', 'handle': handle, 'offset': offset, 'length': length},
+        )
+        response = await self.request(request)
+        if self.did_fail(response):
+            raise RuntimeError(response.get('message', 'Failed to read media'))
+        return response.get('arguments', {}).get('data', b'')
+
+    async def media_close(self, handle: str) -> None:
+        """Close a media read handle."""
+        await self.call('rrext_media', subcommand='media_close', handle=handle)
+
+    async def media_chunks(self, path: str) -> AsyncIterator[bytes]:
+        """Yield an artifact's chunks as they are produced, stopping at end-of-stream.
+
+        Each read blocks server-side until bytes exist, so this paces itself to the
+        producing node instead of polling.
+        """
+        info = await self.media_open(path)
+        handle = info['handle']
+        try:
+            offset = 0
+            while chunk := await self.media_read(handle, offset):
+                offset += len(chunk)
+                yield chunk
+        finally:
+            await self.media_close(handle)
+
+    async def media_read_bytes(self, path: str) -> bytes:
+        """Pull a whole produced media artifact, waiting for the producer to finish.
+
+        Uses only ``task.data`` — no ``task.store``, no signed URL, no HTTP fetch.
+        The path comes from the response node's artifact announcement (under ``outputs/``).
+        """
+        chunks = [chunk async for chunk in self.media_chunks(path)]
+        return b''.join(chunks)
 
     async def fs_read_string(self, path: str, encoding: str = 'utf-8') -> str:
         """Read a file as a decoded string."""

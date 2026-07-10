@@ -25,7 +25,7 @@
 import { useState, useCallback } from 'react';
 import { Question, QuestionType, PIPELINE_RESULT } from 'rocketride';
 import { Message } from '../types/chat.types';
-import { extractTextFromResult } from '../utils/pipelineUtils';
+import { extractTextFromResult, extractMediaFromResult } from '../utils/pipelineUtils';
 
 /**
  * Custom hook for managing chat message state and API communication
@@ -63,7 +63,7 @@ export const useChatMessages = () => {
 		userMessage: string,
 		client: any,
 		authToken: string
-	): Promise<ReturnType<typeof extractTextFromResult>> => {
+	): Promise<{ answers: ReturnType<typeof extractTextFromResult>; media: ReturnType<typeof extractMediaFromResult> }> => {
 		try {
 			if (!client || !authToken) {
 				throw new Error('Not connected to RocketRide. Please refresh the page.');
@@ -91,6 +91,24 @@ export const useChatMessages = () => {
 				token: authToken,
 				question: question,
 				onSSE: async (type: string, data: Record<string, unknown>) => {
+					// Media artifact announced live by the response node. The bytes are
+					// pulled as chunks over rrext_media (task.data only); the signed `url`
+					// it ships is kept strictly as a fallback for when that pull fails.
+					if (type === 'artifact_path' && typeof data.path === 'string') {
+						const url = typeof data.url === 'string' && data.url ? data.url : undefined;
+						setMessages(prev => [...prev, {
+							id: Date.now(),
+							text: '',
+							sender: 'bot',
+							timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+							filePath: data.path as string,
+							mediaFallbackUrl: url,
+							mediaMime: typeof data.mime_type === 'string' ? data.mime_type : undefined,
+							mediaName: typeof data.name === 'string' ? data.name : undefined
+						}]);
+						return;
+					}
+
 					const text = data.message as string | undefined;
 					if (text) {
 						setMessages(prev => [...prev, {
@@ -104,10 +122,17 @@ export const useChatMessages = () => {
 				}
 			});
 
+			// Media persisted to the FileStore already arrived over SSE; what is left
+			// in the result is the store-less base64 fallback, which never announces.
+			const media = extractMediaFromResult(result).filter(m => m.url);
+
 			// Extract text responses from result
 			const textResponses = extractTextFromResult(result);
+			const answers = textResponses.length > 0 || media.length > 0
+				? textResponses
+				: [{ text: 'No valid response received', key: '' }];
 
-			return textResponses.length > 0 ? textResponses : [{ text: 'No valid response received', key: '' }];
+			return { answers, media };
 
 		} catch (error) {
 			console.error('Error sending message via SDK:', error);
@@ -143,18 +168,30 @@ export const useChatMessages = () => {
 
 		try {
 			// Send to API and get response using authToken
-			const answers = await sendMessageToAPI(text, client, authToken);
+			const { answers, media } = await sendMessageToAPI(text, client, authToken);
 
-			// Add bot response(s) to chat
+			// Persisted media already arrived live via onSSE 'artifact_path'; these are
+			// the base64-fallback entries, carrying their bytes inline as a data URI.
+			const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 			const botResponses: Message[] = answers.map((answer, index) => ({
 				id: Date.now() + index + 1,
 				text: answer.text,
 				sender: 'bot' as const,
-				timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+				timestamp,
 				...(answer.key ? { resultKey: answer.key } : {})
 			}));
 
-			setMessages(prev => [...prev, ...botResponses]);
+			const mediaResponses: Message[] = media.map((item, index) => ({
+				id: Date.now() + answers.length + index + 1,
+				text: '',
+				sender: 'bot' as const,
+				timestamp,
+				mediaUrl: item.url as string,
+				mediaMime: item.mime,
+				mediaName: item.name
+			}));
+
+			setMessages(prev => [...prev, ...botResponses, ...mediaResponses]);
 		} catch (error) {
 			// Show error message in chat
 			const errorMessage: Message = {

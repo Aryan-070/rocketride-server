@@ -116,7 +116,7 @@ export interface UploadedFile {
  * setActiveTab('images');
  * ```
  */
-export type TabType = 'results' | 'text' | 'documents' | 'tables' | 'images' | 'questions' | 'answers';
+export type TabType = 'results' | 'text' | 'documents' | 'tables' | 'images' | 'videos' | 'audios' | 'questions' | 'answers';
 
 // ============================================================================
 // CONTENT TYPES
@@ -265,6 +265,12 @@ export interface ProcessedResults {
 
 	/** Extracted images grouped by filename */
 	images: GroupedContent[];
+
+	/** Extracted videos grouped by filename (URLs resolved via fsGetUrl) */
+	videos: GroupedContent[];
+
+	/** Extracted audios grouped by filename (URLs resolved via fsGetUrl) */
+	audios: GroupedContent[];
 
 	/** Extracted questions grouped by filename */
 	questions: GroupedContent[];

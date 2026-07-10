@@ -36,6 +36,15 @@ export interface Message {
 	timestamp: string;
 	resultKey?: string | undefined;
 	sseType?: string;
+	// Inline media: when set, the message renders a player/viewer instead of
+	// markdown. filePath is the logical FileStore path, pulled as chunks over
+	// rrext_media. mediaUrl is a pre-resolved data URI (base64 fallback, nothing
+	// to pull); mediaFallbackUrl is the signed URL, used only if the pull fails.
+	filePath?: string | undefined;
+	mediaUrl?: string | undefined;
+	mediaFallbackUrl?: string | undefined;
+	mediaMime?: string | undefined;
+	mediaName?: string | undefined;
 }
 
 /**
