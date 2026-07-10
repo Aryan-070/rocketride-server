@@ -22,10 +22,15 @@
 # =============================================================================
 
 from typing import List
-import os
+import asyncio
 import base64
+import mimetypes
+import os
+import uuid
 
-from rocketlib import IInstanceBase
+from rocketlib import IInstanceBase, warning
+from ai.account.live_media import LiveWriter
+from ai.account.file_store import MAX_CHUNK_SIZE
 from ai.common.schema import Doc, Question, Answer
 from rocketlib import AVI_ACTION, Entry
 
@@ -36,7 +41,11 @@ class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
     text: str = ''
-    image = bytearray()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Per-lane spool writers; per-instance, not class-level mutables (shared).
+        self._media: dict = {}
 
     def _getkey(self, type: str):
         # Allow the key to be overriden by
@@ -78,8 +87,8 @@ class IInstance(IInstanceBase):
             object (Entry): The object to initialize processing for.
         """
         self.text = ''  # Reset the text buffer
-        self.image = bytearray()
-        self.video = bytearray()
+        # Per-lane spool writers; each lane's BEGIN (re)creates its entry.
+        self._media = {}
 
     def close(self):
         """
@@ -194,70 +203,153 @@ class IInstance(IInstanceBase):
         else:
             self.instance.currentObject.response[key].append(answer.getText())
 
+    def _write_media(self, lane: str, action: int, mimeType: str, data: bytes):
+        """Shared handler for the image/audio/video stream lanes.
+
+        The bytes go to a spool file as they arrive, and the artifact is announced on
+        BEGIN — before a single byte exists. A consumer opens it immediately and reads
+        along behind the producer, so playback starts while the node is still writing.
+        On END the spool is persisted to the account store and the result carries the
+        path; nothing is ever held whole in memory.
+
+        Args:
+            lane (str): The media lane — ``'image'``, ``'audio'`` or ``'video'``.
+            action (int): The AVI stream action (BEGIN/WRITE/END).
+            mimeType (str): The media MIME type.
+            data (bytes): A WRITE data chunk (empty on BEGIN/END).
+        """
+        if action == AVI_ACTION.BEGIN:
+            self._begin_media(lane, mimeType)
+
+        elif action == AVI_ACTION.WRITE:
+            if entry := self._media.get(lane):
+                entry['writer'].append(data)
+
+        elif action == AVI_ACTION.END:
+            entry = self._media.pop(lane, None)
+            if entry is None:
+                return
+            key = self._getkey(lane)
+            if key not in self.instance.currentObject.response:
+                self.instance.currentObject.response[key] = []
+            self.instance.currentObject.response[key].append(self._end_media(lane, entry))
+
+    def _begin_media(self, lane: str, mimeType: str) -> None:
+        """Open the spool and announce the artifact before its bytes exist."""
+        path = self._media_path(lane, mimeType)
+        writer = LiveWriter(self.IGlobal.client_id or 'anonymous', path)
+        writer.begin()
+        self._media[lane] = {'writer': writer, 'path': path, 'mime': mimeType}
+
+        # Announce only when a consumer could act on it: a live pull needs the
+        # server to resolve the same spool, which it keys by the account id.
+        if self.IGlobal.transmit_media and self.IGlobal.client_id:
+            self._announce_artifact(lane, mimeType, path)
+
+    def _end_media(self, lane: str, entry: dict) -> dict:
+        """Close the spool, persist it, and build the result item for this media.
+
+        The spool is discarded last, because the base64 fallback reads it back.
+        """
+        writer, path, mime = entry['writer'], entry['path'], entry['mime']
+        writer.finish()
+        try:
+            if self.IGlobal.file_store is not None:
+                try:
+                    _run_async(self._persist_spool(path))
+                    return {'mime_type': mime, 'path': path}
+                except Exception as e:
+                    warning(f'response: persisting {path!r} failed; falling back to base64: {e}')
+
+            # No store, or the write failed: inline the bytes under the legacy lane key.
+            return {'mime_type': mime, lane: base64.b64encode(self._read_spool(lane, path)).decode('utf-8')}
+        finally:
+            writer.discard()
+
+    async def _persist_spool(self, path: str) -> None:
+        """Copy the spool into the account store, one chunk at a time."""
+        store = self.IGlobal.file_store
+        handle = await store.open_write(path, 0)
+        try:
+            with open(self._spool_part(path), 'rb') as fh:
+                while chunk := fh.read(MAX_CHUNK_SIZE):
+                    await store.write_chunk(handle, chunk)
+        except BaseException:
+            # Release the handle without masking the original failure.
+            try:
+                await store.close_write(handle)
+            except Exception:
+                pass
+            raise
+        await store.close_write(handle)
+
+    def _spool_part(self, path: str) -> str:
+        from ai.account.live_media import spool_paths
+
+        return spool_paths(self.IGlobal.client_id or 'anonymous', path)[0]
+
+    def _read_spool(self, lane: str, path: str) -> bytes:
+        """Read the whole spool back. Only the base64 fallback pays this cost."""
+        try:
+            with open(self._spool_part(path), 'rb') as fh:
+                return fh.read()
+        except OSError as e:
+            warning(f'response: reading spool for {lane} failed: {e}')
+            return b''
+
+    def _announce_artifact(self, kind: str, mime: str, path: str) -> None:
+        """Emit an ``artifact_path`` SSE event before the media exists.
+
+        Carries no bytes and no URL: the consumer pulls them over ``rrext_media``,
+        whose reads wait for the producer. Best-effort — a transport failure never
+        breaks the pipeline.
+        """
+        try:
+            self.instance.sendSSE(
+                'artifact_path',
+                kind=kind,
+                mime_type=mime,
+                path=path,
+                name=path.rsplit('/', 1)[-1],
+                streaming=True,
+            )
+        except Exception as e:
+            warning(f'response: artifact_path SSE failed for {path!r}: {e}')
+
+    def _media_path(self, kind: str, mime: str) -> str:
+        """Unique logical FileStore path under ``outputs/<kind>/`` for this media."""
+        ext = mimetypes.guess_extension(mime or '') or ''
+        if not ext and mime and '/' in mime:
+            # guess_extension misses common audio/video types (e.g. audio/wav);
+            # fall back to the MIME subtype so the file keeps a usable extension.
+            ext = '.' + mime.split(';')[0].split('/')[-1].strip()
+        base = 'output'
+        if self.instance.currentObject.hasName and self.instance.currentObject.name:
+            base = os.path.splitext(os.path.basename(self.instance.currentObject.name))[0] or 'output'
+        return f'outputs/{kind}/{base}-{uuid.uuid4().hex[:8]}{ext}'
+
     def writeAudio(self, aviAction: int, mimeType: str, data: bytes):
-        # Get the key to write to
-        key = self._getkey('audio')
-
-        # If it isn't there, create it
-        if key not in self.instance.currentObject.response:
-            self.instance.currentObject.response[key] = []
-
-        # Create the tracking info
-        info = {
-            'url': self.instance.currentObject.url,
-            'aviAction': str(aviAction),
-            'mimeType': mimeType,
-            'size': len(data),
-        }
-
-        # Add the documents
-        self.instance.currentObject.response[key].append(info)
+        self._write_media('audio', aviAction, mimeType, data)
 
     def writeVideo(self, aviAction: int, mimeType: str, data: bytes):
-        if aviAction == AVI_ACTION.BEGIN:
-            self.video = bytearray()
-
-        elif aviAction == AVI_ACTION.WRITE:
-            self.video += data
-
-        elif aviAction == AVI_ACTION.END:
-            key = self._getkey('video')
-
-            if key not in self.instance.currentObject.response:
-                self.instance.currentObject.response[key] = []
-
-            video_str = base64.b64encode(self.video).decode('utf-8')
-            self.video = bytearray()
-
-            self.instance.currentObject.response[key].append(
-                {
-                    'mime_type': mimeType,
-                    'video': video_str,
-                }
-            )
+        self._write_media('video', aviAction, mimeType, data)
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
-        # Handle AVI_BEGIN action
-        if action == AVI_ACTION.BEGIN:
-            self.image = bytearray()
+        self._write_media('image', action, mimeType, buffer)
 
-        # Handle AVI_WRITE action (appending chunks of the image)
-        elif action == AVI_ACTION.WRITE:
-            self.image += buffer  # Append the chunk to the existing image data
 
-        # Handle AVI_END action (finalizing the image processing)
-        elif action == AVI_ACTION.END:
-            # Get the key to write to
-            key = self._getkey('image')
+def _run_async(coro):
+    """Run an async coroutine from the synchronous AVI write callbacks.
 
-            # If it isn't there, create it
-            if key not in self.instance.currentObject.response:
-                self.instance.currentObject.response[key] = []
+    The engine invokes write* synchronously (no running event loop), so a fresh
+    ``asyncio.run`` is safe. Pre-check to surface a clear error if ever called
+    from a thread that already owns a loop.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        raise RuntimeError('_run_async must not be called from a thread with a running event loop')
 
-            image_str = base64.b64encode(self.image).decode('utf-8')
-
-            # Release the image
-            self.image = bytearray()
-
-            # Add the image
-            self.instance.currentObject.response[key].append({'mime_type': mimeType, 'image': image_str})
+    return asyncio.run(coro)
