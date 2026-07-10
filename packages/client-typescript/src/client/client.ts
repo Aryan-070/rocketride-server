@@ -2419,10 +2419,27 @@ export class RocketRideClient extends DAPClient {
 			// Our encoders stamp real timestamps (a first frame can land at t=2s), and the
 			// element would sit at t=0 on an empty buffer. 'sequence' rebases onto zero.
 			buffer.mode = 'sequence';
-			const appended = () =>
-				new Promise<void>(resolve => buffer.addEventListener('updateend', () => resolve(), { once: true }));
 
-			// appendBuffer is asynchronous; a second call before updateend throws.
+			// appendBuffer never throws: a rejected chunk fires `error`, then `updateend`.
+			// Waiting only for updateend would keep feeding a dead buffer, in silence.
+			const appended = () =>
+				new Promise<void>((resolve, reject) => {
+					const done = () => {
+						cleanup();
+						resolve();
+					};
+					const failed = () => {
+						cleanup();
+						reject(new Error(`SourceBuffer rejected a ${type} chunk`));
+					};
+					const cleanup = () => {
+						buffer.removeEventListener('updateend', done);
+						buffer.removeEventListener('error', failed);
+					};
+					buffer.addEventListener('updateend', done);
+					buffer.addEventListener('error', failed);
+				});
+
 			buffer.appendBuffer(first as BufferSource);
 			await appended();
 			for await (const chunk of rest) {
@@ -2431,7 +2448,7 @@ export class RocketRideClient extends DAPClient {
 			}
 			if (mediaSource.readyState === 'open') mediaSource.endOfStream();
 		} catch (e) {
-			console.error('media: progressive playback failed', e);
+			console.error(`media: progressive playback failed for ${type}`, e);
 			if (mediaSource.readyState === 'open') mediaSource.endOfStream('decode');
 		}
 	}

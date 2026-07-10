@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { Question, QuestionType, PIPELINE_RESULT } from 'rocketride';
 import { Message } from '../types/chat.types';
 import { extractTextFromResult, extractMediaFromResult } from '../utils/pipelineUtils';
@@ -41,6 +41,9 @@ import { extractTextFromResult, extractMediaFromResult } from '../utils/pipeline
  */
 export const useChatMessages = () => {
 	const [messages, setMessages] = useState<Message[]>([]);
+
+	/** Artifact paths already rendered from an SSE announcement. */
+	const announcedPaths = useRef(new Set<string>());
 	const [isTyping, setIsTyping] = useState(false);
 
 	/**
@@ -93,6 +96,7 @@ export const useChatMessages = () => {
 				onSSE: async (type: string, data: Record<string, unknown>) => {
 					// The response node announces the artifact before its first byte exists.
 					if (type === 'artifact_path' && typeof data.path === 'string') {
+						announcedPaths.current.add(data.path);
 						setMessages(prev => [...prev, {
 							id: Date.now(),
 							text: '',
@@ -118,9 +122,9 @@ export const useChatMessages = () => {
 				}
 			});
 
-			// Media persisted to the FileStore already arrived over SSE; what is left
-			// in the result is the store-less base64 fallback, which never announces.
-			const media = extractMediaFromResult(result).filter(m => m.url);
+			// The result names every artifact. SSE may have announced some of them
+			// already; the caller drops those and renders the rest.
+			const media = extractMediaFromResult(result);
 
 			// Extract text responses from result
 			const textResponses = extractTextFromResult(result);
@@ -166,8 +170,6 @@ export const useChatMessages = () => {
 			// Send to API and get response using authToken
 			const { answers, media } = await sendMessageToAPI(text, client, authToken);
 
-			// Persisted media already arrived live via onSSE 'artifact_path'; these are
-			// the base64-fallback entries, carrying their bytes inline as a data URI.
 			const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 			const botResponses: Message[] = answers.map((answer, index) => ({
 				id: Date.now() + index + 1,
@@ -177,15 +179,19 @@ export const useChatMessages = () => {
 				...(answer.key ? { resultKey: answer.key } : {})
 			}));
 
-			const mediaResponses: Message[] = media.map((item, index) => ({
-				id: Date.now() + answers.length + index + 1,
-				text: '',
-				sender: 'bot' as const,
-				timestamp,
-				mediaUrl: item.url as string,
-				mediaMime: item.mime,
-				mediaName: item.name
-			}));
+			// The announcement bus is lossy; the result is not. Render whatever SSE
+			// never delivered — a dropped event must not cost the user their media.
+			const mediaResponses: Message[] = media
+				.filter(item => item.url || (item.path && !announcedPaths.current.has(item.path)))
+				.map((item, index) => ({
+					id: Date.now() + answers.length + index + 1,
+					text: '',
+					sender: 'bot' as const,
+					timestamp,
+					...(item.url ? { mediaUrl: item.url } : { filePath: item.path as string }),
+					mediaMime: item.mime,
+					mediaName: item.name
+				}));
 
 			setMessages(prev => [...prev, ...botResponses, ...mediaResponses]);
 		} catch (error) {
