@@ -41,21 +41,45 @@ let clientId = 0;
 const MEDIA_CHUNK_SIZE = 4_194_304;
 
 /**
- * MediaSource rejects a bare `video/mp4`: it wants the codec named. The artifact
- * announcement carries only the container MIME, so probe the codecs our encoders
- * actually emit — libx264 high/baseline for MP4, and MP3 as-is.
+ * Containers MediaSource can play progressively, and the guess we use to decide
+ * whether to try before any bytes have arrived. For MP4 the real codec string is
+ * read out of the init segment (see {@link mp4CodecFromInitSegment}); this list only
+ * answers "is MSE plausible here at all".
  */
-const MSE_CANDIDATES: Record<string, string[]> = {
-	'video/mp4': ['video/mp4; codecs="avc1.640028"', 'video/mp4; codecs="avc1.42E01E"', 'video/mp4'],
-	'audio/mpeg': ['audio/mpeg'],
+const MSE_PROBE: Record<string, string> = {
+	'video/mp4': 'video/mp4; codecs="avc1.42E01E"',
+	'audio/mpeg': 'audio/mpeg',
 };
 
-/** The first MediaSource-supported MIME string for this artifact, if any. */
-function supportedMseType(mime: string): string | undefined {
-	if (typeof MediaSource === 'undefined') return undefined;
-	const base = mime.split(';')[0].trim();
-	const candidates = MSE_CANDIDATES[base] ?? [mime];
-	return candidates.find(candidate => MediaSource.isTypeSupported(candidate));
+/** Whether MediaSource can plausibly play this container. */
+function mseSupported(mime: string): boolean {
+	if (typeof MediaSource === 'undefined') return false;
+	const probe = MSE_PROBE[mime.split(';')[0].trim()];
+	return Boolean(probe) && MediaSource.isTypeSupported(probe);
+}
+
+/**
+ * The exact `codecs=` string for an MP4, read from the `avcC` box of its init segment.
+ *
+ * MediaSource rejects a codec string that does not match the bytes, and the artifact
+ * announcement carries only `video/mp4`. Guessing a profile/level pair breaks on any
+ * clip that differs — so read the three bytes ffmpeg wrote: profile, constraints, level.
+ *
+ * Returns undefined if the box is not in this chunk, leaving the caller to fall back.
+ */
+function mp4CodecFromInitSegment(chunk: Uint8Array): string | undefined {
+	// 'avcC' — the AVCDecoderConfigurationRecord, inside stsd/avc1 of the moov box.
+	for (let i = 0; i + 8 < chunk.length; i++) {
+		if (chunk[i] === 0x61 && chunk[i + 1] === 0x76 && chunk[i + 2] === 0x63 && chunk[i + 3] === 0x43) {
+			// Skip the box name, then the configurationVersion byte.
+			const profile = chunk[i + 5];
+			const constraints = chunk[i + 6];
+			const level = chunk[i + 7];
+			const hex = (b: number) => b.toString(16).padStart(2, '0');
+			return `video/mp4; codecs="avc1.${hex(profile)}${hex(constraints)}${hex(level)}"`;
+		}
+	}
+	return undefined;
 }
 
 /**
@@ -2369,11 +2393,9 @@ export class RocketRideClient extends DAPClient {
 	 * A `src` for an `<audio>`/`<video>` element that plays while the media is
 	 * still being produced.
 	 *
-	 * Uses MediaSource so the first chunk starts playing immediately. MediaSource
-	 * needs a MIME string it recognises — for MP4 that means naming the codec, which
-	 * the announcement does not carry — so we probe a few candidates. When none is
-	 * supported (Safari does not do MSE for MP3), the whole artifact is pulled and
-	 * played from a Blob: still reliable, just not progressive.
+	 * Uses MediaSource so the first chunk starts playing immediately. When MediaSource
+	 * cannot play this container (Safari does not do MSE for MP3), the whole artifact is
+	 * pulled and played from a Blob: still reliable, just not progressive.
 	 *
 	 * Revoke the returned URL when the element goes away.
 	 *
@@ -2381,37 +2403,48 @@ export class RocketRideClient extends DAPClient {
 	 * @param mime - MIME type from the same event
 	 */
 	async mediaPlaybackUrl(path: string, mime?: string): Promise<string> {
-		const mseType = mime ? supportedMseType(mime) : undefined;
-		if (!mseType || typeof MediaSource === 'undefined') {
+		if (!mime || !mseSupported(mime)) {
 			return URL.createObjectURL(await this.mediaFetchBlob(path, mime));
 		}
 
 		const mediaSource = new MediaSource();
 		const url = URL.createObjectURL(mediaSource);
-
-		mediaSource.addEventListener(
-			'sourceopen',
-			() => {
-				const buffer = mediaSource.addSourceBuffer(mseType);
-				void this.pumpIntoSourceBuffer(path, mediaSource, buffer);
-			},
-			{ once: true }
-		);
+		mediaSource.addEventListener('sourceopen', () => void this.pumpIntoSourceBuffer(path, mime, mediaSource), {
+			once: true,
+		});
 		return url;
 	}
 
-	/** Feed each chunk into the SourceBuffer, one at a time, until the stream ends. */
-	private async pumpIntoSourceBuffer(path: string, mediaSource: MediaSource, buffer: SourceBuffer): Promise<void> {
-		const appended = () => new Promise<void>(resolve => buffer.addEventListener('updateend', () => resolve(), { once: true }));
+	/**
+	 * Feed the artifact's chunks into a SourceBuffer as they arrive.
+	 *
+	 * The SourceBuffer is created only once the first chunk is in hand, because for MP4
+	 * the codec string has to be read out of the init segment — MediaSource rejects a
+	 * guess that does not match the bytes.
+	 */
+	private async pumpIntoSourceBuffer(path: string, mime: string, mediaSource: MediaSource): Promise<void> {
+		let buffer: SourceBuffer | undefined;
+		const appended = (target: SourceBuffer) =>
+			new Promise<void>(resolve => target.addEventListener('updateend', () => resolve(), { once: true }));
+
 		try {
 			for await (const chunk of this.mediaChunks(path)) {
+				if (!buffer) {
+					const type = mime.startsWith('video/mp4') ? (mp4CodecFromInitSegment(chunk) ?? mime) : mime;
+					buffer = mediaSource.addSourceBuffer(type);
+					// Our encoders stamp real timestamps: frame_grabber's first frame can
+					// land at t=2s, and the element would sit at t=0 on an empty buffer,
+					// showing nothing. 'sequence' rebases each chunk onto the timeline.
+					buffer.mode = 'sequence';
+				}
 				// appendBuffer is asynchronous; a second call before updateend throws.
 				buffer.appendBuffer(chunk as BufferSource);
-				await appended();
+				await appended(buffer);
 			}
 			if (mediaSource.readyState === 'open') mediaSource.endOfStream();
-		} catch {
-			if (mediaSource.readyState === 'open') mediaSource.endOfStream('network');
+		} catch (e) {
+			console.error(`media playback failed for ${path}:`, e);
+			if (mediaSource.readyState === 'open') mediaSource.endOfStream('decode');
 		}
 	}
 
