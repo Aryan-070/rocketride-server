@@ -4,10 +4,10 @@
  * See LICENSE file for details.
  */
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { RocketRideClient, UPLOAD_RESULT } from 'rocketride';
 import { UploadedFile, ProcessedResults, GroupedContent } from '../types/dropper.types';
-import { parseDropperResults, generateFileId } from '../utils/dropperUtils';
+import { parseDropperResults, extractMediaArtifacts, generateFileId } from '../utils/dropperUtils';
 import { subscribeToClient } from './clientSingleton';
 
 /** Empty results structure used to seed media merges before a parse exists. */
@@ -117,6 +117,32 @@ export const useFileProcessing = (
 
 	/** Parsed and organized results from processing */
 	const [results, setResults] = useState<ProcessedResults | null>(null);
+
+	/** Artifact paths already merged from an SSE announcement. */
+	const announcedPaths = useRef(new Set<string>());
+
+	/**
+	 * Pull any artifact the result names but SSE never announced.
+	 *
+	 * The announcement bus is lossy; the result is not. Without this, a dropped event
+	 * silently costs the user their media.
+	 */
+	const recoverMissedArtifacts = useCallback(
+		async (uploadResults: UPLOAD_RESULT[]) => {
+			if (!client) return;
+			for (const artifact of extractMediaArtifacts(uploadResults)) {
+				if (announcedPaths.current.has(artifact.path)) continue;
+				announcedPaths.current.add(artifact.path);
+				try {
+					const url = await client.mediaPlaybackUrl(artifact.path, artifact.mime);
+					setResults(prev => mergeArtifact(prev, artifact.kind, artifact.name, url));
+				} catch (err) {
+					console.error('Failed to recover media artifact:', err);
+				}
+			}
+		},
+		[client]
+	);
 
 	/** Flag indicating if files are currently being processed */
 	const [isProcessing, setIsProcessing] = useState(false);
@@ -228,10 +254,11 @@ export const useFileProcessing = (
 			// Parse results if we have any
 			if (uploadResults.length > 0) {
 				parseDropperResults(uploadResults).then(parsed => setResults(prev => withPreservedMedia(parsed, prev)));
+				void recoverMissedArtifacts(uploadResults);
 			}
 			setIsProcessing(false);
 		}
-	}, [remainingFiles, isProcessing, uploadedFiles.length, uploadResults]);
+	}, [remainingFiles, isProcessing, uploadedFiles.length, uploadResults, recoverMissedArtifacts]);
 
 	// ============= FILE PROCESSING =============
 
@@ -275,6 +302,8 @@ export const useFileProcessing = (
 					const kind = typeof data.kind === 'string' ? data.kind : '';
 					const name = typeof data.name === 'string' ? data.name : 'media';
 					const mime = typeof data.mime_type === 'string' ? data.mime_type : undefined;
+					if (announcedPaths.current.has(path)) return;
+					announcedPaths.current.add(path);
 					try {
 						const content = await client.mediaPlaybackUrl(path, mime);
 						setResults(prev => mergeArtifact(prev, kind, name, content));
