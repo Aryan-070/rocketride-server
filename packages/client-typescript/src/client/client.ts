@@ -41,24 +41,6 @@ let clientId = 0;
 const MEDIA_CHUNK_SIZE = 4_194_304;
 
 /**
- * Containers MediaSource can play progressively, and the guess we use to decide
- * whether to try before any bytes have arrived. For MP4 the real codec string is
- * read out of the init segment (see {@link mp4CodecFromInitSegment}); this list only
- * answers "is MSE plausible here at all".
- */
-const MSE_PROBE: Record<string, string> = {
-	'video/mp4': 'video/mp4; codecs="avc1.42E01E"',
-	'audio/mpeg': 'audio/mpeg',
-};
-
-/** Whether MediaSource can plausibly play this container. */
-function mseSupported(mime: string): boolean {
-	if (typeof MediaSource === 'undefined') return false;
-	const probe = MSE_PROBE[mime.split(';')[0].trim()];
-	return Boolean(probe) && MediaSource.isTypeSupported(probe);
-}
-
-/**
  * The exact `codecs=` string for an MP4, read from the `avcC` box of its init segment.
  *
  * MediaSource rejects a codec string that does not match the bytes, and the artifact
@@ -80,6 +62,22 @@ function mp4CodecFromInitSegment(chunk: Uint8Array): string | undefined {
 		}
 	}
 	return undefined;
+}
+
+/**
+ * The MIME string to hand MediaSource for this artifact, or undefined to fall back.
+ *
+ * Asks the browser about the codec actually present in the bytes rather than a guess,
+ * so a clip whose profile or level we did not anticipate degrades to Blob playback
+ * instead of leaving the user with nothing.
+ */
+function playableMseType(mime: string, initSegment: Uint8Array): string | undefined {
+	if (typeof MediaSource === 'undefined') return undefined;
+	const base = mime.split(';')[0].trim();
+	let candidate: string | undefined;
+	if (base === 'video/mp4') candidate = mp4CodecFromInitSegment(initSegment);
+	else if (base === 'audio/mpeg') candidate = base;
+	return candidate && MediaSource.isTypeSupported(candidate) ? candidate : undefined;
 }
 
 /**
@@ -2393,9 +2391,11 @@ export class RocketRideClient extends DAPClient {
 	 * A `src` for an `<audio>`/`<video>` element that plays while the media is
 	 * still being produced.
 	 *
-	 * Uses MediaSource so the first chunk starts playing immediately. When MediaSource
-	 * cannot play this container (Safari does not do MSE for MP3), the whole artifact is
-	 * pulled and played from a Blob: still reliable, just not progressive.
+	 * Reads the first chunk before deciding: for MP4 the codec string lives in the init
+	 * segment, and MediaSource rejects any guess that does not match the bytes. If the
+	 * browser can play it progressively we hand back a MediaSource url and keep feeding
+	 * it; otherwise we pull the artifact whole and play it from a Blob — slower to start,
+	 * but it always plays. A MediaSource failure must never cost the user the media.
 	 *
 	 * Revoke the returned URL when the element goes away.
 	 *
@@ -2403,47 +2403,54 @@ export class RocketRideClient extends DAPClient {
 	 * @param mime - MIME type from the same event
 	 */
 	async mediaPlaybackUrl(path: string, mime?: string): Promise<string> {
-		if (!mime || !mseSupported(mime)) {
-			return URL.createObjectURL(await this.mediaFetchBlob(path, mime));
+		const chunks = this.mediaChunks(path);
+		const first = await chunks.next();
+		if (first.done) return URL.createObjectURL(new Blob([], mime ? { type: mime } : undefined));
+
+		const type = mime ? playableMseType(mime, first.value) : undefined;
+		if (!type) {
+			// No progressive path: drain the rest and play the whole thing.
+			const rest: Uint8Array[] = [first.value];
+			for await (const chunk of chunks) rest.push(chunk);
+			return URL.createObjectURL(new Blob(rest as BlobPart[], mime ? { type: mime } : undefined));
 		}
 
 		const mediaSource = new MediaSource();
 		const url = URL.createObjectURL(mediaSource);
-		mediaSource.addEventListener('sourceopen', () => void this.pumpIntoSourceBuffer(path, mime, mediaSource), {
-			once: true,
-		});
+		mediaSource.addEventListener(
+			'sourceopen',
+			() => void this.pumpIntoSourceBuffer(type, first.value, chunks, mediaSource),
+			{ once: true }
+		);
 		return url;
 	}
 
-	/**
-	 * Feed the artifact's chunks into a SourceBuffer as they arrive.
-	 *
-	 * The SourceBuffer is created only once the first chunk is in hand, because for MP4
-	 * the codec string has to be read out of the init segment — MediaSource rejects a
-	 * guess that does not match the bytes.
-	 */
-	private async pumpIntoSourceBuffer(path: string, mime: string, mediaSource: MediaSource): Promise<void> {
-		let buffer: SourceBuffer | undefined;
-		const appended = (target: SourceBuffer) =>
-			new Promise<void>(resolve => target.addEventListener('updateend', () => resolve(), { once: true }));
-
+	/** Feed the first chunk and everything after it into a SourceBuffer, in order. */
+	private async pumpIntoSourceBuffer(
+		type: string,
+		first: Uint8Array,
+		rest: AsyncGenerator<Uint8Array, void, void>,
+		mediaSource: MediaSource
+	): Promise<void> {
 		try {
-			for await (const chunk of this.mediaChunks(path)) {
-				if (!buffer) {
-					const type = mime.startsWith('video/mp4') ? (mp4CodecFromInitSegment(chunk) ?? mime) : mime;
-					buffer = mediaSource.addSourceBuffer(type);
-					// Our encoders stamp real timestamps: frame_grabber's first frame can
-					// land at t=2s, and the element would sit at t=0 on an empty buffer,
-					// showing nothing. 'sequence' rebases each chunk onto the timeline.
-					buffer.mode = 'sequence';
-				}
-				// appendBuffer is asynchronous; a second call before updateend throws.
+			const buffer = mediaSource.addSourceBuffer(type);
+			// Our encoders stamp real timestamps: frame_grabber's first frame can land at
+			// t=2s, and the element would sit at t=0 on an empty buffer, showing nothing.
+			// 'sequence' rebases each chunk onto the timeline.
+			buffer.mode = 'sequence';
+			const appended = () =>
+				new Promise<void>(resolve => buffer.addEventListener('updateend', () => resolve(), { once: true }));
+
+			// appendBuffer is asynchronous; a second call before updateend throws.
+			buffer.appendBuffer(first as BufferSource);
+			await appended();
+			for await (const chunk of rest) {
 				buffer.appendBuffer(chunk as BufferSource);
-				await appended(buffer);
+				await appended();
 			}
 			if (mediaSource.readyState === 'open') mediaSource.endOfStream();
 		} catch (e) {
-			console.error(`media playback failed for ${path}:`, e);
+			console.error('media: progressive playback failed', e);
 			if (mediaSource.readyState === 'open') mediaSource.endOfStream('decode');
 		}
 	}
