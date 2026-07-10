@@ -132,9 +132,9 @@ export const useFileProcessing = (
 			if (!client) return;
 			for (const artifact of extractMediaArtifacts(uploadResults)) {
 				if (announcedPaths.current.has(artifact.path)) continue;
-				announcedPaths.current.add(artifact.path);
 				try {
 					const url = await client.mediaPlaybackUrl(artifact.path, artifact.mime);
+					announcedPaths.current.add(artifact.path);
 					setResults(prev => mergeArtifact(prev, artifact.kind, artifact.name, url));
 				} catch (err) {
 					console.error('Failed to recover media artifact:', err);
@@ -303,9 +303,11 @@ export const useFileProcessing = (
 					const name = typeof data.name === 'string' ? data.name : 'media';
 					const mime = typeof data.mime_type === 'string' ? data.mime_type : undefined;
 					if (announcedPaths.current.has(path)) return;
-					announcedPaths.current.add(path);
 					try {
 						const content = await client.mediaPlaybackUrl(path, mime);
+						// Marked only on success: a live pull that fails is retried once the
+						// artifact is persisted, when reconciliation runs.
+						announcedPaths.current.add(path);
 						setResults(prev => mergeArtifact(prev, kind, name, content));
 					} catch (err) {
 						console.error('Failed to resolve media artifact:', err);
