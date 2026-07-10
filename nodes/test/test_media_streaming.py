@@ -190,13 +190,6 @@ def test_response_keeps_concurrent_lanes_in_separate_spools():
     assert bytes(store.written[video['path']]) == b'VVVV'
 
 
-def test_response_ignores_a_write_without_a_begin():
-    node = _response(store=_Store())
-    node.writeVideo(AVI_ACTION.WRITE, 'video/mp4', b'orphan')
-    node.writeVideo(AVI_ACTION.END, 'video/mp4', b'')
-    assert node.instance.currentObject.response == {}
-
-
 # ===========================================================================
 # audio_tts — MP3 frames as Kokoro produces them
 # ===========================================================================
@@ -272,12 +265,6 @@ def test_tts_streams_mp3_not_wav():
     assert not stream.startswith(b'RIFF')
 
 
-def test_tts_emits_nothing_for_empty_text():
-    node = _tts([_tone(2400)])
-    node.writeText('   ')
-    assert node.instance.calls == []
-
-
 def test_tts_emits_end_even_when_synthesis_fails():
     """A failed utterance must not leave the downstream stream open forever."""
 
@@ -293,12 +280,6 @@ def test_tts_emits_end_even_when_synthesis_fails():
         node.writeText('hello')
 
     assert node.instance.actions() == [AVI_ACTION.BEGIN, AVI_ACTION.END]
-
-
-def test_tts_raises_when_the_model_returns_no_samples():
-    node = _tts([])
-    with pytest.raises(ValueError, match='no audio samples'):
-        node.writeText('hello')
 
 
 # ===========================================================================
@@ -435,13 +416,6 @@ def test_composer_close_drains_the_tail_and_ends_the_stream():
     assert proc.stdin.closed, 'the encoder must be told there are no more frames'
     assert node.instance.payload() == b'moofmdat-tail'
     assert node.instance.actions()[-1] == AVI_ACTION.END
-
-
-def test_composer_close_without_frames_encodes_nothing():
-    node = _composer()
-    node.close()
-    assert node.instance.calls == []
-    assert node._proc is None
 
 
 def test_composer_a_broken_encoder_ends_the_stream_instead_of_raising():

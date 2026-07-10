@@ -34,7 +34,6 @@ import hashlib
 import json
 import os
 import tempfile
-import time
 from typing import Optional
 
 READ_TIMEOUT = 30.0
@@ -64,28 +63,6 @@ def is_live(client_id: str, path: str) -> bool:
     """True while a spool exists — the artifact is streaming or just finished."""
     part, _ = spool_paths(client_id, path)
     return os.path.exists(part)
-
-
-def sweep_stale_spools(max_age: float = 3600.0) -> int:
-    """Reclaim spools discard() could not: a crashed node, or Windows holding one open."""
-    now = time.time()
-    removed = 0
-    try:
-        entries = os.scandir(live_dir())
-    except OSError:
-        return 0
-    with entries:
-        for entry in entries:
-            if not entry.name.endswith(('.part', '.done')):
-                continue
-            try:
-                if now - entry.stat().st_mtime <= max_age:
-                    continue
-                os.unlink(entry.path)
-                removed += 1
-            except OSError:
-                continue
-    return removed
 
 
 class LiveWriter:

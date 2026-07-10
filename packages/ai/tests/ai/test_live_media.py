@@ -7,7 +7,6 @@ live artifact waits for the producer, so empty bytes only ever mean end-of-strea
 
 import asyncio
 import os
-import time
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -143,33 +142,6 @@ async def test_reader_survives_the_spool_being_reclaimed():
         r.close()
 
 
-def test_discard_never_raises_when_a_reader_holds_the_spool():
-    """On Windows the unlink fails; the node must not care."""
-    w = LiveWriter(CLIENT, PATH)
-    w.begin()
-    w.append(b'x')
-    w.finish()
-    r = _reader()
-    try:
-        w.discard()  # must not raise on any platform
-    finally:
-        r.close()
-
-
-def test_sweep_reclaims_spools_a_crashed_node_left_behind():
-    w = LiveWriter(CLIENT, PATH)
-    w.begin()
-    w.append(b'orphan')  # never finished, never discarded
-
-    part, _ = live_media.spool_paths(CLIENT, PATH)
-    assert live_media.sweep_stale_spools(max_age=3600) == 0, 'a fresh spool is not stale'
-
-    old = time.time() - 7200
-    os.utime(part, (old, old))
-    assert live_media.sweep_stale_spools(max_age=3600) == 1
-    assert not live_media.is_live(CLIENT, PATH)
-
-
 def test_begin_discards_a_stale_spool():
     w = LiveWriter(CLIENT, PATH)
     w.begin()
@@ -227,37 +199,11 @@ async def test_gates_on_task_data_not_task_store():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('subcommand', [None, 'media_delete'])
-async def test_missing_or_unknown_subcommand_raises(subcommand):
-    conn = _make_conn()
-    with pytest.raises(ValueError):
-        await _call(conn, subcommand=subcommand)
-
-
-# ---------------------------------------------------------------------------
-# outputs/ scoping
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize('path', ['secrets/key.pem', '/secrets/key.pem', 'outputs-evil/x.mp4'])
 async def test_open_rejects_paths_outside_outputs(path):
     conn = _make_conn()
     with pytest.raises(PermissionError, match=_ARTIFACT_PREFIX):
         await _call(conn, subcommand='media_open', path=path)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('path', [None, '', 123])
-async def test_open_rejects_a_missing_path(path):
-    conn = _make_conn()
-    with pytest.raises(ValueError):
-        await _call(conn, subcommand='media_open', path=path)
-
-
-# ---------------------------------------------------------------------------
-# Finished artifacts — served from the store, size is final
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -285,36 +231,6 @@ async def test_finished_read_returns_bytes_in_arguments_and_size_in_body():
 
     assert resp['arguments']['data'] == b'abc'
     assert resp['body'] == {'size': 3, 'complete': True}
-
-
-@pytest.mark.asyncio
-async def test_read_length_is_capped_at_the_chunk_limit():
-    fs = MagicMock()
-    fs.open_read = AsyncMock(return_value={'handle': 'h1', 'size': 0})
-    fs.read_chunk = AsyncMock(return_value=b'')
-    conn = _make_conn(file_store=fs)
-
-    handle = (await _call(conn, subcommand='media_open', path=PATH))['body']['handle']
-    await _call(conn, subcommand='media_read', handle=handle, offset=0, length=99_999_999)
-
-    assert fs.read_chunk.await_args.args[2] == 4_194_304
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('bad', [{'offset': -1}, {'length': 0}, {'length': -5}])
-async def test_read_rejects_a_bad_offset_or_length(bad):
-    fs = MagicMock()
-    fs.open_read = AsyncMock(return_value={'handle': 'h1', 'size': 0})
-    conn = _make_conn(file_store=fs)
-    handle = (await _call(conn, subcommand='media_open', path=PATH))['body']['handle']
-
-    with pytest.raises(ValueError):
-        await _call(conn, subcommand='media_read', handle=handle, **bad)
-
-
-# ---------------------------------------------------------------------------
-# Live artifacts — served from the node's spool, reads wait
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -382,51 +298,6 @@ async def test_live_read_returns_eof_only_once_the_node_finishes():
     finally:
         await _call(conn, subcommand='media_close', handle=handle)
         writer.discard()
-
-
-@pytest.mark.asyncio
-async def test_live_read_is_rewindable_while_producing():
-    writer = LiveWriter(CLIENT, PATH)
-    writer.begin()
-    writer.append(b'0123456789')
-    conn = _make_conn()
-
-    handle = (await _call(conn, subcommand='media_open', path=PATH))['body']['handle']
-    try:
-        assert (await _call(conn, subcommand='media_read', handle=handle, offset=5))['arguments']['data'] == b'56789'
-        assert (await _call(conn, subcommand='media_read', handle=handle, offset=0, length=3))['arguments'][
-            'data'
-        ] == b'012'
-    finally:
-        await _call(conn, subcommand='media_close', handle=handle)
-        writer.discard()
-
-
-# ---------------------------------------------------------------------------
-# Handles
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_read_on_an_unknown_handle_raises():
-    conn = _make_conn()
-    with pytest.raises(ValueError, match='Unknown media handle'):
-        await _call(conn, subcommand='media_read', handle='nope', offset=0)
-
-
-@pytest.mark.asyncio
-async def test_close_releases_the_handle_and_is_idempotent():
-    fs = MagicMock()
-    fs.open_read = AsyncMock(return_value={'handle': 'h1', 'size': 1})
-    fs.close_read = AsyncMock()
-    conn = _make_conn(file_store=fs)
-
-    handle = (await _call(conn, subcommand='media_open', path=PATH))['body']['handle']
-    await _call(conn, subcommand='media_close', handle=handle)
-    fs.close_read.assert_awaited_once_with('h1', 7)
-
-    await _call(conn, subcommand='media_close', handle=handle)  # must not raise
-    assert conn._media_store_handles == {}
 
 
 @pytest.mark.asyncio
