@@ -26,6 +26,7 @@
 import React, { CSSProperties, ReactNode, useEffect, useRef, useState } from 'react';
 import { ViewMenuEntry } from '../../types/viewMenu';
 import { ViewMenuBadge } from '../page-view-control/ViewMenuBadge';
+import { CLOSE_GLYPH, trapFocus } from '../modal/Modal';
 
 // =============================================================================
 // CONSTANTS
@@ -33,9 +34,6 @@ import { ViewMenuBadge } from '../page-view-control/ViewMenuBadge';
 
 /** Default drawer width when the caller does not override `width`. */
 const DEFAULT_WIDTH = 560;
-
-/** Multiplication-sign glyph used for the close affordance. */
-const CLOSE_GLYPH = '×';
 
 // =============================================================================
 // TYPES
@@ -201,6 +199,8 @@ export function DetailPanel({
 }: IDetailPanelProps): React.ReactElement | null {
 	// Drives the slide-in: false on mount (off-screen), flipped true next frame.
 	const [entered, setEntered] = useState(false);
+	// The drawer box — Tab focus is trapped inside it while open.
+	const panelRef = useRef<HTMLDivElement>(null);
 	// Focus target on open; also the button the close glyph fires.
 	const closeButtonRef = useRef<HTMLButtonElement>(null);
 	// Element focused before opening, restored on close.
@@ -225,10 +225,13 @@ export function DetailPanel({
 		const enterRaf = requestAnimationFrame(() => setEntered(true));
 		// Move focus into the panel (the close button).
 		const focusRaf = requestAnimationFrame(() => closeButtonRef.current?.focus());
-		// Escape closes the drawer.
+		// Escape closes the drawer; Tab is trapped inside it — aria-modal alone
+		// does not stop keyboard focus from wandering into the page behind.
 		const onKeyDown = (event: KeyboardEvent): void => {
 			if (event.key === 'Escape') {
 				onCloseRef.current();
+			} else if (event.key === 'Tab' && panelRef.current) {
+				trapFocus(event, panelRef.current);
 			}
 		};
 		document.addEventListener('keydown', onKeyDown);
@@ -256,7 +259,7 @@ export function DetailPanel({
 		/* Dismissal is deliberate-only per the 2026-07-08 design decision: the
 		   close glyph or Escape — clicking the dim backdrop must NOT close. */
 		<div style={styles.overlay}>
-			<div style={styles.panel(width, entered)} role="dialog" aria-modal="true" aria-label={title}>
+			<div ref={panelRef} style={styles.panel(width, entered)} role="dialog" aria-modal="true" aria-label={title}>
 				{/* Fixed EntityHeader: avatar slot + name/secondary + close glyph. */}
 				<div style={styles.header}>
 					{avatar != null && <div style={styles.avatar}>{avatar}</div>}

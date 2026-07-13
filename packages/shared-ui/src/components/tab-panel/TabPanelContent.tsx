@@ -67,7 +67,14 @@ export function TabPanelContent({ panels, activeId }: ITabPanelContentProps): Re
 	return (
 		<div style={styles.wrapper}>
 			{Object.entries(panels).map(([id, panel]) => (
-				<div key={id} style={{ ...styles.panel, display: id === activeId ? undefined : 'none' }}>
+				/* tabpanel role completes the ARIA tab pattern whose tabs are
+				   rendered by PageViewControl; hidden panels are aria-hidden. */
+				<div
+					key={id}
+					role="tabpanel"
+					aria-hidden={id !== activeId}
+					style={{ ...styles.panel, display: id === activeId ? undefined : 'none' }}
+				>
 					{panel.content}
 				</div>
 			))}

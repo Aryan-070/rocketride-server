@@ -274,6 +274,9 @@ export function DataTable<Row>({
 	const [rows, setRows] = useState<Row[]>([]);
 	const [total, setTotal] = useState(0);
 	const [loading, setLoading] = useState(true);
+	// Message of the newest failed query, or null. Keeps a failed server query
+	// visibly distinct from a legitimate empty result.
+	const [error, setError] = useState<string | null>(null);
 
 	// --- Refs guarding async races and unmount -------------------------------
 	// Latest query, kept current every render so silent refreshes read it.
@@ -302,6 +305,8 @@ export function DataTable<Row>({
 			// Claim a request id; only the newest claim may apply its result.
 			const id = ++reqIdRef.current;
 			if (showLoading) setLoading(true);
+			// A fresh attempt clears the previous failure so a retry can recover.
+			setError(null);
 			Promise.resolve(source.query(q))
 				.then((result) => {
 					// Ignore if unmounted or a newer query superseded this one.
@@ -310,8 +315,10 @@ export function DataTable<Row>({
 					setTotal(result.total);
 					setLoading(false);
 				})
-				.catch(() => {
+				.catch((err: unknown) => {
 					if (!mountedRef.current || id !== reqIdRef.current) return;
+					// Surface the failure instead of leaving a silent empty table.
+					setError(err instanceof Error ? err.message : String(err));
 					setLoading(false);
 				});
 		},
@@ -398,8 +405,9 @@ export function DataTable<Row>({
 	const showToolbar = showSearch || Boolean(countLabel);
 	// Row-count text: the caller's label when present, else `${n} rows`.
 	const countText = countLabel ? countLabel(total) : `${total} rows`;
-	// Empty when a settled (non-loading) query returned nothing.
-	const isEmpty = !loading && total === 0;
+	// Empty when a settled (non-loading) query returned nothing. A failed query
+	// is NOT empty — it renders the error row instead of the EmptyState.
+	const isEmpty = !loading && total === 0 && !error;
 	// Total pages (at least one) for the pager.
 	const totalPages = Math.max(1, Math.ceil(total / pageSize));
 	// Footer visibility: the footer exists to page — so it renders only when the
@@ -485,6 +493,18 @@ export function DataTable<Row>({
 								<tr>
 									<td style={styles.messageCell} colSpan={colCount}>
 										Loading...
+									</td>
+								</tr>
+							) : error && rows.length === 0 ? (
+								/* Failed query with nothing to show: full-width error row (live
+								   region so the failure is announced, not just tinted). */
+								<tr>
+									<td
+										style={{ ...styles.messageCell, color: 'var(--rr-color-error)' }}
+										colSpan={colCount}
+										role="alert"
+									>
+										Failed to load: {error}
 									</td>
 								</tr>
 							) : (

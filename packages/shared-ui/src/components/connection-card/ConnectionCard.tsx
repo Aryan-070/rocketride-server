@@ -197,8 +197,17 @@ export function ConnectionCard({
 			}
 			onMouseEnter={() => setHovered(true)}
 			onMouseLeave={() => setHovered(false)}
+			// Focus mirrors hover so keyboard users see the revealed actions:
+			// focus/blur bubble from the inner action buttons, giving the card
+			// focus-within behaviour without a CSS class.
+			onFocus={() => setHovered(true)}
+			onBlur={(e) => {
+				// Only clear when focus leaves the card entirely, not when it
+				// moves between the card and its action buttons.
+				if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHovered(false);
+			}}
 		>
-			{/* Hover-revealed edit / delete actions. */}
+			{/* Hover-revealed edit / delete actions (also shown while focused). */}
 			{(onEdit || onDelete) && (
 				<div style={styles.actions(hovered)}>
 					{onEdit && (

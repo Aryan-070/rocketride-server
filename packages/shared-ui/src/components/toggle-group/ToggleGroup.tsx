@@ -72,6 +72,8 @@ export function ToggleGroup<T extends string>({ options, value, onChange, small 
 					<button
 						key={option.id}
 						type="button"
+						// Selection is otherwise conveyed only by the pill styling.
+						aria-pressed={active}
 						style={{ ...commonStyles.toggleButton(active), ...(small ? styles.smallButton : null) }}
 						onClick={() => onChange(option.id)}
 					>

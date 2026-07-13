@@ -247,8 +247,9 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 	};
 
 	return (
-		/* Backdrop is inert: dismissal is deliberate-only (close button / Cancel)
-		   per the 2026-07-08 design decision — clicking outside must NOT close. */
+		/* Backdrop is inert: dismissal is deliberate-only (footer Cancel, or the
+		   auto-close after a successful plan change) per the 2026-07-08 design
+		   decision — clicking outside must NOT close, and there is no corner ✕. */
 		<div style={S.overlay}>
 			<div style={S.dialog}>
 				{/* Header — no top-right ✕: this dialog dismisses via footer Cancel and

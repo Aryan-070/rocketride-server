@@ -200,8 +200,13 @@ export interface ExplorerFileAction {
  * Props for the Explorer component.
  */
 export interface IExplorerProps {
-	/** Virtual file system provider for all file operations. */
-	vfs: IVirtualFileSystem;
+	/**
+	 * @deprecated Unused — the Explorer no longer performs file operations
+	 * itself (hosts provide `entries` and handle actions via callbacks). Kept
+	 * optional so existing callers still compile; stop passing it, it will be
+	 * removed once every caller has.
+	 */
+	vfs?: IVirtualFileSystem;
 
 	/** Component configuration (title, extensions, display names). */
 	config: ExplorerConfig;

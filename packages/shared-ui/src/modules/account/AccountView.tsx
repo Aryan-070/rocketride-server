@@ -209,10 +209,18 @@ export interface IAccountViewProps {
 	onSetDefaultTeam: (teamId: string) => Promise<void>;
 	/** Switches the user's active organization. */
 	onSetDefaultOrg: (orgId: string) => Promise<void>;
-	/** Triggers the logout flow. */
-	onLogout: () => void;
-	/** Permanently deletes the user account. */
-	onDeleteAccount: () => Promise<void>;
+	/**
+	 * @deprecated Unused — the shell owns the logout flow (`shell:logoutRequest`);
+	 * no panel in this view renders a sign-out control. Kept optional so existing
+	 * hosts still compile; will be removed once every caller stops passing it.
+	 */
+	onLogout?: () => void;
+	/**
+	 * @deprecated Unused — account deletion has no entry point in this view.
+	 * Kept optional so existing hosts still compile; will be removed once every
+	 * caller stops passing it.
+	 */
+	onDeleteAccount?: () => Promise<void>;
 	/** Persists an updated organization name. */
 	onSaveOrgName: (name: string) => Promise<void>;
 	/** Creates a new API key and returns the raw key string. */
@@ -257,7 +265,7 @@ export interface IAccountViewProps {
  * to the host via async callback props defined in IAccountViewProps.
  */
 const AccountView: React.FC<IAccountViewProps> = (props) => {
-	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, apps, onCancelSubscription, onOpenPortal, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, memberNames, teamNames, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDefaultTeam, onSetDefaultOrg, onLogout, onDeleteAccount, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onResendInvite, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
+	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, apps, onCancelSubscription, onOpenPortal, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, memberNames, teamNames, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDefaultTeam, onSetDefaultOrg, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onResendInvite, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
 
 	// =========================================================================
 	// PERMISSION HELPERS
@@ -737,7 +745,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 						<ContentHeader title="Profile" subtitle="Your identity, sign-in, and defaults for this account." />
 						<div style={commonStyles.tabContent}>
 						{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
-						<ProfilePanel profile={profile} authUser={authUser} onSave={onSaveProfile} onSetDefaultTeam={onSetDefaultTeam} onSetDefaultOrg={onSetDefaultOrg} onLogout={onLogout} onDeleteAccount={onDeleteAccount} />
+						<ProfilePanel profile={profile} authUser={authUser} onSave={onSaveProfile} onSetDefaultTeam={onSetDefaultTeam} onSetDefaultOrg={onSetDefaultOrg} />
 						</div>
 					</>
 				),
@@ -822,7 +830,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 				),
 			},
 		}),
-		[sectionError, profile, authUser, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, transactions, apps, usageByUser, usageByTeam, activeTasks, dashboardLoading, topupPlans, allPlans, memberNames, teamNames, onSaveProfile, onSetDefaultTeam, onSetDefaultOrg, onLogout, onDeleteAccount, onSubscribe, onTransactionPage, onBuyTopup, onPurchaseTopup, onUpgradeSubscription, onSaveOrgName, onResendInvite, onActiveTeamIdChange, onLoadTeamDetail, openCancelSub, handlePortal, openCreateKey, openRevokeKey, openInvite, openChangeRole, openRemoveMember, openRemoveTeamMember, openAddMember, openEditPerms, isOrgAdmin, isActiveTeamAdmin]
+		[sectionError, profile, authUser, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, transactions, apps, usageByUser, usageByTeam, activeTasks, dashboardLoading, topupPlans, allPlans, memberNames, teamNames, onSaveProfile, onSetDefaultTeam, onSetDefaultOrg, onSubscribe, onTransactionPage, onBuyTopup, onPurchaseTopup, onUpgradeSubscription, onSaveOrgName, onResendInvite, onActiveTeamIdChange, onLoadTeamDetail, openCancelSub, handlePortal, openCreateKey, openRevokeKey, openInvite, openChangeRole, openRemoveMember, openRemoveTeamMember, openAddMember, openEditPerms, isOrgAdmin, isActiveTeamAdmin]
 	);
 
 	// =========================================================================

@@ -167,7 +167,7 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 			</div>
 
 			{/* ── Explorer (file tree) ────────────────────────────────── */}
-			<Explorer vfs={null as any} config={PIPELINE_CONFIG} entries={explorerEntries} statuses={explorerStatuses} isConnected={isConnected} showChildActions={isSubscribed} activeFilePath={activeFilePath} onOpenFile={onOpenFile} onFileManage={onFileManage} fileActions={fileActions} onChildAction={handleChildAction} onRefresh={onRefresh} />
+			<Explorer config={PIPELINE_CONFIG} entries={explorerEntries} statuses={explorerStatuses} isConnected={isConnected} showChildActions={isSubscribed} activeFilePath={activeFilePath} onOpenFile={onOpenFile} onFileManage={onFileManage} fileActions={fileActions} onChildAction={handleChildAction} onRefresh={onRefresh} />
 
 			{/* ── Unknown tasks (Other) ───────────────────────────────── */}
 			{hasUnknown && (

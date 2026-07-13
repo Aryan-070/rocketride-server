@@ -57,8 +57,12 @@ export function formatDate(iso: string): string {
 export function formatDuration(ms: number): string {
 	// Sub-second durations in whole milliseconds.
 	if (ms < 1000) return `${Math.round(ms)}ms`;
-	// Under a minute: seconds with one decimal.
-	if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+	// Under a minute: seconds with one decimal. Guard the boundary: values just
+	// under 60s round up to "60.0", which must carry into the minute form.
+	if (ms < 60000) {
+		const secs = (ms / 1000).toFixed(1);
+		return secs === '60.0' ? '1m 0s' : `${secs}s`;
+	}
 	// A minute or more: whole minutes + seconds.
 	let minutes = Math.floor(ms / 60000);
 	let seconds = Math.round((ms % 60000) / 1000);

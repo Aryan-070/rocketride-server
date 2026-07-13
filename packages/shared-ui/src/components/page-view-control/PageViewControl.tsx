@@ -17,7 +17,7 @@
  * never hand-roll their own tab bars.
  */
 
-import React, { CSSProperties, ReactNode } from 'react';
+import React, { CSSProperties, KeyboardEvent, ReactNode, useRef } from 'react';
 import { ViewMenu } from '../../types/viewMenu';
 import { ViewMenuBadge } from './ViewMenuBadge';
 
@@ -93,26 +93,79 @@ const styles = {
  * @returns The strip element.
  */
 export function PageViewControl({ menu, activeId, onSelect, trailing }: IPageViewControlProps): React.ReactElement {
+	// Refs to the rendered tab elements, for roving-focus keyboard navigation.
+	const tabRefs = useRef<(HTMLDivElement | null)[]>([]);
+	// Index of the active entry; -1 when activeId matches nothing (then the
+	// first tab stays tabbable so the strip never falls out of the tab order).
+	const activeIndex = menu.entries.findIndex((entry) => entry.id === activeId);
+
+	/**
+	 * Selects and focuses the entry at `index` (wrapping both ends) — the ARIA
+	 * tabs roving-tabindex pattern, where selection follows focus.
+	 *
+	 * @param index - Target entry index; may be out of range (it wraps).
+	 */
+	const moveTo = (index: number): void => {
+		const count = menu.entries.length;
+		if (count === 0) return;
+		const next = ((index % count) + count) % count;
+		onSelect(menu.entries[next].id);
+		tabRefs.current[next]?.focus();
+	};
+
+	/**
+	 * Keyboard handling per the ARIA tabs pattern: Enter / Space activate,
+	 * Arrow keys move to the neighbour, Home / End jump to the edges.
+	 *
+	 * @param e - The keydown event.
+	 * @param index - Index of the tab that received the key.
+	 * @param id - Id of that tab's entry.
+	 */
+	const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>, index: number, id: string): void => {
+		switch (e.key) {
+			case 'Enter':
+			case ' ':
+				e.preventDefault();
+				onSelect(id);
+				break;
+			case 'ArrowRight':
+				e.preventDefault();
+				moveTo(index + 1);
+				break;
+			case 'ArrowLeft':
+				e.preventDefault();
+				moveTo(index - 1);
+				break;
+			case 'Home':
+				e.preventDefault();
+				moveTo(0);
+				break;
+			case 'End':
+				e.preventDefault();
+				moveTo(menu.entries.length - 1);
+				break;
+		}
+	};
+
 	return (
 		<div style={styles.strip} role="tablist">
-			{menu.entries.map((entry) => {
+			{menu.entries.map((entry, index) => {
 				// The active tab carries the brand underline + primary text colour.
 				const isActive = entry.id === activeId;
 				return (
 					<div
 						key={entry.id}
+						ref={(el) => {
+							tabRefs.current[index] = el;
+						}}
 						role="tab"
 						aria-selected={isActive}
-						tabIndex={0}
+						// Roving tabIndex: only the active tab sits in the page tab
+						// order; Arrow / Home / End move within the strip.
+						tabIndex={isActive || (activeIndex === -1 && index === 0) ? 0 : -1}
 						style={styles.tab(isActive)}
 						onClick={() => onSelect(entry.id)}
-						onKeyDown={(e) => {
-							// Enter / Space activate the tab, matching native button semantics.
-							if (e.key === 'Enter' || e.key === ' ') {
-								e.preventDefault();
-								onSelect(entry.id);
-							}
-						}}
+						onKeyDown={(e) => handleKeyDown(e, index, entry.id)}
 					>
 						{entry.label}
 						{/* Count badge when the entry declares a count. */}

@@ -523,6 +523,9 @@ const TransactionLog: React.FC<{ transactions: TransactionsResult | null; onPage
 	// watchdog timer so a never-arriving page can't hang the table.
 	const pendingRef = useRef<{
 		page: number;
+		// Page size of the parked query — needed to recognise a clamped response
+		// (the host answering an out-of-range request with its own last page).
+		pageSize: number;
 		resolve: (p: DataPage<LedgerTransaction>) => void;
 		reject: (e: unknown) => void;
 		timer: ReturnType<typeof setTimeout>;
@@ -556,7 +559,7 @@ const TransactionLog: React.FC<{ transactions: TransactionsResult | null; onPage
 								reject(new Error(`Transaction page ${wanted} fetch timed out`));
 							}
 						}, PAGE_FETCH_TIMEOUT_MS);
-						pendingRef.current = { page: wanted, resolve, reject, timer };
+						pendingRef.current = { page: wanted, pageSize: q.pageSize, resolve, reject, timer };
 						onPageRef.current(wanted);
 					});
 				},
@@ -573,13 +576,18 @@ const TransactionLog: React.FC<{ transactions: TransactionsResult | null; onPage
 	// forever).
 	useEffect(() => {
 		const pending = pendingRef.current;
-		if (pending) {
-			// A request is parked. Settle it as soon as the host delivers the wanted
-			// page OR clamps to a lower one (an out-of-range page it can't serve);
-			// either way stop, and let DataTable's page-clamp effect snap its index
-			// back into range. Ignore a stray higher-page update (leave it parked;
-			// the watchdog covers a genuinely missing page).
-			if (transactions && transactions.page <= pending.page) {
+		if (pending && transactions) {
+			// A request is parked. Settle it when the host delivers EXACTLY the
+			// wanted page, or when it clamps an out-of-range request to the last
+			// page of the (shrunken) set — recognised from the response's own
+			// total, so a stale lower page from a superseded request can NOT
+			// settle a newer parked one and briefly show the wrong rows. Any
+			// other page is ignored (leave it parked; the watchdog covers a
+			// genuinely missing page), and DataTable's page-clamp effect snaps
+			// the index back into range after a clamp.
+			const lastPage = Math.max(1, Math.ceil(transactions.total / pending.pageSize));
+			const isClamped = pending.page > lastPage && transactions.page === lastPage;
+			if (transactions.page === pending.page || isClamped) {
 				clearTimeout(pending.timer);
 				pendingRef.current = null;
 				pending.resolve({ rows: transactions.transactions, total: transactions.total });

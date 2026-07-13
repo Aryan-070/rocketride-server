@@ -69,6 +69,11 @@ export function Banner({ variant, children }: IBannerProps): React.ReactElement 
 	const token = VARIANT_TOKENS[variant];
 	return (
 		<div
+			// Live region so dynamically-mounted banners (e.g. an in-thread chat
+			// error) are announced by screen readers; errors interrupt, the rest
+			// wait for an idle moment.
+			role={variant === 'error' ? 'alert' : 'status'}
+			aria-live={variant === 'error' ? 'assertive' : 'polite'}
 			style={{
 				...styles.banner,
 				borderColor: token,

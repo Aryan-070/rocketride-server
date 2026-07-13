@@ -295,14 +295,16 @@ const EnvironmentView: React.FC<EnvironmentViewProps> = ({
 
 	return (
 		<div style={styles.container}>
+			{/* Page strip — connection-slot tabs (multi-slot only). Rendered FIRST:
+			    the PageViewControl contract puts the strip at the very top of the
+			    view, above any ContentHeader. */}
+			{viewMenu && <PageViewControl menu={viewMenu} activeId={activeTab} onSelect={setActiveTab} />}
+
 			{/* Page heading — what this page is and how the scopes interact. */}
 			<ContentHeader
 				title="Environment Variables"
 				subtitle="Key–value variables injected into your pipelines at run time. Scopes cascade — a user variable overrides the same key on the team, which overrides the organization."
 			/>
-
-			{/* Page strip — connection-slot tabs (multi-slot only). */}
-			{viewMenu && <PageViewControl menu={viewMenu} activeId={activeTab} onSelect={setActiveTab} />}
 
 			{/* Page-level error banner */}
 			{error && <div style={styles.errorBanner}>{error}</div>}

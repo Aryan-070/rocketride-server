@@ -32,6 +32,12 @@ function injectKeyframe(): void {
 	document.head.appendChild(el);
 }
 
+// Inject once at module load (safe no-op outside the DOM). Calling this from
+// the render body would violate render purity under concurrent rendering;
+// module scope also beats a mount effect, which would start the animation one
+// frame late. Matches the InputField placeholder-rule pattern.
+injectKeyframe();
+
 // =============================================================================
 // STYLES
 // =============================================================================
@@ -85,8 +91,6 @@ interface TypingIndicatorProps {
  * @returns The indicator element.
  */
 export const TypingIndicator: React.FC<TypingIndicatorProps> = ({ label }) => {
-	// Ensure the shared opacity keyframe is present (no-op after the first mount).
-	injectKeyframe();
 	return (
 		<div style={styles.row}>
 			<div style={styles.bubble}>

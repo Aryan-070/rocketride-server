@@ -13,7 +13,7 @@
  * role but no action buttons.
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
@@ -244,6 +244,16 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ org, members, profil
 	 */
 	const recordFor = (row: MemberRow): MemberRecord | undefined => members.find((m) => m.userId === row.userId);
 
+	// Mounted flag guarding the async resend flow — the await and the 3s
+	// confirmation timer can both outlive the panel (e.g. the modal closes).
+	const mountedRef = useRef(true);
+	useEffect(
+		() => () => {
+			mountedRef.current = false;
+		},
+		[],
+	);
+
 	/**
 	 * Resends the invitation email for a pending member, tracking in-flight and
 	 * "Sent!" confirmation state per user id.
@@ -256,10 +266,14 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ org, members, profil
 		setResendingUserId(row.userId);
 		try {
 			await onResendInvite(record);
+			// Skip the confirmation state entirely if the panel is already gone.
+			if (!mountedRef.current) return;
 			setResentUserId(row.userId);
-			setTimeout(() => setResentUserId(null), 3000);
+			setTimeout(() => {
+				if (mountedRef.current) setResentUserId(null);
+			}, 3000);
 		} finally {
-			setResendingUserId(null);
+			if (mountedRef.current) setResendingUserId(null);
 		}
 	};
 

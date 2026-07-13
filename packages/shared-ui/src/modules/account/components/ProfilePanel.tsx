@@ -216,10 +216,6 @@ export interface ProfilePanelProps {
 	onSetDefaultTeam: (teamId: string) => void;
 	/** Switches the user's active organization by its ID. */
 	onSetDefaultOrg: (orgId: string) => void;
-	/** Triggers the logout flow. */
-	onLogout: () => void;
-	/** Async handler that permanently deletes the user account. */
-	onDeleteAccount: () => Promise<void>;
 }
 
 // =============================================================================

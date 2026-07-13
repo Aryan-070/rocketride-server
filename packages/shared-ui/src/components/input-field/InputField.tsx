@@ -14,7 +14,7 @@
  * `--rr-text-disabled`.
  */
 
-import React, { CSSProperties, InputHTMLAttributes, useEffect } from 'react';
+import React, { CSSProperties, InputHTMLAttributes } from 'react';
 import { commonStyles } from '../../themes/styles';
 
 // =============================================================================
@@ -52,6 +52,11 @@ function ensurePlaceholderStyle(): void {
 	document.head.appendChild(el);
 }
 
+// Inject once at module load (safe no-op outside the DOM) so even the very
+// first paint of the first InputField has the placeholder colour — a mount
+// effect would run one frame too late and flash the browser default.
+ensurePlaceholderStyle();
+
 // =============================================================================
 // STYLES
 // =============================================================================
@@ -78,11 +83,6 @@ const styles = {
  * @returns The input element.
  */
 export function InputField({ className, style, ...rest }: IInputFieldProps): React.ReactElement {
-	// Ensure the placeholder colour rule is present after mount.
-	useEffect(() => {
-		ensurePlaceholderStyle();
-	}, []);
-
 	// Merge our scoped class with any caller-supplied class.
 	const mergedClassName = className ? `${INPUT_CLASS} ${className}` : INPUT_CLASS;
 

@@ -30,7 +30,7 @@
  * the old `×` / `✕` / `&times;` drift disappears.
  */
 
-import React, { CSSProperties, ReactNode, useEffect, useRef } from 'react';
+import React, { CSSProperties, ReactNode, useEffect, useId, useRef } from 'react';
 import { commonStyles } from '../../themes/styles';
 
 // =============================================================================
@@ -41,7 +41,7 @@ import { commonStyles } from '../../themes/styles';
 export const CLOSE_GLYPH = '✕';
 
 /** Selector matching the tabbable elements inside a dialog (for focus + trap). */
-const FOCUSABLE_SELECTOR =
+export const FOCUSABLE_SELECTOR =
 	'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
@@ -50,6 +50,13 @@ const FOCUSABLE_SELECTOR =
  * dialog over a DetailPanel) dismiss one at a time rather than all at once.
  */
 const openLayers: object[] = [];
+
+/**
+ * The page's body overflow value from BEFORE the first layer opened. Restored
+ * only when the LAST layer closes: per-layer save/restore would let a lower
+ * dialog closing out of order re-enable page scroll behind a still-open one.
+ */
+let originalBodyOverflow: string | null = null;
 
 // =============================================================================
 // FOCUS TRAP
@@ -62,7 +69,7 @@ const openLayers: object[] = [];
  * @param e - The Tab keydown event.
  * @param container - The dialog box to trap focus inside.
  */
-function trapFocus(e: KeyboardEvent, container: HTMLElement): void {
+export function trapFocus(e: KeyboardEvent, container: HTMLElement): void {
 	// All tabbable elements currently inside the dialog, in DOM order.
 	const focusables = Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
 	if (focusables.length === 0) {
@@ -161,6 +168,12 @@ export function Modal({
 	// footer (a footer carries the dismiss control, making a corner ✕ redundant).
 	const resolvedShowClose = showClose ?? footer == null;
 
+	// Stable id linking the rendered title to the dialog's accessible name when
+	// `title` is a React node and no explicit ariaLabel was given — otherwise the
+	// dialog would end up unnamed for assistive tech.
+	const titleId = useId();
+	const labelledByTitle = ariaLabel == null && title != null && typeof title !== 'string';
+
 	// Ref to the dialog box, for focus placement and the Tab focus trap.
 	const dialogRef = useRef<HTMLDivElement>(null);
 	// Latest onClose / closeOnEscape kept in refs so the open effect runs ONCE:
@@ -174,14 +187,14 @@ export function Modal({
 	// lock page scroll, move focus in, and wire Escape + Tab. Cleanup reverses
 	// every side effect and restores the prior focus.
 	useEffect(() => {
-		// 1. Identity token marking this dialog's spot in the layer stack.
+		// 1. Identity token marking this dialog's spot in the layer stack. The
+		//    pre-lock overflow is captured once, by the FIRST layer only.
+		if (openLayers.length === 0) originalBodyOverflow = document.body.style.overflow;
 		const layer = {};
 		openLayers.push(layer);
 		// 2. Remember what to restore focus to when the dialog closes.
 		const previouslyFocused = document.activeElement;
-		// 3. Lock page scroll behind the dialog. Save/restore the exact prior
-		//    value so nesting (dialog over a DetailPanel) unwinds correctly.
-		const previousOverflow = document.body.style.overflow;
+		// 3. Lock page scroll behind the dialog.
 		document.body.style.overflow = 'hidden';
 		// 4. Move focus into the dialog unless a child already claimed it (e.g. a
 		//    ConfirmDialog focusing its confirm button in its own, later, effect).
@@ -209,8 +222,12 @@ export function Modal({
 			// Pop this layer (indexOf, not pop, so out-of-order unmounts are safe).
 			const i = openLayers.indexOf(layer);
 			if (i >= 0) openLayers.splice(i, 1);
-			// Restore page scroll and the previously-focused element.
-			document.body.style.overflow = previousOverflow;
+			// Restore page scroll only when the LAST layer is gone — a lower layer
+			// closing must not unlock scroll behind a still-open higher one.
+			if (openLayers.length === 0 && originalBodyOverflow !== null) {
+				document.body.style.overflow = originalBodyOverflow;
+				originalBodyOverflow = null;
+			}
 			if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
 		};
 		// Mount-once: the refs above carry the latest onClose / closeOnEscape.
@@ -225,13 +242,17 @@ export function Modal({
 				role="dialog"
 				aria-modal="true"
 				aria-label={typeof title === 'string' ? title : ariaLabel}
+				aria-labelledby={labelledByTitle ? titleId : undefined}
 				// tabIndex -1 lets the box itself hold focus when it has no tabbable child.
 				tabIndex={-1}
 				style={width != null ? { ...commonStyles.modalDialog, width } : commonStyles.modalDialog}
 			>
-				{/* Header: title on the left, optional ✕ pushed to the trailing edge. */}
+				{/* Header: title on the left, optional ✕ pushed to the trailing edge.
+				    display:contents keeps the id-carrying wrapper out of the flex layout. */}
 				<div style={commonStyles.modalHeader}>
-					{title}
+					<span id={labelledByTitle ? titleId : undefined} style={{ display: 'contents' }}>
+						{title}
+					</span>
 					{resolvedShowClose && (
 						<button type="button" style={styles.close} onClick={onClose} aria-label="Close">
 							{CLOSE_GLYPH}

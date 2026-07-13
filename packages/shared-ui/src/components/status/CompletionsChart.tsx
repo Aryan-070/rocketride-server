@@ -50,7 +50,6 @@ const styles: Record<string, CSSProperties> = {
 interface CompletionsChartProps {
 	dataPoints: StatusDataPoint[];
 	timeRange: TimeRange;
-	onTimeRangeChange: (range: TimeRange) => void;
 	currentElapsed: number;
 	onStatsCalculated: (stats: ChartStats) => void;
 }

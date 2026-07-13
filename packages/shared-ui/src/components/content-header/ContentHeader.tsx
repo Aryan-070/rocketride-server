@@ -45,7 +45,10 @@ const styles = {
 		gap: 16,
 	} as CSSProperties,
 
+	// Rendered as an h1 for assistive-tech navigation; margin reset because
+	// the styles here fully own the type scale.
 	title: {
+		margin: 0,
 		fontSize: 24,
 		fontWeight: 700,
 		letterSpacing: '-0.01em',
@@ -82,7 +85,7 @@ export function ContentHeader({ title, subtitle, actions }: IContentHeaderProps)
 		<div style={styles.container}>
 			{/* Title row: title on the left, actions pushed to the right. */}
 			<div style={styles.titleRow}>
-				<div style={styles.title}>{title}</div>
+				<h1 style={styles.title}>{title}</h1>
 				{actions && <div style={styles.actions}>{actions}</div>}
 			</div>
 			{/* Optional subtitle beneath the title. */}
