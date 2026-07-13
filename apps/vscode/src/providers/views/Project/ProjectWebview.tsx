@@ -248,8 +248,8 @@ const ProjectWebview: React.FC = () => {
 	);
 
 	const handlePipelineAction = useCallback(
-		(action: 'run' | 'stop' | 'restart', source?: string) => {
-			sendMessage({ type: 'status:pipelineAction', action, source, pipelineTraceLevel: viewState?.pipelineTraceLevel ?? 'summary' });
+		(action: 'run' | 'stop' | 'restart', source?: string, options?: { ttl?: number }) => {
+			sendMessage({ type: 'status:pipelineAction', action, source, ttl: options?.ttl, pipelineTraceLevel: viewState?.pipelineTraceLevel ?? 'summary' });
 		},
 		[sendMessage, viewState]
 	);
