@@ -18,7 +18,7 @@ import React, { useState, useCallback, CSSProperties } from 'react';
 import { commonStyles } from '../../themes/styles';
 import { BxPlus, BxDesktop, BxChevronRight, BxChevronDown, BxStop } from '../../components/BoxIcon';
 import { SidebarMenu } from '../../components/sidebar-menu/SidebarMenu';
-import { Explorer } from '../explorer';
+import { Explorer, NOOP_VFS } from '../explorer';
 import type { ISidebarViewProps } from './types';
 import type { ViewMenu } from '../../types/viewMenu';
 import type { ExplorerEntry, ExplorerStatus, ExplorerConfig } from '../explorer';
@@ -167,7 +167,9 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 			</div>
 
 			{/* ── Explorer (file tree) ────────────────────────────────── */}
-			<Explorer config={PIPELINE_CONFIG} entries={explorerEntries} statuses={explorerStatuses} isConnected={isConnected} showChildActions={isSubscribed} activeFilePath={activeFilePath} onOpenFile={onOpenFile} onFileManage={onFileManage} fileActions={fileActions} onChildAction={handleChildAction} onRefresh={onRefresh} />
+			{/* vfs must be passed (frozen shell-contract shape) but is unused —
+			    the typed no-op replaces the old `null as any` cast. */}
+			<Explorer vfs={NOOP_VFS} config={PIPELINE_CONFIG} entries={explorerEntries} statuses={explorerStatuses} isConnected={isConnected} showChildActions={isSubscribed} activeFilePath={activeFilePath} onOpenFile={onOpenFile} onFileManage={onFileManage} fileActions={fileActions} onChildAction={handleChildAction} onRefresh={onRefresh} />
 
 			{/* ── Unknown tasks (Other) ───────────────────────────────── */}
 			{hasUnknown && (
