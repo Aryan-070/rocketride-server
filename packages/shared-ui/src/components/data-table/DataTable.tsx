@@ -177,6 +177,16 @@ const styles = {
 		padding: 16,
 	} as CSSProperties,
 
+	// Slim strip above the table when a refresh failed but previous rows are
+	// still shown — stale data must never look like a healthy table.
+	staleErrorBanner: {
+		padding: '6px 12px',
+		fontSize: 12.5,
+		fontFamily: 'var(--rr-font-family)',
+		color: 'var(--rr-color-error)',
+		borderBottom: '1px solid var(--rr-border)',
+	} as CSSProperties,
+
 	// Footer: row count (left) + page-size selector and pager (right).
 	footer: {
 		display: 'flex',
@@ -446,6 +456,14 @@ export function DataTable<Row>({
 				</div>
 			) : (
 				<>
+					{/* A failed refresh with rows still on screen: keep the stale rows
+					    but say so — otherwise the failure is indistinguishable from a
+					    healthy table (the in-body error row covers the no-rows case). */}
+					{error && rows.length > 0 && (
+						<div style={styles.staleErrorBanner} role="alert">
+							Failed to refresh: {error} — showing previous results.
+						</div>
+					)}
 					<table style={styles.table}>
 						<thead>
 							<tr>
