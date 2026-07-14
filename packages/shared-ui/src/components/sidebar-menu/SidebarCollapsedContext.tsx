@@ -66,3 +66,30 @@ export const SidebarCollapsedProvider: React.FC<ISidebarCollapsedProviderProps> 
 export function useSidebarCollapsed(): boolean {
 	return useContext(SidebarCollapsedContext);
 }
+
+// =============================================================================
+// COLLAPSED GATE
+// =============================================================================
+
+/** Props for the {@link SidebarCollapsedGate} component. */
+export interface ISidebarCollapsedGateProps {
+	/** The sidebar content to hide while the sidebar is collapsed. */
+	children: ReactNode;
+}
+
+/**
+ * Renders its children only while the sidebar is expanded.
+ *
+ * The shell renders registered sidebar content even while the sidebar is
+ * collapsed to its icon rail. Free-form content with no icon-rail form (file
+ * trees, chat explorers) wraps itself in this gate to disappear while
+ * collapsed, instead of each app re-implementing the same four lines.
+ *
+ * @param props - {@link ISidebarCollapsedGateProps}.
+ * @returns The children while expanded, or null while collapsed.
+ */
+export const SidebarCollapsedGate: React.FC<ISidebarCollapsedGateProps> = ({ children }) => {
+	// Collapsed flag provided by the shell around the sidebar slot.
+	const collapsed = useSidebarCollapsed();
+	return collapsed ? null : <>{children}</>;
+};
