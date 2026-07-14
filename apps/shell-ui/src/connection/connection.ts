@@ -44,6 +44,7 @@ import { RocketRideClient, ConnectResult } from 'rocketride';
 import type { ShellConnectionEventMap, IConnectionManager, IAuthProvider } from 'shared';
 import { ConnectionState, ConnectionStatus } from 'shared';
 import type { ConnectionMode } from 'shared';
+import { resolveThemePreference } from 'shared/themes';
 import { BaseManager } from './base-manager';
 import { RemoteManager } from './remote-manager';
 import { getStoredVerifier, clearStoredVerifier } from '../util/pkce';
@@ -537,12 +538,16 @@ export class ConnectionManager implements IConnectionManager {
 		// Publish identity to all listeners
 		this.emit('shell:login', { user: result });
 
-		// Restore saved theme from workspace file
+		// Restore the account theme from the workspace file — but only when no
+		// explicit local device choice exists. A local choice was already
+		// applied by onInit; unconditionally re-applying the server value here
+		// was the visible light→dark theme flip on login.
 		if (config?.onThemeChange) {
 			try {
 				const dir = config.workspaceDir ?? DEFAULT_WORKSPACE_DIR;
 				const global = await this.client!.fsReadJson<{ shellPrefs?: { theme?: string } }>(`${dir}/global.json`);
-				if (global?.shellPrefs?.theme) config.onThemeChange(global.shellPrefs.theme);
+				const resolved = resolveThemePreference(global?.shellPrefs?.theme);
+				if (resolved.source === 'server') config.onThemeChange(resolved.theme);
 			} catch { /* theme read failed — not critical */ }
 		}
 

@@ -24,7 +24,7 @@
 // createShellConfig — Assembles the ShellConfig for the cloud host
 // =============================================================================
 
-import { fetchAndApplyTheme } from 'shared/themes';
+import { fetchAndApplyTheme, resolveThemePreference } from 'shared/themes';
 import type { ShellConfig, ShellApiConfig, AppManifestEntry } from 'shell-ui';
 import { ConnectionManager } from './connection/connection';
 
@@ -111,15 +111,12 @@ export function buildShellConfig(apps: AppManifestEntry[], capabilities: string[
 
 		// Apply the user's saved theme on first mount so the loading screen
 		// background matches their preference instead of always showing light.
-		// Falls back to rocketride-light if nothing is saved yet.
+		// Local device choice (rr:theme primary, rr:home:theme mode hint), else
+		// the default; the server account theme — when it wins — is applied
+		// later by finishConnect via the same resolver.
 		onInit: () => {
-			const homeTheme = (() => { try { return localStorage.getItem('rr:home:theme'); } catch { return null; } })();
-			const saved = (() => {
-				if (homeTheme === 'dark') return 'rocketride';
-				if (homeTheme === 'light') return 'rocketride-light';
-				try { return localStorage.getItem('rr:theme') || 'rocketride-light'; } catch { return 'rocketride-light'; }
-			})();
-			return fetchAndApplyTheme(saved, '/shell/themes').catch(console.error);
+			const { theme } = resolveThemePreference();
+			return fetchAndApplyTheme(theme, '/shell/themes').catch(console.error);
 		},
 
 		themeConfig: {

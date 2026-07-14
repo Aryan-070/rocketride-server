@@ -29,6 +29,7 @@ import { RocketRideClient } from 'rocketride';
 import { useWorkspaceState } from './useWorkspaceState';
 import type { WorkspacePrefs, AppDescriptor, AppManifestEntry } from './types';
 import type { ShellConnectionEventMap } from 'shared';
+import { persistLocalThemeChoice } from 'shared/themes';
 import { ConnectionManager } from '../connection/connection';
 
 // =============================================================================
@@ -338,7 +339,9 @@ export const WorkspaceProvider: React.FC<{
 	const setTheme = useCallback((themeId: string) => {
 		updatePrefs({ theme: themeId });
 		onThemeChange?.(themeId);
-		try { localStorage.setItem('rr:theme', themeId); } catch {}
+		// Writes rr:theme AND the rr:home:theme mode mirror so the two local
+		// keys can never diverge (a stale rr:home:theme used to win at boot).
+		persistLocalThemeChoice(themeId);
 	}, [updatePrefs, onThemeChange]);
 
 	return (

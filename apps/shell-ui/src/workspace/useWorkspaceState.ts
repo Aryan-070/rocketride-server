@@ -26,6 +26,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { RocketRideClient } from 'rocketride';
+import { readLocalThemeChoice, resolveThemePreference } from 'shared/themes';
 import type { AppWorkspaceState, WorkspacePrefs } from './types';
 
 // =============================================================================
@@ -58,9 +59,9 @@ const defaultPrefs: WorkspacePrefs = {
  */
 const makeDefaultAppState = (_appId: string): AppWorkspaceState => {
 	// Restore theme from localStorage if available (persists across unauthenticated sessions)
-	const savedTheme = (() => { try { return localStorage.getItem('rr:theme') || ''; } catch { return ''; } })();
+	const localTheme = readLocalThemeChoice();
 	return {
-		prefs: { ...defaultPrefs, ...(savedTheme ? { theme: savedTheme } : {}) },
+		prefs: { ...defaultPrefs, ...(localTheme ? { theme: localTheme } : {}) },
 		appState: {},
 	};
 };
@@ -319,17 +320,33 @@ export function useWorkspaceState(
 					if (raw?.prefs) appStateData = raw;
 				} catch { /* no saved state */ }
 
-				// Build the resolved state, overlaying global prefs
+				// Build the resolved state, overlaying global prefs.
+				// Theme precedence: explicit local device choice > server account
+				// theme > per-app file / defaults. sidePanelOpen keeps the old
+				// server-wins behaviour — only theme has a local-choice contract.
 				const baseState = appStateData ?? makeDefaultAppState(restoredAppId);
 				const sp = global?.shellPrefs;
-				const mergedState: AppWorkspaceState = sp ? {
+				const resolvedTheme = resolveThemePreference(sp?.theme, baseState.prefs.theme ?? defaultPrefs.theme);
+				const mergedState: AppWorkspaceState = {
 					...baseState,
 					prefs: {
 						...baseState.prefs,
-						...(sp.theme !== undefined && { theme: sp.theme }),
-						...(sp.sidePanelOpen !== undefined && { sidePanelOpen: sp.sidePanelOpen }),
+						theme: resolvedTheme.theme,
+						...(sp?.sidePanelOpen !== undefined && { sidePanelOpen: sp.sidePanelOpen }),
 					},
-				} : baseState;
+				};
+
+				// Converge the stores: when the local choice beat (or the server
+				// had no) value, persist the winner to global.json now so the next
+				// login agrees and the flip can never recur. Direct call —
+				// deliberately bypasses the firstGlobalWriteRef skip below, which
+				// only suppresses the effect-driven echo of prefs just read from
+				// disk. writeGlobalPrefs also patches shellPrefsRef.current, so
+				// the switchApp overlay uses the winner instead of re-imposing the
+				// stale server theme on app switch.
+				if (resolvedTheme.theme !== sp?.theme) {
+					writeGlobalPrefs({ theme: resolvedTheme.theme }, restoredAppId);
+				}
 
 				// Ensure appState exists (handle v2 files that don't have it)
 				if (!mergedState.appState) mergedState.appState = {};
