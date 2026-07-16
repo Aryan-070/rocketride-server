@@ -43,8 +43,8 @@ jobs:
           - ubuntu:22.04
           - ubuntu:24.04
           - ubuntu:26.04
-          - fedora:latest # moving target on purpose — surfaces new-Fedora breakage early; a break here is informative
-          - almalinux:9 # RHEL-compatible; may need EPEL / RHEL-column tuning in compiler-unix.sh — a break here is informative
+          - fedora:latest
+          - almalinux:10 # RHEL-compatible
     steps:
       # Minimal base images ship without git, Python, or the Python build
       # backends. actions/checkout needs git; compiler-unix.sh installs the

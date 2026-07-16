@@ -109,6 +109,7 @@ LINUX_DEPS=(
     "libtool"
     "zip"
     "unzip"
+    "xz-utils|xz"                           # `xz` CLI: tar -xJf unpacks the .tar.xz LLVM/dump_syms tarballs (minimal Ubuntu 24.04+ omits it)
     "uuid-dev|libuuid-devel"
     "pkg-config|pkgconf-pkg-config"
     "libffi-dev|libffi-devel"
