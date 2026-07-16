@@ -107,7 +107,20 @@ jobs:
         shell: bash
         run: |
           chmod +x ./builder || true
-          ./builder build --verbose --autoinstall
+          # --system-compiler: install a repo clang + its runtime libs where available;
+          # tarball fallback only where no in-range clang exists (Fedora/EL).
+          ./builder build --verbose --autoinstall --system-compiler
+
+      # Building every vcpkg dep from source leaves multi-GB rebuild scratch
+      # (buildtrees/downloads/packages). The installed libs are in vcpkg_installed
+      # and are kept; drop the scratch so the test phase has disk headroom — some
+      # node requirements pull multi-GB ML wheels (torch/CUDA).
+      - name: Reclaim vcpkg build scratch
+        shell: bash
+        run: |
+          df -h / 2>/dev/null || true
+          rm -rf build/vcpkg/buildtrees build/vcpkg/downloads build/vcpkg/packages || true
+          df -h / 2>/dev/null || true
 
       - name: Unit tests
         shell: bash

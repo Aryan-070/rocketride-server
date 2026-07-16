@@ -132,6 +132,7 @@ LINUX_DEPS=(
     "libc++1|libcxx"                        # libc++.so.1
     "libc++abi1|libcxxabi"                  # libc++abi.so.1
     "|llvm-libunwind"                       # fedora: clang/libc++ unwinder (apt pulls it via libc++ dev; packaged by tasks.js)
+    "libatomic1|libatomic"                  # libatomic.so.1 — vcpkg build tools (icupkg/ICU) link it; absent on minimal EL, and gcc doesn't pull it on dnf
     "libgomp1|libgomp"                      # OMP runtime for bundled transitive deps
     "libgles2|mesa-libGLES"                 # libGLESv2.so.2 — MediaPipe GPU-delegate dlopen
     "libegl1|libglvnd-egl"                  # libEGL.so.1
