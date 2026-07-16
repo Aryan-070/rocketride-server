@@ -100,8 +100,8 @@ LINUX_DEPS=(
     "ninja-build"
     "cmake"                                 # version gated (>= 3.19) by check_linux_cmake
     "git"
-    "|gcc"                                  # fedora: sdist C extensions
-    "|gcc-c++"                              # fedora: sdist C++ extensions
+    "gcc"                                   # C compiler + crt objects the llvm.org clang links on every distro; also sdist C extensions
+    "g++|gcc-c++"                           # provides libstdc++.so — clang's DEFAULT (non-libc++) link and CMake's compiler check need it; also sdist C++ extensions
     "|perl-core"                            # fedora: vcpkg openssl Configure needs core Perl (IPC::Cmd, FindBin); Fedora modularizes it
     "autoconf"
     "autoconf-archive"
@@ -162,6 +162,34 @@ detect_linux_distro() {
         echo "=========================================="
         exit 1
     fi
+}
+
+# True on the RHEL / Enterprise-Linux family (AlmaLinux, Rocky, RHEL, CentOS,
+# Oracle) — NOT Fedora. Both use dnf, but EL ships a far smaller default package
+# set, so the dnf column needs EL-specific handling (extra repos + a few drops).
+is_el_family() {
+    [ -r /etc/os-release ] || return 1
+    ( . /etc/os-release
+      case " $ID $ID_LIKE " in
+          *" rhel "*|*" centos "*|*" almalinux "*|*" rocky "*|*" ol "*) exit 0 ;;
+      esac
+      exit 1 )
+}
+
+# EL BaseOS/AppStream are minimal; enable CRB (CodeReady Builder) and EPEL so the
+# dnf column resolves. On AlmaLinux 10 these carry ncurses-compat-libs
+# (libtinfo.so.5), python3-build/wheel and libdb-devel — all absent from the base
+# repos. Best-effort: a leg without these repos still surfaces via the strict
+# post-install re-check.
+enable_el_repos() {
+    # config-manager ships in dnf-plugins-core (dnf4) or dnf5-plugins (dnf5).
+    $SUDO dnf install -y dnf-plugins-core >/dev/null 2>&1 \
+        || $SUDO dnf install -y dnf5-plugins >/dev/null 2>&1 || true
+    # Enable CRB (EL9/10) / PowerTools (EL8); --set-enabled is dnf4, setopt is dnf5.
+    $SUDO dnf config-manager --set-enabled crb >/dev/null 2>&1 \
+        || $SUDO dnf config-manager setopt crb.enabled=1 >/dev/null 2>&1 \
+        || $SUDO dnf config-manager --set-enabled powertools >/dev/null 2>&1 || true
+    $SUDO dnf install -y epel-release >/dev/null 2>&1 || true
 }
 
 # =============================================================================
@@ -638,12 +666,18 @@ check_dependencies() {
     check_linux_python  # hard version gate (python >= 3.10), distro-agnostic
     check_linux_cmake   # hard version gate (cmake >= 3.19), distro-agnostic
 
+    local el_family=0
+    is_el_family && el_family=1
+
     # Package set = shared LINUX_DEPS column + any clang packages select_system_clang
     # chose. For a versioned apt clang install, drop the distro's unversioned
     # libc++1/libc++abi1 — the versioned libc++1-N in CLANG_PKGS supersedes them.
     local pkgs=() p
     while IFS= read -r p; do
         if [ -n "$CLANG_ALT_VERSION" ] && { [ "$p" = "libc++1" ] || [ "$p" = "libc++abi1" ]; }; then continue; fi
+        # libcxx/libcxxabi/llvm-libunwind are Fedora-only and bundled inside the
+        # LLVM tarball the EL leg downloads — RHEL/EL packages none of them.
+        if [ "$el_family" = 1 ] && { [ "$p" = "libcxx" ] || [ "$p" = "libcxxabi" ] || [ "$p" = "llvm-libunwind" ]; }; then continue; fi
         pkgs+=("$p")
     done < <(emit_distro_deps "$mgr")
     pkgs+=("${CLANG_PKGS[@]}")
@@ -683,6 +717,11 @@ check_dependencies() {
     # Distro packages (root) — only under --autoinstall.
     if [ "$AUTOINSTALL" == "1" ] && [ ${#missing[@]} -ne 0 ]; then
         echo "Auto-installing missing dependencies with $mgr..."
+        # EL base repos are minimal — turn on CRB + EPEL so ncurses-compat-libs,
+        # python3-build/wheel and libdb-devel are resolvable before the install.
+        if [ "$mgr" = "dnf" ] && [ "$el_family" = 1 ]; then
+            enable_el_repos
+        fi
         # --system-compiler on a distro whose archive lacks clang-18 (e.g. Ubuntu
         # 22.04): add apt.llvm.org first.
         if [ -n "$LLVM_APT_VERSION" ] && ! ensure_llvm_repo "$LLVM_APT_VERSION"; then
