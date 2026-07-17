@@ -115,6 +115,13 @@ elseif(VCPKG_TARGET_IS_LINUX)
         AND EXISTS "${_clang_root}/bin/clang++"
         AND EXISTS "${_clang_root}/bin/llvm-ar")
         string(APPEND OPTIONS " clang_path=\"${_clang_root}\"")
+    else()
+        # Heuristic missed (bare /usr or a non-versioned LLVM layout): gn falls back
+        # to PATH clang, which can mismatch the engine's libc++ ABI and make
+        # crashpad_handler SIGSEGV in _init. Warn loudly rather than fail silently.
+        message(WARNING "crashpad: could not pin gn to the engine's clang toolchain "
+            "(detected root '${_clang_root}'); gn will use PATH clang/clang++. If that "
+            "clang differs from the engine's, crashpad_handler may crash at startup.")
     endif()
 
     # Force lld: gn's default (system ld.bfd) can emit a broken DT_INIT that makes
