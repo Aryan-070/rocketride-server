@@ -28,6 +28,10 @@ env:
   # that is the actual cross-OS compile test. A read-only nuget cache can be
   # layered in later to speed up the triplet-matching legs.
   VCPKG_BINARY_SOURCES: clear
+  # From-source builds every dep, so keep peak disk low: vcpkg drops each port's
+  # buildtree/package staging right after it builds. Needed on the smaller (72G)
+  # runners, where the final link otherwise runs out of space.
+  VCPKG_CLEAN_AFTER_BUILD: '1'
 
 jobs:
   os-matrix:

@@ -90,6 +90,7 @@ LINUX_DEPS=(
     "wget"
     "dos2unix"
     "ca-certificates"
+    "tzdata"                                # /usr/share/zoneinfo — libc++ std::chrono tz lookups abort without it (minimal Ubuntu 22.04/24.04 omit it)
     "gnupg|gnupg2"
     "lsb-release|"                          # apt-only: Fedora build path doesn't use lsb_release
     "python3"

@@ -655,6 +655,15 @@ function makeConfigureServerAction(options = {}) {
 
 			const cmakeArgs = ['cmake', '-B', BUILD_ROOT, '-S', SERVER_DIR, ...generator, '-DCMAKE_BUILD_TYPE=Release', `-DCMAKE_TOOLCHAIN_FILE=${vcpkgToolchain}`, `-DVCPKG_TARGET_TRIPLET=${triplet}`, `-DVCPKG_HOST_TRIPLET=${triplet}`, `-DVCPKG_OVERLAY_PORTS=${overlayPorts}`, `-DVCPKG_OVERLAY_TRIPLETS=${overlayTriplets}`];
 
+			// Opt-in (CI / small-disk hosts): drop each port's buildtree + package
+			// staging right after it builds so peak disk stays low across the whole
+			// from-source build. Without it, the final link accumulates every port's
+			// scratch and can run out of disk on a small runner ("final link failed:
+			// No space left"). Off by default so local rebuilds keep their buildtrees.
+			if (process.env.VCPKG_CLEAN_AFTER_BUILD === '1') {
+				cmakeArgs.push('-DVCPKG_INSTALL_OPTIONS=--clean-buildtrees-after-build;--clean-packages-after-build');
+			}
+
 			if (options.batchSize) {
 				cmakeArgs.push(`-DROCKETRIDE_UNITY_BATCH_SIZE:STRING=${options.batchSize}`);
 			}
