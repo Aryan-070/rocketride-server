@@ -40,12 +40,14 @@ from __future__ import annotations
 
 import base64
 
-from rocketlib import IInstanceBase, tool_function
+from rocketlib import tool_function
 
-from ai.common.utils import normalize_tool_input, require_str
+from ai.common.utils import int_arg, normalize_tool_input, require_str
 from nodes.core.google_access import GoogleAccessError
 
-from .gmail_client import (
+from ..IInstance import GoogleToolInstanceBase
+from .client import (
+    SERVICE,
     MAX_BATCH,
     USER_ID,
     build_html_message,
@@ -74,20 +76,13 @@ _GMAIL_SETTINGS_SCOPE = 'https://www.googleapis.com/auth/gmail.settings.basic'
 _GMAIL_SETTINGS_SHARING_SCOPE = 'https://www.googleapis.com/auth/gmail.settings.sharing'
 
 
-class IInstance(IInstanceBase):
+class IInstance(GoogleToolInstanceBase):
     IGlobal: IGlobal
+    SERVICE = SERVICE
 
     # -----------------------------------------------------------------------
     # Helpers
     # -----------------------------------------------------------------------
-
-    def _svc(self):
-        """Return the shared Gmail service handle."""
-        return self.IGlobal.service
-
-    def _access(self):
-        """Return the node's access descriptor (tier, scopes, flags)."""
-        return self.IGlobal.access
 
     def _require_send(self, op: str) -> None:
         """Raise GoogleAccessError unless the granted scopes include the send or full scope."""
@@ -125,18 +120,6 @@ class IInstance(IInstanceBase):
             )
 
     @staticmethod
-    def _int_arg(args: dict, key: str, default: int, lo: int, hi: int) -> int:
-        """Read an integer arg, defaulting only on None and clamping to [lo, hi].
-
-        `args.get(key) or default` silently turns an explicit 0 into the
-        default, bypassing the clamp (the antipattern flagged on #1228/#1445).
-        """
-        value = args.get(key)
-        if value is None:
-            value = default
-        return max(lo, min(int(value), hi))
-
-    @staticmethod
     def _id_list(args: dict, key: str, op: str) -> list[str]:
         """Validate a non-empty list of id strings, capped at MAX_BATCH."""
         ids = args.get(key)
@@ -163,54 +146,7 @@ class IInstance(IInstanceBase):
     )
     def check_connection(self, args: dict) -> dict:
         """Check Gmail connection status and whether granted OAuth scopes cover the configured access tier. Read-only."""
-        glb = self.IGlobal
-        access = glb.access
-        granted_scopes: set[str] = set()
-        scope_available = False
-        auth_type = 'unknown'
-
-        try:
-            from ai.common.config import Config
-
-            cfg = Config.getNodeConfig(glb.glb.logicalType, glb.glb.connConfig)
-            auth_type = (cfg.get('authType') or 'service').strip()
-            if auth_type == 'user':
-                token_str = str(cfg.get('userToken') or '').strip()
-                if token_str:
-                    from .gmail_client import _decode_blob
-                    import json as _json
-
-                    info = _json.loads(_decode_blob(token_str))
-                    raw = (info.get('scope') or '').split()
-                    granted_scopes = {s for s in raw if s}
-                    scope_available = True
-        except Exception:
-            pass
-
-        if scope_available:
-            from nodes.core.google_access import missing_scopes
-
-            # Superset-aware: full mailbox covers everything, gmail.modify
-            # covers gmail.readonly. Empty scope field is fail-open.
-            missing = missing_scopes(granted_scopes, access.scopes)
-        else:
-            missing = []  # service account — scopes come from key, not token
-
-        ok = not missing
-        return {
-            'auth_type': auth_type,
-            'configured_tier': access.tier,
-            'required_scopes': access.scopes,
-            'granted_scopes': sorted(granted_scopes) if granted_scopes else ['(service account or scope field absent)'],
-            'missing_scopes': missing,
-            'connection_ok': ok,
-            'action': (
-                'Disconnect and reconnect your Google account with the current access tier '
-                'selected. After reconnecting, call check_connection again to confirm.'
-            )
-            if not ok
-            else None,
-        }
+        return self._check_connection_impl()
 
     # =======================================================================
     # MESSAGES — read
@@ -240,7 +176,7 @@ class IInstance(IInstanceBase):
             'userId': USER_ID,
             'q': args.get('query'),
             'labelIds': args.get('labelIds'),
-            'maxResults': self._int_arg(args, 'maxResults', 25, 1, 500),
+            'maxResults': int_arg(args, 'maxResults', default=25, lo=1, hi=500),
             'pageToken': args.get('pageToken'),
             'includeSpamTrash': bool(args.get('includeSpamTrash', False)),
         }
@@ -427,7 +363,7 @@ class IInstance(IInstanceBase):
             'userId': USER_ID,
             'q': args.get('query'),
             'labelIds': args.get('labelIds'),
-            'maxResults': self._int_arg(args, 'maxResults', 25, 1, 500),
+            'maxResults': int_arg(args, 'maxResults', default=25, lo=1, hi=500),
             'pageToken': args.get('pageToken'),
         }
         data = execute(self._svc().users().threads().list(**{k: v for k, v in params.items() if v is not None}))
@@ -546,7 +482,7 @@ class IInstance(IInstanceBase):
         args = normalize_tool_input(args, tool_name='tool_gmail')
         params = {
             'userId': USER_ID,
-            'maxResults': self._int_arg(args, 'maxResults', 25, 1, 500),
+            'maxResults': int_arg(args, 'maxResults', default=25, lo=1, hi=500),
             'pageToken': args.get('pageToken'),
         }
         data = execute(self._svc().users().drafts().list(**{k: v for k, v in params.items() if v is not None}))
@@ -924,7 +860,7 @@ class IInstance(IInstanceBase):
             'startHistoryId': start,
             'historyTypes': args.get('historyTypes'),
             'labelId': args.get('labelId'),
-            'maxResults': self._int_arg(args, 'maxResults', 100, 1, 500),
+            'maxResults': int_arg(args, 'maxResults', default=100, lo=1, hi=500),
             'pageToken': args.get('pageToken'),
         }
         data = execute(self._svc().users().history().list(**{k: v for k, v in params.items() if v is not None}))
