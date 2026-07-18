@@ -480,6 +480,30 @@ async function copyClangRuntimeLibs(options = {}) {
 		return { copied: true, version: 'fedora' };
 	}
 
+	// LLVM tarball (~/toolchains/llvm-18): the RHEL/EL leg builds with this
+	// toolchain and has no distro libc++ to stage from the dirs above (EL ships
+	// none, and compiler-unix.sh drops the Fedora-only libcxx packages there).
+	// Copy the tarball's own libc++/libc++abi/libunwind — they match the ABI the
+	// engine was built against.
+	const tarballLib = path.join(invokingHome(), 'toolchains', 'llvm-18', 'lib',
+		`${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}-unknown-linux-gnu`);
+	const tarballLibcpp = path.join(tarballLib, 'libc++.so.1');
+	if (await exists(tarballLibcpp)) {
+		await copyFile(tarballLibcpp, path.join(destLib, 'libc++.so.1'));
+
+		const tarballLibcppabi = path.join(tarballLib, 'libc++abi.so.1');
+		if (await exists(tarballLibcppabi)) {
+			await copyFile(tarballLibcppabi, path.join(destLib, 'libc++abi.so.1'));
+		}
+
+		const tarballUnwind = path.join(tarballLib, 'libunwind.so.1');
+		if (await exists(tarballUnwind)) {
+			await copyFile(tarballUnwind, path.join(destLib, 'libunwind.so.1'));
+		}
+
+		return { copied: true, version: 'llvm-tarball' };
+	}
+
 	return { copied: false, reason: 'No clang runtime libs found' };
 }
 
