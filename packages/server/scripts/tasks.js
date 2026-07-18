@@ -484,27 +484,25 @@ async function copyClangRuntimeLibs(options = {}) {
 	// toolchain and has no distro libc++ to stage from the dirs above (EL ships
 	// none, and compiler-unix.sh drops the Fedora-only libcxx packages there).
 	// Copy the tarball's own libc++/libc++abi/libunwind — they match the ABI the
-	// engine was built against.
-	const tarballLib = path.join(invokingHome(), 'toolchains', 'llvm-18', 'lib',
-		`${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}-unknown-linux-gnu`);
-	const tarballLibcpp = path.join(tarballLib, 'libc++.so.1');
-	if (await exists(tarballLibcpp)) {
-		await copyFile(tarballLibcpp, path.join(destLib, 'libc++.so.1'));
+	// engine was built against. The runtime .so lives either in the per-target
+	// dir (lib/<triple>, modern per-target-runtime layout) or flat in lib/, so
+	// try both.
+	const tarballRoot = path.join(invokingHome(), 'toolchains', 'llvm-18');
+	const triple = `${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}-unknown-linux-gnu`;
+	const tarballDirs = [path.join(tarballRoot, 'lib', triple), path.join(tarballRoot, 'lib')];
+	for (const dir of tarballDirs) {
+		const libcpp = path.join(dir, 'libc++.so.1');
+		if (!(await exists(libcpp))) continue;
 
-		const tarballLibcppabi = path.join(tarballLib, 'libc++abi.so.1');
-		if (await exists(tarballLibcppabi)) {
-			await copyFile(tarballLibcppabi, path.join(destLib, 'libc++abi.so.1'));
+		await copyFile(libcpp, path.join(destLib, 'libc++.so.1'));
+		for (const name of ['libc++abi.so.1', 'libunwind.so.1']) {
+			const src = path.join(dir, name);
+			if (await exists(src)) await copyFile(src, path.join(destLib, name));
 		}
-
-		const tarballUnwind = path.join(tarballLib, 'libunwind.so.1');
-		if (await exists(tarballUnwind)) {
-			await copyFile(tarballUnwind, path.join(destLib, 'libunwind.so.1'));
-		}
-
 		return { copied: true, version: 'llvm-tarball' };
 	}
 
-	return { copied: false, reason: 'No clang runtime libs found' };
+	return { copied: false, reason: `No clang runtime libs found (checked ${tarballDirs.join(', ')})` };
 }
 
 // =============================================================================
@@ -767,6 +765,9 @@ function makeSetupRuntimeLibsAction(options = {}) {
 			}
 			const result = await copyClangRuntimeLibs(options);
 			task.output = result.copied ? `Synced clang-${result.version} runtime libs` : result.reason;
+			// A silent no-op here breaks the tests later (engine can't load libc++);
+			// warn loudly with the reason so the failure is diagnosable from the log.
+			if (!result.copied) console.warn(`WARNING: no clang runtime libs staged — ${result.reason}`);
 		},
 	};
 }
