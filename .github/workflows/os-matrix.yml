@@ -136,3 +136,37 @@ jobs:
       - name: Unit tests
         shell: bash
         run: ./builder test --verbose --sequential
+
+      # On any failure, capture crash dumps + their .sym store so an intermittent
+      # engine crash (the flaky-test investigation) can be symbolicated offline
+      # with minidump-stackwalk. Fires only on failure; a no-op on green legs.
+      - name: Collect crash artifacts
+        if: failure()
+        shell: bash
+        run: |
+          safe="${{ matrix.image }}"; safe="${safe//[:\/]/-}"
+          echo "CRASH_ARTIFACT=crash-$safe" >> "$GITHUB_ENV"
+          mkdir -p _crash/dumps _crash/symbols _crash/bin
+          cp -v /tmp/*.dmp _crash/dumps/ 2>/dev/null || true
+          cp -rv /tmp/rocketride-crashdb _crash/dumps/ 2>/dev/null || true
+          for d in build/*/test/symbols build/*/*/test/symbols dist/server/symbols; do
+            [ -d "$d" ] && cp -rv "$d" "_crash/symbols/${d//\//_}" || true
+          done
+          # The exact binaries that crashed (+ their .debug) — ground truth for
+          # debug-id matching and lldb/gdb. The .sym store above already covers
+          # minidump-stackwalk; these are the fallback for a richer backtrace.
+          for b in build/engine-lib/test/*/engtest build/engine-lib/test/engtest \
+                   build/engine-core/test/*/aptest build/engine-core/test/aptest \
+                   dist/server/engine; do
+            [ -f "$b" ]         && cp -v "$b" _crash/bin/ 2>/dev/null || true
+            [ -f "$b.debug" ]   && cp -v "$b.debug" _crash/bin/ 2>/dev/null || true
+          done
+          echo "--- collected ---"; find _crash -type f 2>/dev/null | head -80 || true
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ env.CRASH_ARTIFACT }}
+          path: _crash
+          if-no-files-found: ignore
