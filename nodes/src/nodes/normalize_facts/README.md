@@ -106,7 +106,7 @@ as far as possible.
 
 ## Pipeline position
 
-```
+```text
 datalab_parse → extract_facts → normalize_facts → currency_convert_explicit → schema_validate → …
 ```
 
