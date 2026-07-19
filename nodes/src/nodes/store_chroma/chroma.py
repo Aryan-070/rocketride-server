@@ -200,14 +200,15 @@ class Store(DocumentStoreBase):
         Return the Chroma server version string, or None if it can't be determined.
 
         Defensive: get_version() is not present on every chromadb client build (the thin
-        `chromadb-client` has shipped client shapes without it), so its absence or failure
-        must not be mistaken for a connection error.
+        `chromadb-client` has shipped client shapes without it), so its absence, failure,
+        or non-string result must not be mistaken for a connection error.
         """
         getter = getattr(self.client, 'get_version', None)
         if not callable(getter):
             return None
         try:
-            return getter()
+            version = getter()
+            return version if isinstance(version, str) else None
         except Exception:
             return None
 

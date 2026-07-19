@@ -138,6 +138,18 @@ def test_get_server_version_returns_none_when_probe_raises() -> None:
     assert store._getServerVersion() is None
 
 
+@pytest.mark.parametrize('result', [6, object(), None], ids=['integer', 'object', 'none'])
+def test_get_server_version_treats_non_string_probe_results_as_unknown(result: object) -> None:
+    """Unexpected probe result types must not fail the open()-style version check."""
+    module = _load_module()
+    store = module.Store.__new__(module.Store)
+    store.client = SimpleNamespace(get_version=lambda: result)
+
+    server_version = store._getServerVersion()
+    assert server_version is None
+    module._check_server_version(server_version)
+
+
 # --- _doesCollectionExist normalization --------------------------------------
 
 
