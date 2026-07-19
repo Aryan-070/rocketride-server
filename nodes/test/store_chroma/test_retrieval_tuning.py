@@ -200,7 +200,10 @@ def test_convert_to_docs_applies_hardcoded_score_floor(monkeypatch):
 
     assert len(docs) == 1
     assert docs[0].page_content == 'chunk 1'
-    assert docs[0].score == pytest.approx(0.20)
+    # Plain tolerance compare on purpose: pytest.approx probes numpy's bool_ type,
+    # and other node test files in the shared CI worker leave a stubbed `numpy` in
+    # sys.modules, which makes that probe raise TypeError.
+    assert abs(docs[0].score - 0.20) < 1e-9
 
 
 # --- _effectiveLimit / top_k override ----------------------------------------
