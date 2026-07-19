@@ -195,9 +195,13 @@ def _infer_class(metric_value: Any, category_metric_map: Dict[str, List[str]]) -
 
     matched: List[str] = []
     for category, keywords in category_metric_map.items():
+        # Canonicalize the key so an inferred class compares equal to a declared
+        # category (which is always lowercased), even for a custom map that uses
+        # mixed-case keys like "Equity".
+        canon_category = str(category).strip().lower()
         for kw in keywords:
             if kw and kw in label:
-                matched.append(category)
+                matched.append(canon_category)
                 break
 
     if not matched:
@@ -244,11 +248,13 @@ def validate_fact(fact: Any, config: Dict[str, Any]) -> Any:
     cat_map = config.get('category_metric_map')
     if not isinstance(cat_map, dict):
         cat_map = DEFAULT_CATEGORY_METRIC_MAP
+    # These fields accept only off/warning/error (not 'ok'); enforce that here
+    # too so the pure function upholds the same contract as IGlobal in isolation.
     sign_sev = config.get('sign', 'warning')
-    if sign_sev not in SEVERITY_RANK:
+    if sign_sev not in ('off', 'warning', 'error'):
         sign_sev = 'warning'
     prov_sev = config.get('require_provenance', 'error')
-    if prov_sev not in SEVERITY_RANK:
+    if prov_sev not in ('off', 'warning', 'error'):
         prov_sev = 'error'
 
     flags: List[Dict[str, Any]] = []
@@ -366,7 +372,7 @@ def validate_fact(fact: Any, config: Dict[str, Any]) -> Any:
                 'missing_provenance',
                 prov_sev,
                 'provenance',
-                'fact has no provenance; upstream extraction chain is not recorded',
+                'fact has no usable provenance list; upstream extraction chain is not recorded',
             )
         )
 

@@ -82,7 +82,7 @@ Output (defaults `sign="warning"`, `require_provenance="error"`):
       { "code": "category_metric_mismatch", "severity": "error", "field": "category",
         "message": "metric 'Cost of goods sold' implies category 'expense' but fact declares 'revenue'" },
       { "code": "missing_provenance", "severity": "error", "field": "provenance",
-        "message": "fact has no provenance; upstream extraction chain is not recorded" }
+        "message": "fact has no usable provenance list; upstream extraction chain is not recorded" }
     ]
   },
   "provenance": [
@@ -143,7 +143,7 @@ that key is overwritten — this node is its sole owner.
 
 ## Pipeline position
 
-```
+```text
 datalab_parse → extract_facts → normalize_facts → currency_convert_explicit → schema_validate → authoritative_overlay → reconcile
 ```
 

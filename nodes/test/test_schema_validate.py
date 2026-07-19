@@ -325,6 +325,25 @@ def test_custom_category_key_mismatch_still_fires():
     assert 'category_metric_mismatch' in codes(out)
 
 
+def test_mixed_case_map_key_no_false_mismatch():
+    # A mixed-case custom map key ('Equity') must canonicalize to match a
+    # lowercased declared category — no spurious category_metric_mismatch.
+    c = cfg(category_metric_map={'Equity': ['common stock'], 'Revenue': ['sales']})
+    out = validate_fact({'metric': 'Common stock', 'category': 'equity', 'provenance': [{'op': 'x'}]}, c)
+    assert 'category_metric_mismatch' not in codes(out)
+    assert 'unknown_category' not in codes(out)
+
+
+def test_sign_severity_ok_falls_back_to_warning():
+    # 'ok' is not a valid severity for the sign field; it must fall back to the
+    # default rather than producing a flag with severity 'ok'.
+    out = validate_fact(
+        {'category': 'cost', 'amount': 500, 'currency': 'USD', 'provenance': [{'op': 'x'}]}, cfg(sign='ok')
+    )
+    flag = next(f for f in out['validation']['flags'] if f['code'] == 'sign_category_mismatch')
+    assert flag['severity'] == 'warning'
+
+
 def test_empty_map_skips_mismatch():
     c = cfg(category_metric_map={})
     out = validate_fact(
