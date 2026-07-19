@@ -22,7 +22,10 @@ Reads structured facts on the `answers` lane and, for every fact, adds a
 
 Across the batch the node also **de-duplicates** facts that are identical. Facts that
 share a metric but differ in value, currency or scale are conflicts, not duplicates,
-and are all kept — a genuine fact is never dropped.
+and are all kept — a genuine fact is never dropped. Because dedupe works on the whole
+batch, the facts are re-emitted together as a **single list answer** (a lone bare fact
+object keeps its shape) — downstream consumers must accept a list payload even when
+the facts arrived as separate answers.
 
 The normalization is **non-destructive and audit-friendly**: the raw `label` and
 `value` are left untouched, a `normalized` block is added, and a `provenance` entry

@@ -88,6 +88,15 @@ def test_parse_footnote_stripped():
     assert value == 1234
 
 
+def test_parse_scale_suffix_then_footnote():
+    # Regression: the footnote used to block the end-anchored suffix strip,
+    # losing the value while detect_scale still tagged millions.
+    value, _, _ = parse_number('1,234m(a)')
+    assert value == 1234
+    value, _, _ = parse_number('1,234m (b)')
+    assert value == 1234
+
+
 def test_parse_currency_symbol_and_scale_suffix():
     value, neg, source = parse_number('(£456.789m)')
     assert float(value) == -456.789
@@ -232,6 +241,15 @@ def test_normalize_fact_scale_not_multiplied():
     out = normalize_fact({'label': 'Revenue (in millions)', 'value': '1,234.5'}, CFG)
     assert out['normalized']['value_normalized'] == 1234.5  # NOT 1_234_500_000
     assert out['normalized']['scale_factor'] == 1_000_000
+
+
+def test_normalize_fact_scale_suffix_with_footnote():
+    # Regression: '1,234m (a)' must keep BOTH the parsed value and the scale
+    # tag; the value used to come back null while the scale was still tagged.
+    out = normalize_fact({'label': 'Revenue', 'value': '1,234m (a)'}, CFG)
+    assert out['normalized']['value_normalized'] == 1234
+    assert out['normalized']['scale_factor'] == 1_000_000
+    assert out['normalized']['scale_unit'] == 'millions'
 
 
 def test_normalize_fact_idempotent():

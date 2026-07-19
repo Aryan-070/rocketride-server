@@ -24,8 +24,9 @@
 """Pure, engine-free fact normalization for the ``normalize_facts`` node.
 
 Deliberately free of any RocketRide / rocketlib imports so the logic can be
-unit-tested in isolation. All arithmetic uses :class:`decimal.Decimal` so that
-number parsing is exact and reproducible for audit trails.
+unit-tested in isolation. Parsing and sign handling use :class:`decimal.Decimal`
+internally so no precision is lost mid-computation; non-integral results are
+emitted as ``float`` for JSON (integral ones as ``int``).
 
 The normalization is deterministic (no LLM, no network): it parses numbers and
 signs, *tags* the detected currency and scale (never converts, never multiplies
@@ -217,10 +218,11 @@ def parse_number(raw: Any, decimal_format: str = 'auto') -> Tuple[Optional[Decim
         if sign_source == 'none':
             sign_source = 'explicit_plus'
 
+    # Strip a trailing footnote marker first (1,234m(a)): both regexes are
+    # end-anchored, so a footnote after a scale suffix would block the suffix.
+    s = _FOOTNOTE_RE.sub('', s).strip()
     # Strip a trailing scale suffix (500m, 1.2bn) — scale is tagged separately.
     s = _NUM_SUFFIX_RE.sub('', s).strip()
-    # Strip a trailing footnote marker (1,234(a)).
-    s = _FOOTNOTE_RE.sub('', s).strip()
 
     s = _apply_separators(s, decimal_format)
     d = _to_decimal(s)
@@ -384,8 +386,10 @@ def normalize_fact(fact: Any, cfg: Dict[str, Any]) -> Any:
 
     Non-destructive: the raw fields are preserved, a ``normalized`` block and a
     ``provenance`` entry are added. Scale and currency are tagged, never applied
-    or converted. Idempotent: re-running overwrites ``normalized`` and never
-    mutates the raw value, so the number cannot drift.
+    or converted. Idempotent for the ``normalized`` block: re-running overwrites
+    it and never mutates the raw value, so the number cannot drift. Each pass
+    intentionally appends its own ``provenance`` entry, so the trail records
+    every normalization that touched the fact.
     """
     if not isinstance(fact, dict):
         return fact

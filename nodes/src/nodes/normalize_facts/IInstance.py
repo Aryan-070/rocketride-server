@@ -67,6 +67,13 @@ class IInstance(IInstanceBase):
         self.preventDefault()
 
     def closing(self):
+        """Partition queued items into deduplicated facts and ordered extras, then emit.
+
+        Fact dicts are batch-deduplicated via ``dedupe_facts`` and re-emitted as
+        one list answer — so N incoming dict answers can collapse into a single
+        list payload (a lone bare dict keeps its shape). Non-fact items are
+        emitted verbatim, in arrival order, after the facts.
+        """
         # Separate normalized fact dicts (deduped as a batch) from everything
         # else (emitted verbatim, in order, after the facts).
         facts = []
