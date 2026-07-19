@@ -295,7 +295,15 @@ def validate_fact(fact: Any, config: Dict[str, Any]) -> Any:
 
     # --- Metric / category coherence (checks 4, 5, 7) ------------------------
     inferred, matched = _infer_class(fact.get(metric_field), cat_map)
-    declared = _canonical_category(fact.get(category_field), CATEGORY_ALIAS)
+    # Recognised declared categories = the built-in aliases plus the (possibly
+    # custom) map keys, so a user-defined category such as ``equity`` added to
+    # ``category_metric_map`` is not falsely flagged ``unknown_category``.
+    category_alias = dict(CATEGORY_ALIAS)
+    for key in cat_map:
+        canon = str(key).strip().lower()
+        if canon:
+            category_alias.setdefault(canon, canon)
+    declared = _canonical_category(fact.get(category_field), category_alias)
     has_metric = metric_field in fact and fact.get(metric_field) is not None
     has_category = category_field in fact and fact.get(category_field) is not None
 

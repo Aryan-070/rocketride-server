@@ -308,6 +308,23 @@ def test_custom_category_metric_map():
     assert 'category_metric_mismatch' in codes(out)
 
 
+def test_custom_category_key_not_flagged_unknown():
+    # A category declared using a custom map key (not in the built-in aliases)
+    # is recognised, not falsely flagged unknown_category.
+    c = cfg(category_metric_map={'equity': ['retained earnings', 'common stock'], 'revenue': ['sales']})
+    out = validate_fact({'metric': 'Common stock', 'category': 'equity', 'provenance': [{'op': 'x'}]}, c)
+    assert 'unknown_category' not in codes(out)
+    assert 'category_metric_mismatch' not in codes(out)
+
+
+def test_custom_category_key_mismatch_still_fires():
+    # Metric implies equity but fact declares revenue -> mismatch, even though
+    # 'equity' is only a custom map key (not a built-in alias).
+    c = cfg(category_metric_map={'equity': ['common stock'], 'revenue': ['sales']})
+    out = validate_fact({'metric': 'Common stock', 'category': 'sales', 'provenance': [{'op': 'x'}]}, c)
+    assert 'category_metric_mismatch' in codes(out)
+
+
 def test_empty_map_skips_mismatch():
     c = cfg(category_metric_map={})
     out = validate_fact(

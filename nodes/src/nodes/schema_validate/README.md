@@ -49,6 +49,15 @@ pass through untouched.
 `valid` is `true` when no `error`-severity flag fired (warnings do not invalidate).
 `severity` is the highest severity across the flags (`error` > `warning` > `ok`).
 
+The metric classifier is **keyword-based**: it case-insensitively substring-matches the metric label
+against `category_metric_map`. It is intentionally conservative — a label that matches keywords from
+two or more categories resolves to `ambiguous` (and suppresses the mismatch check) rather than
+guessing, and a label matching none is simply not classified. Because it is heuristic, tune
+`category_metric_map` to your corpus: e.g. a label containing `"tax"` (expense) and `"income"`
+(revenue) is treated as ambiguous, and `"deferred tax asset"` matches the `"tax"` keyword. Declared
+categories are recognised from the built-in aliases **plus** the keys of `category_metric_map`, so a
+custom category (e.g. `equity`) added to the map is accepted rather than flagged `unknown_category`.
+
 ## Example
 
 Input — a cost row wrongly declared as revenue, positive amount, no provenance:
@@ -137,6 +146,11 @@ that key is overwritten — this node is its sole owner.
 ```
 datalab_parse → extract_facts → normalize_facts → currency_convert_explicit → schema_validate → authoritative_overlay → reconcile
 ```
+
+Several of these sibling nodes (`datalab_parse`, `extract_facts`, `authoritative_overlay`,
+`reconcile`, `currency_convert_explicit`) are part of the in-progress audit-grade financial
+extraction suite (epic #1432) and are not all on `develop` yet; `schema_validate` stands alone and
+runs on any upstream that emits fact objects on the `answers` lane.
 
 This node is marked **experimental**.
 

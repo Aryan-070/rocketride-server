@@ -51,7 +51,10 @@ class IInstance(IInstanceBase):
 
         Only JSON-lane answers (``isJson()`` — i.e. ``expectJson``) are treated
         as facts. A plain-text answer whose text merely looks like JSON is left
-        on the text lane verbatim, preserving its ``expectJson=False`` flag.
+        on the text lane verbatim, preserving its ``expectJson=False`` flag. A
+        JSON-lane answer whose value is a bare scalar (not a dict/list) carries
+        no fact to validate and is re-emitted as text (``expectJson=False``) —
+        its content is unchanged but its lane flag flips.
 
         The payload is extracted here (not the ``Answer`` object) so nothing
         depends on the engine reusing the object after this call returns.
