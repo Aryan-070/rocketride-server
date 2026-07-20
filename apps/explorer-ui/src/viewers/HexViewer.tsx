@@ -405,6 +405,14 @@ class RangeDataSource {
 	private _recordFailure(chunkIndex: number, message: string): void {
 		this._failures.set(chunkIndex, (this._failures.get(chunkIndex) ?? 0) + 1);
 		this._errors.set(chunkIndex, message);
+		// Bound the failure bookkeeping like _chunks (oldest-first) so a long session
+		// with many transient failures can't grow these maps without limit.
+		while (this._failures.size > RangeDataSource.MAX_CACHED_CHUNKS) {
+			const oldest = this._failures.keys().next().value;
+			if (oldest === undefined) break;
+			this._failures.delete(oldest);
+			this._errors.delete(oldest);
+		}
 		this._onUpdate();
 	}
 
@@ -473,6 +481,7 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 		setReady(false);
 		setError(null);
 		setFileSize(0);
+		setTopRow(0); // reset scroll offset so a stale row from a bigger file can't outrun a smaller one
 		let disposed = false;
 
 		const ds = new RangeDataSource(
@@ -565,8 +574,14 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 		setTopRow(clampedRow);
 		const el = viewportRef.current;
 		if (el) {
-			syncingRef.current = true;
-			el.scrollTop = rowToScrollTop(clampedRow);
+			// Only arm the guard when the scroll position actually changes — a no-op
+			// assignment fires no scroll event, which would leave the flag stuck true
+			// and swallow the user's next real scroll.
+			const nextScrollTop = rowToScrollTop(clampedRow);
+			if (nextScrollTop !== el.scrollTop) {
+				syncingRef.current = true;
+				el.scrollTop = nextScrollTop;
+			}
 		}
 	}, [totalRows, rowToScrollTop]);
 
