@@ -185,6 +185,10 @@ private:
 
         ServiceDefinition &def;
         ServiceFields privateFields;
+
+        // The section currently being built. Used to resolve per-section
+        // "byMode" field overrides while walking the config.
+        Text currentSection;
     };
 
     //-------------------------------------------------------------

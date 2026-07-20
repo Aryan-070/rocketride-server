@@ -20,14 +20,22 @@ from pathlib import Path
 
 _CONFIG_PATH = Path(__file__).resolve().parents[3] / 'src' / 'ai' / 'common' / 'config.py'
 
-# Fake service definition: single "default" profile with empty field defaults.
+# Fake service definition: a config-based node whose type:"enum" profile field
+# has a single "default" branch carrying the preset field defaults.
 _SERVICE = {
-    'preconfig': {
-        'default': 'default',
-        'profiles': {
-            'default': {'instructions': [], 'agent_description': '', 'role': 'Assistant'},
+    'fields': {
+        'agent.profile': {
+            'type': 'enum',
+            'default': 'default',
+            'enum': {
+                'default': {
+                    'title': 'Default',
+                    'preset': {'instructions': [], 'agent_description': '', 'role': 'Assistant'},
+                },
+            },
         },
-    }
+    },
+    'config': ['agent.profile'],
 }
 
 

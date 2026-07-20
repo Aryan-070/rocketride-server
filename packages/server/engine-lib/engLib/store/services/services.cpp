@@ -344,24 +344,15 @@ Error IServices::declareDefaultUrlMappers() noexcept {
 ///		The full parsed json definition
 //-------------------------------------------------------------------------
 Error IServices::loadGlobalFields(json::Value &definition) noexcept {
-    // Get the fields subkey
+    // A field-definition file declares shared fields as an object keyed by
+    // field name. Each is added to the global field pool and referenced by
+    // name from node "config" lists (or from other field definitions).
     json::Value &definitionFields = definition["fields"];
     if (definitionFields.type() != json::ValueType::objectValue) return {};
 
-    // Get the field member names
-    auto members = definitionFields.getMemberNames();
+    for (auto &field : definitionFields.getMemberNames())
+        m_fields[field] = definitionFields[field];
 
-    for (auto &field : members) {
-        // Get the field
-        json::Value &fieldValue = definitionFields[field];
-
-        // Add the name member if it is not specified
-        // if (!fieldValue.isMember("name"))
-        //     fieldValue["name"] = getFieldName(field);
-
-        // Save it into the fields list
-        m_fields[field] = fieldValue;
-    }
     return {};
 }
 
@@ -438,6 +429,146 @@ ErrorOr<json::Value> IServices::lookupField(ServiceContext &context,
 //-------------------------------------------------------------------------
 ErrorOr<IServices::ServiceSchema> IServices::getField(
     ServiceContext &context, TextView fieldName, json::Value &field) noexcept {
+    // A config entry of the form {"field": "<name>", ...} references a named
+    // field (local or global). A bare {"field": …} (any "modes" was consumed
+    // upstream) is a plain reference. Remaining sibling keys are property
+    // overrides merged onto the referenced definition; the output name still
+    // derives from the reference. refName owns the storage fieldName views.
+    Text refName;
+    if (field.isObject() && field.isMember("field")) {
+        if (field.size() == 1) {
+            field = json::Value(field.lookup<Text>("field"));
+        } else {
+            Text refId = field.lookup<Text>("field");
+            auto resolved = lookupField(context, refId);
+            if (!resolved) return resolved.ccode();
+            json::Value merged = *resolved;
+            field.removeMember("field");
+            merged.merge(field);
+            field = _mv(merged);
+            refName = getFieldName(refId);
+            fieldName = refName;
+        }
+    }
+
+    // A config entry may be an inline field-definition object carrying an
+    // explicit "name" (its output key). Extract it so it drives the field
+    // name and does not leak into the emitted schema. explicitName owns the
+    // storage the view refers to.
+    Text explicitName;
+    if (field.isObject() && field.isMember("name")) {
+        explicitName = field.lookup<Text>("name");
+        field.removeMember("name");
+        fieldName = explicitName;
+    }
+
+    // Resolve per-section value overrides: a field may carry a "byMode" object
+    // mapping a section name to a partial definition merged onto the base for
+    // that section only. This lets one field vary its property values across
+    // sections (e.g. a different description in Source vs Pipe).
+    if (field.isObject() && field.isMember("byMode")) {
+        auto &byMode = field["byMode"];
+        if (byMode.isObject() && byMode.isMember(context.currentSection))
+            field.merge(byMode[context.currentSection]);
+        field.removeMember("byMode");
+    }
+
+    // An "enum" written as an object - { "<key>": { "title": …, "object": …,
+    // "config": [ … ], "preset": { … } }, … } plus an optional "order": [ … ] -
+    // is sugar for the enum + conditional + object vocabulary.
+    // Each key becomes one choice valued by that key and labelled by its
+    // "title". A branch with a "config" yields a conditional exposing
+    // those fields, nested under a sub-object when it names one with "object". A
+    // branch without one contributes just its value (the enum processor groups
+    // those into a single empty conditional). "preset" is runtime-only and is
+    // ignored here so it never reaches the emitted schema. Choices keep the
+    // field store's (sorted) key order; the conditionals follow an explicit
+    // "order" when given, so the emitted oneOf/ui:order can preserve a legacy
+    // author order that differs from sorted. Desugaring into the legacy form
+    // lets the compiler below emit it unchanged.
+    if (field.isObject() && field.isMember("enum") && field["enum"].isObject()) {
+        json::Value enumList(json::arrayValue);
+        json::Value conditional(json::arrayValue);
+
+        auto &choices = field["enum"];
+
+        // A choice's value is its key. JSON keys are always text, so for a field
+        // whose values are not strings the key is read as the declared type; a
+        // key that is not a valid value of that type is a configuration error
+        // rather than a silently mistyped value.
+        const Text declaredType = field.lookup<Text>("type");
+        json::Value values(json::objectValue);
+        for (const auto &key : choices.getMemberNames()) {
+            if (declaredType == "boolean") {
+                if (key != "true" && key != "false")
+                    return APERR(Ec::InvalidParam, "Enum key", key,
+                                 "must be \"true\" or \"false\" for boolean field",
+                                 fieldName, "in", context.def.definitionPath);
+
+                values[key] = key == "true";
+            } else if (declaredType == "number" || declaredType == "integer") {
+                return APERR(Ec::InvalidParam,
+                             "Numeric enum values are unsupported in the object "
+                             "form used by field",
+                             fieldName, "in", context.def.definitionPath);
+            } else {
+                values[key] = key;
+            }
+        }
+
+        // Enum values + labels, in the field store's (sorted) key order.
+        for (const auto &key : choices.getMemberNames()) {
+            json::Value pair(json::arrayValue);
+            pair.append(values[key]);
+            pair.append(choices[key].lookup<Text>("title", (Text)key));
+            enumList.append(pair);
+        }
+
+        // Conditionals in the explicit "order" when given, else sorted.
+        json::Value order(json::arrayValue);
+        if (field.isMember("order") && field["order"].isArray())
+            order = field["order"];
+        else
+            for (const auto &key : choices.getMemberNames()) order.append(key);
+
+        for (const auto &keyVal : order) {
+            const Text key = (Text)keyVal.asString();
+            if (!choices.isMember(key)) continue;
+            auto &choice = choices[key];
+
+            // Preset-only branches carry no schema fields.
+            if (!choice.isMember("config") || !choice["config"].isArray() ||
+                choice["config"].empty())
+                continue;
+
+            // The branch's fields become the properties shown for its value. A
+            // branch that nests them under a sub-object names it with "object".
+            json::Value props = choice["config"];
+            if (choice.isMember("object")) {
+                json::Value wrapper(json::objectValue);
+                wrapper["object"] = choice["object"];
+                wrapper["properties"] = props;
+
+                props = json::Value(json::arrayValue);
+                props.append(wrapper);
+            }
+
+            json::Value condEntry(json::objectValue);
+            condEntry["value"] = values[key];
+            condEntry["properties"] = props;
+            conditional.append(condEntry);
+        }
+
+        // "enum" as the declared type only means "a choice of values"; the
+        // values themselves are strings. A field declaring a real type (e.g.
+        // boolean, with "value" per branch) keeps it.
+        if (field.lookup<Text>("type") == "enum") field["type"] = "string";
+
+        field["enum"] = enumList;
+        field.removeMember("order");
+        if (!conditional.empty()) field["conditional"] = conditional;
+    }
+
     // Determines if this field is actually a reference to
     // a field in the private/global field list
     const auto isReference = localfcn(json::Value & fieldInfo)->bool {
@@ -1423,20 +1554,7 @@ Error IServices::updateDefinitions() noexcept {
         // Default to resolved
         def.isResolved = true;
 
-        // Get the private fields
-        auto fields = def.serviceDefinition["fields"];
-        if (fields.type() == json::ValueType::objectValue) {
-            // Get the field member names
-            auto members = fields.getMemberNames();
-
-            // For each field definition, add it to the private fields
-            for (auto field : members) {
-                json::Value &fieldValue = fields[field];
-                context.privateFields[field] = fieldValue;
-            }
-        }
-
-        // Make a protocol out of it
+        // Make a protocol out of it (used as the builtin "type" default)
         Text protocol = def.serviceDefinition.lookup<Text>("protocol");
         Url url = Url{protocol};
 
@@ -1445,47 +1563,126 @@ Error IServices::updateDefinitions() noexcept {
             return APERR(Ec::InvalidJson, "Protocol missing or invalid in",
                          def.definitionPath);
 
-        // Build up the "type" field so it can be referenced. We put
-        // it in the local fields in case someone actually defined
-        // a global "type" field - which would be bad
+        // Build the builtin "type" field so it can be referenced by name from
+        // the field list. It is a hidden string defaulting to the protocol.
+        {
+            json::Value ui;
+            ui["ui:widget"] = "hidden";
 
-        // Setup a ui widget to hide it
-        json::Value ui;
-        ui["ui:widget"] = "hidden";
+            json::Value typeField;
+            typeField["type"] = "string";
+            typeField["default"] = url.protocol();
+            typeField["ui"] = ui;
 
-        // Add the "type" field
-        json::Value typeField;
-        typeField["type"] = "string";
+            context.privateFields["type"] = typeField;
+        }
 
-        // Setup the default to be our protocol
-        typeField["default"] = url.protocol();
+        // Node-local field definitions ("fields" object, keyed by name) are
+        // added to the private field pool. A config entry may reference these
+        // by name; they take precedence over global fields of the same name.
+        if (def.serviceDefinition.isMember("fields")) {
+            auto &localFields = def.serviceDefinition["fields"];
+            if (localFields.isObject())
+                for (auto &name : localFields.getMemberNames())
+                    context.privateFields[name] = localFields[name];
+        }
 
-        // Create a ui section for the type
-        typeField["ui"] = ui;
+        // The ordered list of configuration fields
+        auto &config = def.serviceDefinition["config"];
 
-        // And add it into our private field definitions so we use it
-        context.privateFields["type"] = typeField;
+        // "sections" declares the set of sections a node has. It may be an
+        // array of section names (titles default to the node title) or an
+        // object mapping section name -> title. Section titles otherwise
+        // default to the node title.
+        Text nodeTitle = def.serviceDefinition.lookup<Text>("title");
+        const bool sectionTitles =
+            def.serviceDefinition.isMember("sections") &&
+            def.serviceDefinition["sections"].isObject();
 
-        // Get the raw shape section
-        auto &shape = def.serviceDefinition["shape"];
+        // Determine the ordered set of sections: from the "sections"
+        // declaration first, then from any field "modes", else a single "Pipe".
+        std::vector<Text> sectionOrder;
+        const auto addSection = localfcn(const Text &name) {
+            for (auto &s : sectionOrder)
+                if (s == name) return;
+            sectionOrder.push_back(name);
+        };
+        if (def.serviceDefinition.isMember("sections")) {
+            auto &sectionsCfg = def.serviceDefinition["sections"];
+            if (sectionsCfg.isArray())
+                for (auto &s : sectionsCfg) addSection(s.asString());
+            else if (sectionsCfg.isObject())
+                for (auto &m : sectionsCfg.getMemberNames()) addSection(m);
+        }
+        for (auto &entry : config) {
+            if (!entry.isObject() || !entry.isMember("modes")) continue;
+            auto &modes = entry["modes"];
+            if (modes.isArray())
+                for (auto &m : modes) addSection(m.asString());
+            else
+                addSection(modes.asString());
+        }
+        if (sectionOrder.empty()) addSection("Pipe");
+
+        // Determines if a field entry belongs to the given section. A field
+        // with no "modes" belongs to every section.
+        const auto inSection =
+            localfcn(json::Value & entry, const Text &section)->bool {
+            if (!entry.isObject() || !entry.isMember("modes")) return true;
+            auto &modes = entry["modes"];
+            if (modes.isArray()) {
+                for (auto &m : modes)
+                    if (m.asString() == section) return true;
+                return false;
+            }
+            return modes.asString() == section;
+        };
 
         // Create the schema
         json::Value schema;
 
-        // For each type in the shape
-        for (auto &section : shape) {
-            // Transform it
-            auto res = getField(context, "", section);
-            if (!res) return res.ccode();
+        // Build each section from the ordered field list
+        for (auto &sectionName : sectionOrder) {
+            // Track the section being built so getField can resolve any
+            // per-section "byMode" field overrides.
+            context.currentSection = sectionName;
 
-            // Pull the the info
-            auto info = *res;
+            // Section title: node title unless the "sections" object gives one
+            Text title = nodeTitle;
+            if (sectionTitles &&
+                def.serviceDefinition["sections"].isMember(sectionName))
+                title =
+                    def.serviceDefinition["sections"].lookup<Text>(sectionName);
+
+            // Build the section as an object subsection
+            IServices::ServiceSchema info{sectionName};
+            info.isSection = true;
+            info.isResolved = true;
+            info.field = json::Value(json::objectValue);
+            info.field["title"] = title;
+            info.field["type"] = "object";
+            info.ui = json::Value(json::objectValue);
+
+            // Add each field that belongs to this section, in order
+            for (auto &entry : config) {
+                if (!inSection(entry, sectionName)) continue;
+
+                // getField mutates the field, so work on a copy. Strip the
+                // "modes" hint so it never reaches the emitted schema.
+                json::Value fieldCopy = entry;
+                if (fieldCopy.isObject()) fieldCopy.removeMember("modes");
+
+                auto subfield = getField(context, "", fieldCopy);
+                if (!subfield) return subfield.ccode();
+
+                if (!subfield->isResolved) info.isResolved = false;
+                info.children.push_back(_mv(*subfield));
+            }
 
             auto sectionSchema = traverseSchema(info, def);
             auto sectionUI = traverseUI(info, def);
 
-            // If we need another pass at resolution due to the fact
-            // that some fields could not be resolved, mark it
+            // If we could not resolve everything, request another pass
             if (!info.isResolved) def.isResolved = false;
 
             // Create the item and add our two sections
@@ -1494,7 +1691,7 @@ Error IServices::updateDefinitions() noexcept {
             sectionShape["ui"] = sectionUI;
 
             // Save it in the schema
-            schema[info.name] = sectionShape;
+            schema[sectionName] = sectionShape;
         }
 
         // Save the schema
@@ -1674,6 +1871,15 @@ Error IServices::init() noexcept {
                 continue;
             }
 
+            // NOTE: Migration code - a service still declaring the legacy
+            // "shape" has not been converted to "config" yet, so skip it until
+            // it is. Field definition files carry no shape and always load;
+            // their definitions are format independent.
+            if (serviceInfo.isMember("shape")) {
+                LOG(Services, "    Skipping unconverted service (legacy shape)");
+                continue;
+            }
+
             // Resolve all the descriptions fields
             resolveDescriptions(serviceInfo);
 
@@ -1818,10 +2024,6 @@ Error IServices::init() noexcept {
                     return APERR(Ec::InvalidParam, "Invalid action setting",
                                  action, "in", definitionPath);
             }
-
-            if (serviceInfo.isMember("config"))
-                return APERR(Ec::InvalidParam, "Unexpected config section in",
-                             definitionPath);
 
             // Output the lane info
             if (serviceInfo.isMember("lanes")) {
