@@ -59,7 +59,7 @@ All profiles expose `top_n`, `min_score`, and the API key. The Custom profile ad
 
 Reranking sits **between the vector store and the LLM**. The store enriches the question with its `top_k` matches and emits it on the `questions` lane; this node reranks those documents and emits the reordered set on `documents`; the prompt / LLM then builds its context from the reranked `documents`:
 
-```
+```text
 … → embedding → store ──questions──▶ rerank_cohere ──documents──▶ prompt → llm → response
 ```
 
