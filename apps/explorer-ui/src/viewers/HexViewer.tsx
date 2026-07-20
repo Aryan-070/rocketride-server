@@ -403,7 +403,13 @@ class RangeDataSource {
 
 	/** Record a failed fetch and let the UI paint the error state. */
 	private _recordFailure(chunkIndex: number, message: string): void {
-		this._failures.set(chunkIndex, (this._failures.get(chunkIndex) ?? 0) + 1);
+		// delete+set moves the record to the newest end (like _touch does for _chunks),
+		// so eviction below drops the least-recently-failed chunk — never one that's
+		// still actively failing (which would reset its retry count and bypass MAX_RETRIES).
+		const count = (this._failures.get(chunkIndex) ?? 0) + 1;
+		this._failures.delete(chunkIndex);
+		this._failures.set(chunkIndex, count);
+		this._errors.delete(chunkIndex);
 		this._errors.set(chunkIndex, message);
 		// Bound the failure bookkeeping like _chunks (oldest-first) so a long session
 		// with many transient failures can't grow these maps without limit.
