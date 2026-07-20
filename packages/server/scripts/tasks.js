@@ -768,6 +768,19 @@ function makeSetupRuntimeLibsAction(options = {}) {
 			// A silent no-op here breaks the tests later (engine can't load libc++);
 			// warn loudly with the reason so the failure is diagnosable from the log.
 			if (!result.copied) console.warn(`WARNING: no clang runtime libs staged — ${result.reason}`);
+
+			// crashpad_handler is a vcpkg tool copied next to the engine. Unlike the
+			// engine/aptest (rpath $ORIGIN/lib), vcpkg gives it rpath $ORIGIN, so it
+			// looks for libc++ in dist/server itself, not dist/server/lib. Mirror the
+			// staged libs beside it so it starts on distros without a system libc++
+			// (RHEL/EL). Same files the engine already loads from ./lib — a small dup,
+			// not a second toolchain.
+			if (result.copied) {
+				for (const name of ['libc++.so.1', 'libc++abi.so.1', 'libunwind.so.1']) {
+					const src = path.join(DIST_DIR, 'lib', name);
+					if (await exists(src)) await copyFile(src, path.join(DIST_DIR, name));
+				}
+			}
 		},
 	};
 }
