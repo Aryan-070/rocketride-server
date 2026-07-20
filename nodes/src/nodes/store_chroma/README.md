@@ -30,7 +30,7 @@ Documents must pass through an embedding node before reaching this node; chunks 
 | `serverName` | string | Default "chroma". Namespace for agent-facing tool names, e.g. 'chroma' exposes tools as chroma.search / chroma.upsert / chroma.delete. Change this when running multiple Chroma nodes in the same pipeline so their tool names do not collide. |
 | `profile` | string | Default "cloud". Connect to... |
 | `provider` | string |  |
-| `top_k` | number | **Top K** — maximum candidate documents fetched from Chroma before score filtering. Unset ⇒ the caller's limit (25 on the data lane). Raise it to widen recall for a reranker. |
+| `top_k` | integer | **Top K** — maximum candidate documents fetched from Chroma before score filtering. Unset ⇒ the caller's limit (25 on the data lane). Raise it to widen recall for a reranker. |
 
 ---
 
