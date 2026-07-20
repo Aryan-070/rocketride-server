@@ -63,8 +63,9 @@ const EventsApp: React.FC<ShellAppProps> = (_props) => {
 		// Only capture DAP events
 		if (event.type !== 'event') return;
 
-		// Token filter: if config.token is not '*', check it matches
-		if (config.token !== '*' && event.token !== config.token) return;
+		// No client-side token filter: DAP events carry no top-level `token`, and
+		// the server-side subscription below (addMonitor) already scopes the stream
+		// to the selected token. Re-adding an `event.token` check drops every event.
 
 		const captured: CapturedEvent = {
 			id: nextIdRef.current++,
