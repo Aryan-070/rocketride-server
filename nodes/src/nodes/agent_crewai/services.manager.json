@@ -59,7 +59,7 @@
 			"type": "boolean",
 			"title": "Require tool call",
 			"default": false,
-			"description": "Require the agent to invoke at least one tool before answering. When on, a run that answers without calling any tool fails with a guard error. Use for determinism-critical pipelines where an ungrounded or narrated answer must never be delivered. Off by default."
+			"description": "Require at least one tool call (including calls delegated to sub-agents) before answering. When on, a run that answers without any tool invocation fails with a guard error. Use for determinism-critical pipelines where an ungrounded or narrated answer must never be delivered. Off by default."
 		},
 		"advanced_mode": {
 			"type": "boolean",
