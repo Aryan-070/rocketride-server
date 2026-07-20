@@ -67,6 +67,7 @@ Central orchestration server managing:
 
 import time
 import asyncio
+import socket
 import uuid
 from typing import List
 from fastapi import WebSocket
@@ -706,11 +707,21 @@ class TaskServer(DAPBase):
             RuntimeError: If no ports available
         """
         base_port = self._config.get('base_port', 20000)
-        # Search for available port
+        # Search for available port. The in-memory list only covers THIS
+        # process's allocations — a crashed/zombie engine (or any foreign
+        # process) can still hold a port from a previous life, and handing it
+        # out makes the task subprocess die at bind time (exit code 1) with
+        # no useful error. Probe the OS with a bind test before allocating.
         for port in range(base_port, base_port + 10000):
-            if port not in self._allocated_ports:
-                self._allocated_ports.append(port)
-                return port
+            if port in self._allocated_ports:
+                continue
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                    probe.bind(('127.0.0.1', port))
+            except OSError:
+                continue  # OS-level occupied — skip it
+            self._allocated_ports.append(port)
+            return port
 
         raise RuntimeError(f'No available ports in the range {base_port}-{base_port + 9999}')
 
