@@ -561,6 +561,24 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         lanes = self.instance.getListeners()
 
+        if question.type == QuestionType.EXECUTE:
+            raw = question.questions[0].text if question.questions else ''
+            if not self.IGlobal.allow_execute:
+                raise ValueError('Direct execute is disabled on this node (allow_execute=False)')
+            if not is_sql_safe(raw):
+                raise ValueError('Only read-only SELECT/EXPLAIN statements are permitted')
+            result = self._executeRawQuery(raw.strip()) or {'rows': [], 'affected_rows': 0}
+            payload = {
+                'rows': result.get('rows', []),
+                'affected_rows': result.get('affected_rows', 0),
+                'row_count': len(result.get('rows', [])),
+            }
+            self.instance.writeTable(payload['rows'])
+            answer = Answer()
+            answer.setAnswer(json.dumps(payload, default=str))
+            self.instance.writeAnswers(answer)
+            return
+
         try:
             # Ask the LLM to translate the natural-language question into SQL.
             query_json = self._buildSQLQuery(question_text)

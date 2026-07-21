@@ -373,7 +373,7 @@ Question(
 )
 ```
 
-`QuestionType`: `QUESTION`, `SEMANTIC`, `KEYWORD`, `GET`, `PROMPT`. Default type is `QUESTION`. Default filter and `expectJson=False`, `role=''` if omitted.
+`QuestionType`: `QUESTION`, `SEMANTIC`, `KEYWORD`, `GET`, `PROMPT`, `EXECUTE`. Default type is `QUESTION`. Default filter and `expectJson=False`, `role=''` if omitted. `EXECUTE` runs the question text as a raw query directly against a database node (bypassing LLM translation), gated by that node's `allow_execute` config and its read-only safety check.
 
 ### Methods
 
