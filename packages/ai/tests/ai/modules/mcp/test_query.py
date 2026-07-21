@@ -71,3 +71,30 @@ async def test_sql_query_truncates_large(fake_engine):
     tasks = TaskRegistry()
     out = await registry.handler('sql_query')(fake_engine, tasks, {'query': 'SELECT * FROM t'})
     assert out['truncated'] is True and out['row_count'] == 1000
+
+
+@pytest.mark.asyncio
+async def test_graph_query_returns_records(fake_engine):
+    from ai.modules.mcp.tooling import ToolRegistry
+
+    fake_engine._tool_result = {'rows': [{'n': {'id': 7}}], 'affected_rows': 0}
+    registry = ToolRegistry()
+    query.register(registry)
+    tasks = TaskRegistry()
+    out = await registry.handler('graph_query')(fake_engine, tasks, {'query': 'MATCH (n) RETURN n'})
+    assert out['records'] == [{'n': {'id': 7}}]
+    assert out['row_count'] == 1
+    call = fake_engine.tooled[-1]
+    assert call['tool'] == 'execute' and call['node_id'] == 'neo4j_1'
+
+
+@pytest.mark.asyncio
+async def test_graph_query_rejects_write(fake_engine):
+    from ai.modules.mcp.tooling import ToolRegistry
+
+    registry = ToolRegistry()
+    query.register(registry)
+    tasks = TaskRegistry()
+    with pytest.raises(ValueError):
+        await registry.handler('graph_query')(fake_engine, tasks, {'query': 'CREATE (n:X)'})
+    assert not fake_engine.tooled

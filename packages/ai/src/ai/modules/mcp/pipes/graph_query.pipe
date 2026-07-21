@@ -1,0 +1,30 @@
+{
+  "components": [
+    {
+      "id": "neo4j_1",
+      "provider": "db_neo4j",
+      "name": "Neo4j",
+      "config": {
+        "profile": "default",
+        "default": {
+          "db_description": "",
+          "uri": "",
+          "auth_method": "userpass",
+          "user": "",
+          "password": "",
+          "database": "",
+          "max_attempts": 5,
+          "allow_execute": true
+        },
+        "parameters": {}
+      }
+    }
+  ],
+  "project_id": "a3c43e11-2269-4f07-bf23-583d296d9bf8",
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "version": 1
+}

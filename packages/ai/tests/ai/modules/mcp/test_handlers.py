@@ -137,6 +137,7 @@ async def test_list_tools_reflects_real_register_all(fake_engine):
         'deploy_add',
         'monitor',
         'sql_query',
+        'graph_query',
     }
 
 

@@ -6,7 +6,7 @@ Option B: drive queries via the tool-lane execute/search @tool_functions (PR #12
 
 import os
 
-from ai.modules.mcp.read_guards import assert_sql_read_only
+from ai.modules.mcp.read_guards import assert_cypher_read_only, assert_sql_read_only
 from ai.modules.mcp.result_envelope import cap_rows
 
 DEFAULT_TTL = 300
@@ -66,9 +66,36 @@ async def _sql_query(client, tasks, args):
     return out
 
 
+_GRAPH_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'query': {'type': 'string', 'description': 'A read-only Cypher query (MATCH/RETURN/WITH).'},
+        **_SESSION_PROPS,
+    },
+    'required': ['query'],
+}
+
+
+async def _graph_query(client, tasks, args):
+    assert_cypher_read_only(args['query'])
+    token = await open_session(
+        client, tasks, _pipe('graph_query.pipe'), ttl=args.get('ttl'), session_token=args.get('session_token')
+    )
+    result = await client.tool(token, 'execute', GRAPH_NODE_ID, {'sql': args['query']})
+    rows = (result or {}).get('rows', (result or {}).get('records', []))
+    out = cap_rows(rows, rows_key='records')
+    out['session_token'] = token
+    return out
+
+
 def register(registry):
     registry.register(
         'sql_query',
         'Run a read-only SQL query against your RocketRide SQL store and return rows.',
         _SQL_SCHEMA,
     )(_sql_query)
+    registry.register(
+        'graph_query',
+        'Run a read-only Cypher query against your RocketRide graph store and return records.',
+        _GRAPH_SCHEMA,
+    )(_graph_query)
