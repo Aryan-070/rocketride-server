@@ -217,6 +217,108 @@ Tool results include both human-readable text and structured data:
 - **Text content**: Confirmation message plus extracted text from the pipeline result
 - **Structured content**: Raw pipeline result in `structuredContent.result` for programmatic access
 
+## Convenience query tools
+
+Three built-in convenience tools give AI assistants direct, read-only access to
+your SQL, graph, and vector stores without requiring a pre-started pipeline.
+Like `RocketRide_Document_Processor`, each spawns (or reuses) a small backing
+pipeline on first use rather than requiring you to start one yourself.
+
+Unlike server-task tools, the `query` argument on these tools is a **direct
+query** — a SQL statement, a Cypher query, or literal search text/vector — not
+a natural-language question. There is no LLM translating intent into a query.
+
+### sql_query
+
+Run a read-only SQL query against your RocketRide SQL store and return rows.
+
+| Parameter       | Required | Description                                                    |
+| --------------- | -------- | ---------------------------------------------------------------|
+| `query`         | Yes      | A read-only SQL `SELECT`/`EXPLAIN` statement.                  |
+| `session_token` | No       | Reuse a warm query session; omit to spawn one.                 |
+| `ttl`           | No       | Session lifetime in seconds (default 300, max 1800).           |
+
+**Returns:** `{ rows, row_count, truncated, session_token }` (plus `notice`
+when `truncated` is `true`).
+
+### graph_query
+
+Run a read-only Cypher query against your RocketRide graph store and return
+records.
+
+| Parameter       | Required | Description                                                    |
+| --------------- | -------- | ---------------------------------------------------------------|
+| `query`         | Yes      | A read-only Cypher query (`MATCH`/`RETURN`/`WITH`).             |
+| `session_token` | No       | Reuse a warm query session; omit to spawn one.                 |
+| `ttl`           | No       | Session lifetime in seconds (default 300, max 1800).           |
+
+**Returns:** `{ records, row_count, truncated, session_token }` (plus `notice`
+when `truncated` is `true`).
+
+### vector_search
+
+Search your RocketRide vector store by text or embedding and return matches.
+
+| Parameter        | Required                | Description                                          |
+| ----------------- | ------------------------ | ----------------------------------------------------|
+| `collection`      | Yes                      | Collection/index to search.                          |
+| `query`           | One of `query`/`embedding` | Query text (embedded by the store).                |
+| `embedding`       | One of `query`/`embedding` | Raw query vector.                                  |
+| `k`               | No                       | Top-k results (default 10).                          |
+| `filter`          | No                       | Metadata filter object.                              |
+| `session_token`   | No                       | Reuse a warm query session; omit to spawn one.        |
+| `ttl`             | No                       | Session lifetime in seconds (default 300, max 1800). |
+
+**Returns:** `{ matches, row_count, truncated, session_token }` (plus `notice`
+when `truncated` is `true`).
+
+### Read-only guarantee
+
+Every query is validated **before** it reaches the store:
+
+- `sql_query` checks the statement with the same `is_sql_safe` guard used
+  elsewhere in RocketRide, rejecting anything but `SELECT`/`EXPLAIN`.
+- `graph_query` scans the Cypher text for write keywords (`CREATE`, `MERGE`,
+  `DELETE`, `SET`, `REMOVE`, `DETACH`, `DROP`, `CALL`) and rejects any match.
+- `vector_search` is inherently read-only — it only ever issues a similarity
+  search.
+
+A failed check raises an error before any request reaches the engine.
+
+### 40 KB in-band cap
+
+Results are capped at 40 KB so they fit in-band in the model's context. If a
+result would exceed the cap, rows/records/matches are progressively dropped
+until it fits (or the set is emptied). When that happens:
+
+- `truncated` is `true`
+- `row_count` still reports the **true** total count, not the trimmed count
+- `notice` explains the cap and suggests narrowing the query (e.g. `LIMIT` or
+  filters)
+
+There is no out-of-band spill for these tools — large exports belong in a
+pipeline that writes to the filesystem sink, not through the MCP query tools.
+
+### Session model
+
+The first call to any of the three tools spawns a small convenience pipeline
+scoped to that query type and returns its `session_token`. Pass that token
+back on subsequent calls to reuse the same warm session instead of paying
+pipeline start-up cost again.
+
+- Default session TTL: 300 seconds
+- Maximum session TTL: 1800 seconds (`ttl` is clamped to this range)
+- Credentials for the backing SQL/graph/vector store live in the convenience
+  pipeline templates — they are never passed as tool arguments.
+
+### Mechanism
+
+These tools do not go through the natural-language Questions lane. They call
+the tool-lane `execute`/`search` `@tool_function`s directly against the
+backing pipeline's store node — `execute` for `sql_query` and `graph_query`,
+`search` for `vector_search` — so the `query` argument is issued to the store
+as-is, not interpreted as an instruction to an LLM.
+
 ## MCP Resources
 
 The server exposes three read-only **MCP Resources** that provide live information about the connected RocketRide engine. Resources use the `rocketride://` URI scheme and return JSON payloads.
