@@ -24,6 +24,15 @@ async def test_open_session_reuses_live_token(fake_engine):
 
 
 @pytest.mark.asyncio
+async def test_open_session_mismatched_pipe_spawns_fresh(fake_engine):
+    tasks = TaskRegistry()
+    tasks.add('tok-1', pipeline_ref='sql_query.pipe')
+    token = await query.open_session(fake_engine, tasks, 'graph_query.pipe', session_token='tok-1')
+    assert fake_engine.used  # spawned fresh, not reused
+    assert token == fake_engine._token
+
+
+@pytest.mark.asyncio
 async def test_ttl_clamped_to_max(fake_engine):
     tasks = TaskRegistry()
     await query.open_session(fake_engine, tasks, 'sql_query.pipe', ttl=99999)

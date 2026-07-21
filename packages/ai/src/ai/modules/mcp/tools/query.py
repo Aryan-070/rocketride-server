@@ -30,8 +30,10 @@ def _clamp_ttl(ttl):
 
 
 async def open_session(client, tasks, pipe_path, ttl=None, session_token=None):
-    if session_token and tasks.get(session_token) is not None:
-        return session_token
+    if session_token:
+        existing = tasks.get(session_token)
+        if existing is not None and existing.get('pipeline_ref') == pipe_path:
+            return session_token
     started = await client.use(filepath=pipe_path, ttl=_clamp_ttl(ttl))
     token = (started or {}).get('token')
     if not token:

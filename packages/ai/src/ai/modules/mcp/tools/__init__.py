@@ -28,8 +28,8 @@ def register_all(registry: ToolRegistry) -> None:
     (`run_pipeline`, `send_data`, `terminate`, `send_files`), the capability
     tools (`set_env`, `list_env_keys`, `store_read`, `store_list`,
     `save_template`, `load_template`, `deploy_add`), the visibility tool
-    (`monitor`), and the convenience query tool (`sql_query`) -- 18 tools
-    total.
+    (`monitor`), and the convenience query tools (`sql_query`, `graph_query`,
+    `vector_search`).
     """
     introspection.register(registry)
     execution.register(registry)
