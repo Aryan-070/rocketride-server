@@ -16,6 +16,7 @@ from ..tooling import ToolRegistry
 from . import capability
 from . import execution
 from . import introspection
+from . import query
 from . import visibility
 
 
@@ -26,10 +27,12 @@ def register_all(registry: ToolRegistry) -> None:
     `validate_pipeline`, `describe_pipeline`), the execution tools
     (`run_pipeline`, `send_data`, `terminate`, `send_files`), the capability
     tools (`set_env`, `list_env_keys`, `store_read`, `store_list`,
-    `save_template`, `load_template`, `deploy_add`), and the visibility tool
-    (`monitor`) -- 16 tools total.
+    `save_template`, `load_template`, `deploy_add`), the visibility tool
+    (`monitor`), and the convenience query tool (`sql_query`) -- 18 tools
+    total.
     """
     introspection.register(registry)
     execution.register(registry)
     capability.register(registry)
     visibility.register(registry)
+    query.register(registry)

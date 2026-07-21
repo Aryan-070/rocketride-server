@@ -28,3 +28,46 @@ async def test_ttl_clamped_to_max(fake_engine):
     tasks = TaskRegistry()
     await query.open_session(fake_engine, tasks, 'sql_query.pipe', ttl=99999)
     assert fake_engine.used[-1]['ttl'] == query.MAX_TTL
+
+
+@pytest.mark.asyncio
+async def test_sql_query_returns_rows(fake_engine):
+    from ai.modules.mcp.tooling import ToolRegistry
+
+    fake_engine._tool_result = {'rows': [{'id': 1}], 'affected_rows': 0}
+    registry = ToolRegistry()
+    query.register(registry)
+    tasks = TaskRegistry()
+    out = await registry.handler('sql_query')(fake_engine, tasks, {'query': 'SELECT id FROM t'})
+    assert out['rows'] == [{'id': 1}]
+    assert out['row_count'] == 1
+    assert out['truncated'] is False
+    assert out['session_token'] == fake_engine._token
+    call = fake_engine.tooled[-1]
+    assert call['tool'] == 'execute' and call['node_id'] == 'postgres_1'
+    assert call['input'] == {'sql': 'SELECT id FROM t'}
+
+
+@pytest.mark.asyncio
+async def test_sql_query_rejects_write(fake_engine):
+    from ai.modules.mcp.tooling import ToolRegistry
+
+    registry = ToolRegistry()
+    query.register(registry)
+    tasks = TaskRegistry()
+    with pytest.raises(ValueError):
+        await registry.handler('sql_query')(fake_engine, tasks, {'query': 'DELETE FROM t'})
+    assert not fake_engine.tooled  # guard fired before any RPC
+
+
+@pytest.mark.asyncio
+async def test_sql_query_truncates_large(fake_engine):
+    from ai.modules.mcp.tooling import ToolRegistry
+
+    big = [{'id': i, 'blob': 'x' * 200} for i in range(1000)]
+    fake_engine._tool_result = {'rows': big, 'affected_rows': 0}
+    registry = ToolRegistry()
+    query.register(registry)
+    tasks = TaskRegistry()
+    out = await registry.handler('sql_query')(fake_engine, tasks, {'query': 'SELECT * FROM t'})
+    assert out['truncated'] is True and out['row_count'] == 1000

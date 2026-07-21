@@ -1,0 +1,26 @@
+{
+	"components": [
+		{
+			"id": "postgres_1",
+			"provider": "db_postgres",
+			"name": "PostgreSQL",
+			"config": {
+				"profile": "default",
+				"default": {
+					"host": "",
+					"user": "",
+					"password": "",
+					"database": "",
+					"table": "",
+					"db_description": "",
+					"max_attempts": 5,
+					"allow_execute": true
+				},
+				"parameters": {}
+			}
+		}
+	],
+	"project_id": "e0c44324-0024-4dfa-af35-f38d2d839f07",
+	"viewport": { "x": 0, "y": 0, "zoom": 1 },
+	"version": 1
+}
