@@ -35,6 +35,8 @@ class FakeEngineClient:
         self.base_url = base_url
         self.sent = []
         self.used = []
+        self.tooled = []
+        self._tool_result = {}
         self.terminated = []
         self.sent_files = []
         self.set_env_calls = []
@@ -108,6 +110,10 @@ class FakeEngineClient:
     async def use(self, **kwargs):
         self.used.append(kwargs)
         return {'token': self._token, 'publicToken': self._public_token, **kwargs}
+
+    async def tool(self, token, tool, node_id='', input=None):
+        self.tooled.append({'token': token, 'tool': tool, 'node_id': node_id, 'input': input or {}})
+        return self._tool_result
 
     async def terminate(self, token):
         self.terminated.append(token)
