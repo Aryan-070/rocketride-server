@@ -17,6 +17,12 @@ def cap_rows(rows, extra=None, max_bytes=MAX_BYTES, rows_key='rows'):
     total = len(rows)
     kept = list(rows)
     truncated = False
+    if not kept:
+        out = dict(extra or {})
+        out[rows_key] = kept
+        out['row_count'] = total
+        out['truncated'] = truncated
+        return out
     while kept:
         out = dict(extra or {})
         out[rows_key] = kept
@@ -29,4 +35,9 @@ def cap_rows(rows, extra=None, max_bytes=MAX_BYTES, rows_key='rows'):
         truncated = True
         drop = max(1, len(kept) // 10)
         kept = kept[:-drop]
-    return {rows_key: [], 'row_count': total, 'truncated': True, 'notice': _NOTICE, **(extra or {})}
+    out = dict(extra or {})
+    out[rows_key] = []
+    out['row_count'] = total
+    out['truncated'] = True
+    out['notice'] = _NOTICE
+    return out
