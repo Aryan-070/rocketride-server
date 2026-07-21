@@ -45,6 +45,7 @@ async def test_build_mcp_server_lists_tools_from_real_registry(fake_engine):
         'monitor',
         'sql_query',
         'graph_query',
+        'vector_search',
     }
 
 

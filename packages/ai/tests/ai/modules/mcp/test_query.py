@@ -98,3 +98,30 @@ async def test_graph_query_rejects_write(fake_engine):
     with pytest.raises(ValueError):
         await registry.handler('graph_query')(fake_engine, tasks, {'query': 'CREATE (n:X)'})
     assert not fake_engine.tooled
+
+
+@pytest.mark.asyncio
+async def test_vector_search_returns_matches(fake_engine):
+    from ai.modules.mcp.tooling import ToolRegistry
+
+    fake_engine._tool_result = {'results': [{'id': 'a', 'score': 0.9, 'metadata': {}}], 'total': 1}
+    registry = ToolRegistry()
+    query.register(registry)
+    tasks = TaskRegistry()
+    out = await registry.handler('vector_search')(fake_engine, tasks, {'query': 'hello', 'collection': 'docs', 'k': 5})
+    assert out['matches'][0]['id'] == 'a'
+    assert out['row_count'] == 1
+    call = fake_engine.tooled[-1]
+    assert call['tool'] == 'search' and call['node_id'] == 'qdrant_1'
+    assert call['input']['top_k'] == 5 and call['input']['query'] == 'hello'
+
+
+@pytest.mark.asyncio
+async def test_vector_search_requires_query_or_embedding(fake_engine):
+    from ai.modules.mcp.tooling import ToolRegistry
+
+    registry = ToolRegistry()
+    query.register(registry)
+    tasks = TaskRegistry()
+    with pytest.raises(ValueError):
+        await registry.handler('vector_search')(fake_engine, tasks, {'collection': 'docs'})

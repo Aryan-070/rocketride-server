@@ -88,6 +88,41 @@ async def _graph_query(client, tasks, args):
     return out
 
 
+_VECTOR_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'query': {'type': 'string', 'description': 'Query text (embedded by the store).'},
+        'embedding': {'type': 'array', 'items': {'type': 'number'}, 'description': 'Raw query vector.'},
+        'collection': {'type': 'string', 'description': 'Collection/index to search.'},
+        'k': {'type': 'integer', 'description': 'Top-k results (default 10).'},
+        'filter': {'type': 'object', 'description': 'Metadata filter.'},
+        **_SESSION_PROPS,
+    },
+    'required': ['collection'],
+    'anyOf': [{'required': ['query']}, {'required': ['embedding']}],
+}
+
+
+async def _vector_search(client, tasks, args):
+    if not args.get('query') and not args.get('embedding'):
+        raise ValueError('vector_search requires either query or embedding')
+    token = await open_session(
+        client, tasks, _pipe('vector_search.pipe'), ttl=args.get('ttl'), session_token=args.get('session_token')
+    )
+    payload = {'collection': args['collection'], 'top_k': args.get('k', 10)}
+    if args.get('query'):
+        payload['query'] = args['query']
+    if args.get('embedding'):
+        payload['embedding'] = args['embedding']
+    if args.get('filter'):
+        payload['filter'] = args['filter']
+    result = await client.tool(token, 'search', VECTOR_NODE_ID, payload)
+    matches = (result or {}).get('results', (result or {}).get('matches', []))
+    out = cap_rows(matches, rows_key='matches')
+    out['session_token'] = token
+    return out
+
+
 def register(registry):
     registry.register(
         'sql_query',
@@ -99,3 +134,6 @@ def register(registry):
         'Run a read-only Cypher query against your RocketRide graph store and return records.',
         _GRAPH_SCHEMA,
     )(_graph_query)
+    registry.register(
+        'vector_search', 'Search your RocketRide vector store by text or embedding and return matches.', _VECTOR_SCHEMA
+    )(_vector_search)

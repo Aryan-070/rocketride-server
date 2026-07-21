@@ -1,0 +1,29 @@
+{
+	"components": [
+		{
+			"id": "qdrant_1",
+			"provider": "qdrant",
+			"name": "Qdrant",
+			"config": {
+				"profile": "local",
+				"local": {
+					"host": "",
+					"port": 6333,
+					"collection": "",
+					"score": 0.7,
+					"serverName": "qdrant"
+				},
+				"embedding": {
+					"provider": "embedding_transformer",
+					"embedding_transformer": {
+						"profile": "miniLM"
+					}
+				},
+				"parameters": {}
+			}
+		}
+	],
+	"project_id": "7be96105-b269-4b78-8456-f80be71a49cc",
+	"viewport": { "x": 0, "y": 0, "zoom": 1 },
+	"version": 1
+}
