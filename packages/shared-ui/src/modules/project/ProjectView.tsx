@@ -28,8 +28,10 @@ import { SourceFlowContent } from '../../components/flow/Flow';
 import Trace from '../../components/trace/Trace';
 import Errors from '../../components/errors/Errors';
 import { commonStyles } from '../../themes/styles';
+import { OAUTH_ROOT_URL } from '../../config/oauth';
 
 import PipelineActions from '../../components/pipeline-actions/PipelineActions';
+import TtlSettingsDialog from './TtlSettingsDialog';
 import { extractPipelineEnvVars } from '../../components/canvas/util/extractEnvVars';
 import type { ProjectViewMode, ViewState, TaskStatus, TraceEvent, TraceRow, TraceLevel } from './types';
 
@@ -69,14 +71,30 @@ export interface IProjectViewProps {
 	onContentChanged?: (project: any) => void;
 	/** Called to validate a pipeline. Host returns validation result as a Promise. */
 	onValidate?: (pipeline: any) => Promise<any>;
-	/** Called for pipeline run/stop/restart actions. */
-	onPipelineAction?: (action: 'run' | 'stop' | 'restart', source?: string) => void;
+	/** Called for pipeline run/stop/restart actions. `options.ttl` carries the idle-timeout (seconds) for run/restart when the user set one. */
+	onPipelineAction?: (action: 'run' | 'stop' | 'restart', source?: string, options?: { ttl?: number }) => void;
 	/** Called when view state changes (mode, flowViewMode, viewport). */
 	onViewStateChange?: (viewState: ViewState) => void;
 	/** Called when user preferences change (e.g. panel widths, toggles). */
 	onPrefsChange?: (prefs: Record<string, unknown>) => void;
 	/** Called when the user clicks an external link in the canvas. */
 	onOpenLink?: (url: string, displayName?: string) => void;
+	/**
+	 * OAuth broker base URL for the social-login buttons. Defaults to the
+	 * built-in {@link OAUTH_ROOT_URL}; hosts may override (e.g. for staging).
+	 */
+	oauth2RootUrl?: string;
+	/**
+	 * Where the OAuth broker should redirect after authentication. Hosts that
+	 * cannot receive a web redirect (VS Code) set a deep link they intercept.
+	 */
+	oauthReturnUrl?: string;
+	/** Opens an external URL in the host's system browser to start an OAuth login. */
+	onOpenExternal?: (url: string) => void;
+	/** OAuth tokens delivered out-of-band by the host (e.g. VS Code deep-link callback). */
+	pendingOAuthTokens?: { tokens: string; state: string };
+	/** Clears `pendingOAuthTokens` once a config panel has consumed them. */
+	clearPendingOAuthTokens?: () => void;
 	/** Called when the user requests a save (Ctrl+S or menu). */
 	onSave?: () => void;
 	/** SaaS-only: export/download the current pipeline. Forwarded to the canvas. */
@@ -174,7 +192,7 @@ interface SourceInfo {
 // COMPONENT
 // =============================================================================
 
-const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isConnected, isSubscribed = true, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, initialPrefs, traceEvents = [], onContentChanged, onValidate, onPipelineAction, onViewStateChange, onPrefsChange, onOpenLink, onSave, onExport, onTraceClear, isReadonly = false, envKeys, onMissingEnvVars }) => {
+const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isConnected, isSubscribed = true, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, initialPrefs, traceEvents = [], onContentChanged, onValidate, onPipelineAction, onViewStateChange, onPrefsChange, onOpenLink, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, onTraceClear, isReadonly = false, envKeys, onMissingEnvVars }) => {
 	// --- Local view state (initialized from props, managed locally) -----------
 
 	const [viewState, setViewState] = useState<ViewState>(() => ({
@@ -235,6 +253,29 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 		});
 	}, []);
 
+	// --- Idle-timeout (TTL) settings ------------------------------------------
+	// Persisted per-pipeline in prefs (`pipelineTtl` map keyed by project_id),
+	// riding the host's existing prefs persistence. undefined = server default.
+
+	const [ttlDialogOpen, setTtlDialogOpen] = useState(false);
+	const ttlProjectId: string = project?.project_id ?? '';
+	const ttlByProject = (prefs?.pipelineTtl as Record<string, number> | undefined) ?? {};
+	const projectTtl: number | undefined = ttlProjectId ? ttlByProject[ttlProjectId] : undefined;
+
+	const openTtlSettings = useCallback(() => setTtlDialogOpen(true), []);
+	const handleTtlConfirm = useCallback((ttl: number | undefined) => {
+		setTtlDialogOpen(false);
+		if (!ttlProjectId) return;
+		setPrefs((prev) => {
+			const map = { ...((prev?.pipelineTtl as Record<string, number> | undefined) ?? {}) };
+			if (ttl === undefined) delete map[ttlProjectId];
+			else map[ttlProjectId] = ttl;
+			const next = { ...prev, pipelineTtl: map };
+			onPrefsChangeRef.current?.(next);
+			return next;
+		});
+	}, [ttlProjectId]);
+
 	const { rows: traceRows, clearTrace } = useTraceState(traceEvents);
 
 	// --- Validate callback for Canvas ----------------------------------------
@@ -280,9 +321,9 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 					return;
 				}
 			}
-			onPipelineAction?.('run', source);
+			onPipelineAction?.('run', source, projectTtl !== undefined ? { ttl: projectTtl } : undefined);
 		},
-		[onPipelineAction, onMissingEnvVars, envKeys]
+		[onPipelineAction, onMissingEnvVars, envKeys, projectTtl]
 	);
 
 	const handleStopPipeline = useCallback(
@@ -340,9 +381,9 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 
 	const handlePipelineAction = useCallback(
 		(action: 'run' | 'stop' | 'restart', source?: string) => {
-			onPipelineAction?.(action, source);
+			onPipelineAction?.(action, source, action !== 'stop' && projectTtl !== undefined ? { ttl: projectTtl } : undefined);
 		},
-		[onPipelineAction]
+		[onPipelineAction, projectTtl]
 	);
 
 	// --- Viewport change -----------------------------------------------------
@@ -356,7 +397,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 
 	const panels = {
 		design: {
-			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl="" project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={isReadonly ? undefined : handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={isReadonly ? undefined : handleRunPipeline} onStopPipeline={isReadonly ? undefined : handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} getPreference={getPreference} setPreference={setPreference} initialViewport={viewState.viewport} isDirty={isReadonly ? false : isDirty} isNew={isReadonly ? false : isNew} onSave={isReadonly ? undefined : handleSave} onExport={isReadonly ? undefined : onExport} isReadonly={isReadonly} envKeys={envKeys} />}</div>,
+			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl={oauth2RootUrl} oauthReturnUrl={oauthReturnUrl} onOpenExternal={onOpenExternal} pendingOAuthTokens={pendingOAuthTokens} clearPendingOAuthTokens={clearPendingOAuthTokens} project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={isReadonly ? undefined : handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={isReadonly ? undefined : handleRunPipeline} onStopPipeline={isReadonly ? undefined : handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} getPreference={getPreference} setPreference={setPreference} initialViewport={viewState.viewport} isDirty={isReadonly ? false : isDirty} isNew={isReadonly ? false : isNew} onSave={isReadonly ? undefined : handleSave} onExport={isReadonly ? undefined : onExport} onOpenSettings={isReadonly ? undefined : openTtlSettings} isReadonly={isReadonly} envKeys={envKeys} />}</div>,
 		},
 		parameters: {
 			content: (
@@ -420,6 +461,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 	return (
 		<div style={styles.container}>
 			<TabPanel tabs={tabs} activeTab={viewState.mode} onTabChange={handleModeChange} panels={panels} />
+			{ttlDialogOpen && <TtlSettingsDialog ttlSeconds={projectTtl} onConfirm={handleTtlConfirm} onCancel={() => setTtlDialogOpen(false)} />}
 			{!isConnected && (
 				<div style={styles.disconnectOverlay}>
 					<button type="button" style={styles.disconnectButton} disabled>
