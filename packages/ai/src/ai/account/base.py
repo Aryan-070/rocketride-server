@@ -319,6 +319,33 @@ class AccountBase(ABC):
         return {'transactions': [], 'total': 0, 'page': page, 'pageSize': page_size}
 
     # =========================================================================
+    # CLOUD DATABASE — SaaS overrides; OSS raises
+    # =========================================================================
+
+    async def resolve_db_dsn(self, client_id: str) -> str:
+        """
+        Resolve the per-tenant database DSN for the RocketRide cloud DB nodes.
+
+        The ``rocketride_sql`` / ``rocketride_vector`` / ``rocketride_graph``
+        nodes take no connection configuration.  Instead of reading
+        host/user/password, they resolve a ready connection string for the
+        caller's own provisioned cloud database, keyed by the authenticated
+        ``client_id`` (``userId``).  One database per tenant backs all three.
+
+        OSS default: raises NotImplementedError — the cloud databases require a
+        RocketRide cloud identity that the open-source build cannot mint.
+        SaaS override: provisions/looks up the tenant DB and returns its DSN.
+
+        Args:
+            client_id: The authenticated connection identity (``userId``).
+
+        Returns:
+            A libpq/SQLAlchemy-compatible PostgreSQL DSN for the tenant DB
+            (e.g. ``postgresql://user:pass@host:5432/db_<tenant>``).
+        """
+        raise NotImplementedError('resolve_db_dsn requires a RocketRide cloud Account implementation')
+
+    # =========================================================================
     # DAP COMMAND DISPATCH — SaaS overrides all three
     # =========================================================================
 
