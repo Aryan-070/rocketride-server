@@ -54,13 +54,19 @@
 	// Optional:
 	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		in the config
 	"fields": {
 		"include": {
-			"description": "This path defines the paths included for Scan, Index, Classify and OCR. By default, its empty.\n\nFormat for Windows : C:\\foldername (for local filesystem) or \\\\file.core.net\\foldername (for shared folders)\n\nFormat for Linux : /file.core.net/foldername"
+			"byMode": {
+				"Source": { "description": "This path defines the paths included for Scan, Index, Classify and OCR. By default, its empty.\n\nFormat for Windows : C:\\foldername (for local filesystem) or \\\\file.core.net\\foldername (for shared folders)\n\nFormat for Linux : /file.core.net/foldername" },
+				"Pipe": { "description": "Example Path: /Users/usr/Documents/product-images/*" }
+			}
 		},
 		"exclude": {
-			"description": "This path defines the paths excluded for Scan, Index, Classify and OCR. By default, its empty.\n\nFormat for Windows : C:\\foldername (for local filesystem) or \\\\file.core.net\\foldername (for shared folders)\n\nFormat for Linux : /file.core.net/foldername"
+			"byMode": {
+				"Source": { "description": "This path defines the paths excluded for Scan, Index, Classify and OCR. By default, its empty.\n\nFormat for Windows : C:\\foldername (for local filesystem) or \\\\file.core.net\\foldername (for shared folders)\n\nFormat for Linux : /file.core.net/foldername" },
+				"Pipe": { "description": "Example Path: /Users/usr/Documents/product-images/*" }
+			}
 		},
 		"excludeExternalDrives": {
 			"title": "Exclude external drives",
@@ -79,34 +85,30 @@
 		},
 		"filesys.source.parameters": {
 			"section": "parameters",
-			"title": "Parameters",
-			"properties": ["excludeExternalDrives", "excludeEnableGlobal", "excludeSymlinks"]
-		},
-		"Pipe.include": {
-			"description": "Example Path: /Users/usr/Documents/product-images/*"
-		},
-		"Pipe.exclude": {
-			"description": "Example Path: /Users/usr/Documents/product-images/*"
-		},
-		"Pipe.filesys.source.parameters": {
-			"section": "parameters",
-			"properties": ["excludeExternalDrives", "excludeEnableGlobal", "excludeSymlinks"]
+			"properties": ["excludeExternalDrives", "excludeEnableGlobal", "excludeSymlinks"],
+			"byMode": {
+				"Source": { "title": "Parameters" }
+			}
 		}
 	},
 	//
+	// Optional:
+	//		Per-section titles; a section title defaults to the node title
+	//		when not listed here
+	//
+	"sections": { "Source": "File System", "Pipe": "File System" },
+	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		may be specified, or both, but at least one is required
-	"shape": [
-		{
-			"section": "Source",
-			"title": "File System",
-			"properties": ["type", "actions", "source.mode", "filesys.source.parameters", "include", "exclude", "estimation"]
-		},
-		{
-			"section": "Pipe",
-			"title": "File System",
-			"properties": ["type", "actions", "source.mode", "Pipe.filesys.source.parameters", "Pipe.include", "Pipe.exclude"]
-		}
+	//		Defines the fields of the service as an ordered list. Each entry
+	//		references a field by name, or defines one inline
+	//
+	"config": [
+		"type",
+		"actions",
+		"source.mode",
+		"filesys.source.parameters",
+		"include",
+		"exclude",
+		{ "field": "estimation", "modes": "Source" }
 	]
 }

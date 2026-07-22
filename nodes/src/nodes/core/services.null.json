@@ -46,7 +46,7 @@
 	// Optional:
 	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		in the config
 	"fields": {
 		"null.source.parameters": {
 			"section": "parameters",
@@ -60,19 +60,22 @@
 		}
 	},
 	//
+	// Optional:
+	//		Per-section titles; a section title defaults to the node title
+	//		when not listed here
+	//
+	"sections": { "Source": "Null Source", "Target": "Null Target" },
+	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
-	"shape": [
-		{
-			"section": "Source",
-			"title": "Null Source",
-			"properties": ["type", "actions", "source.mode", "null.source.parameters"]
-		},
-		{
-			"section": "Target",
-			"title": "Null Target",
-			"properties": ["type", "target.mode", "null.target.parameters"]
-		}
+	//		Defines the fields of the service as an ordered list. Each entry
+	//		references a field by name, or defines one inline
+	//
+	"config": [
+		"type",
+		{ "field": "actions", "modes": "Source" },
+		{ "field": "source.mode", "modes": "Source" },
+		{ "field": "null.source.parameters", "modes": "Source" },
+		{ "field": "target.mode", "modes": "Target" },
+		{ "field": "null.target.parameters", "modes": "Target" }
 	]
 }

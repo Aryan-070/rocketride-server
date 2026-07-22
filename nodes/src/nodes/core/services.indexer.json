@@ -32,22 +32,9 @@
 	//
 	"prefix": "Indexer",
 	//
-	//	Optional:
-	//		Profile section are configuration optoins used by the driver
-	//		itself
-	//
-	"preconfig": {},
-	//
-	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
-	//
-	"fields": {},
-	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
+	//		Defines the fields of the service as an ordered list. Each entry
+	//		references a field by name, or defines one inline
 	//
-	"shape": []
+	"config": []
 }

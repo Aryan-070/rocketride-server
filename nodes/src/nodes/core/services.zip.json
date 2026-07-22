@@ -40,7 +40,7 @@
 	// Optional:
 	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		in the config
 	//
 	"fields": {
 		"zip.target.parameters": {
@@ -49,15 +49,15 @@
 		}
 	},
 	//
-	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
+	// Optional:
+	//		Per-section titles; a section title defaults to the node title
+	//		when not listed here
 	//
-	"shape": [
-		{
-			"section": "Target",
-			"title": "Zip Stream",
-			"properties": ["type", "zip.target.parameters"]
-		}
-	]
+	"sections": { "Target": "Zip Stream" },
+	//
+	// Required:
+	//		Defines the fields of the service as an ordered list. Each entry
+	//		references a field by name, or defines one inline
+	//
+	"config": ["type", "zip.target.parameters"]
 }

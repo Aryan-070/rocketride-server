@@ -46,33 +46,15 @@
 		"tags": ["tags"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration optoins used by the driver
-	//		itself
-	//
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {}
-		}
-	},
-	//
 	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		Per-section titles; a section title defaults to the node title
+	//		when not listed here
 	//
-	"fields": {},
+	"sections": { "Pipe": "Fingerprint" },
 	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
+	//		Defines the fields of the service as an ordered list. Each entry
+	//		references a field by name, or defines one inline
 	//
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Fingerprint",
-			"properties": []
-		}
-	]
+	"config": []
 }
