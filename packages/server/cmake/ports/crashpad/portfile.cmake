@@ -127,6 +127,12 @@ elseif(VCPKG_TARGET_IS_LINUX)
     # Force lld: gn's default (system ld.bfd) can emit a broken DT_INIT that makes
     # crashpad_handler SIGSEGV in _init before main. lld is always installed on
     # Linux here (compiler-unix.sh), so a missing-lld build error beats that crash.
+    #
+    # Note: the handler's rpath is NOT settable from here — vcpkg rewrites the rpath
+    # of every installed ELF with `patchelf --set-rpath` after this portfile returns,
+    # which always yields a DT_RUNPATH. Because RUNPATH is not consulted for a
+    # dependency's own dependencies, the staging step re-points it at DT_RPATH; see
+    # makeSetupRuntimeLibsAction in packages/server/scripts/tasks.js.
     set(OPTIONS_DBG "${OPTIONS_DBG} \
         extra_cflags_c=\"${VCPKG_COMBINED_C_FLAGS_DEBUG}\" \
         extra_cflags_cc=\"${VCPKG_COMBINED_CXX_FLAGS_DEBUG}\" \

@@ -505,6 +505,34 @@ async function copyClangRuntimeLibs(options = {}) {
 	return { copied: false, reason: `No clang runtime libs found (checked ${tarballDirs.join(', ')})` };
 }
 
+// vcpkg rewrites the rpath of every installed ELF with `patchelf --set-rpath`,
+// which always emits a DT_RUNPATH. RUNPATH is not consulted when resolving a
+// dependency's OWN dependencies, so crashpad_handler's RUNPATH found the staged
+// libc++/libc++abi but not the libunwind.so.1 they in turn need — the loader fell
+// back to the system paths for that one. Distros that ship a libunwind (Ubuntu,
+// Fedora) hid the bug; EL10 ships none, so the handler died at exec with
+// "libunwind.so.1: cannot open shared object file", crashpad captured nothing, and
+// the crash never produced a minidump. DT_RPATH *is* inherited by transitive
+// lookups (it is what engine/aptest already use), so convert the handler over.
+async function forceRpath(elfFile) {
+	// vcpkg acquires patchelf itself to run that fixup, so on Linux it is always in
+	// the build tree; fall back to a system one for a dist tree built elsewhere.
+	const [vcpkgPatchelf] = await glob('downloads/tools/patchelf/*/bin/patchelf', { cwd: VCPKG_DIR, absolute: true });
+	const patchelf = vcpkgPatchelf ?? 'patchelf';
+	const name = path.basename(elfFile);
+
+	try {
+		const printed = await execCommand(patchelf, ['--print-rpath', elfFile], { silent: true, collect: true });
+		const rpath = printed.trim();
+		if (!rpath) return { patched: false, reason: `${name} has no rpath to convert` };
+
+		await execCommand(patchelf, ['--force-rpath', '--set-rpath', rpath, elfFile], { silent: true, collect: true });
+		return { patched: true, rpath };
+	} catch (err) {
+		return { patched: false, reason: `patchelf failed on ${name}: ${err.message}` };
+	}
+}
+
 // =============================================================================
 // Action Factories
 // =============================================================================
@@ -780,6 +808,15 @@ function makeSetupRuntimeLibsAction(options = {}) {
 					const src = path.join(DIST_DIR, 'lib', name);
 					if (await exists(src)) await copyFile(src, path.join(DIST_DIR, name));
 				}
+			}
+
+			// vcpkg leaves the handler with a DT_RUNPATH, which the loader does not
+			// apply to libc++abi's own libunwind.so.1 — fatal on distros without a
+			// system libunwind (RHEL/EL). Convert it to a DT_RPATH, which is.
+			const handler = path.join(DIST_DIR, 'crashpad_handler');
+			if (await exists(handler)) {
+				const rpath = await forceRpath(handler);
+				if (!rpath.patched) console.warn(`WARNING: crashpad_handler rpath not converted — ${rpath.reason}`);
 			}
 		},
 	};
