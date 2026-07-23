@@ -20,6 +20,9 @@ class FakeEngineClient:
         task_statuses=None,
         public_token='pub-1',
         base_url='http://localhost:5565',
+        fs_stat_result=None,
+        fs_get_url_result='https://signed.example/f?sig=abc',
+        deploy_status_result=None,
     ):
         self._tasks = (
             tasks
@@ -44,6 +47,20 @@ class FakeEngineClient:
         self.deploys_added = []
         self.list_tasks_calls = 0
         self.deploy_list_calls = 0
+        self._fs_stat_result = (
+            fs_stat_result
+            if fs_stat_result is not None
+            else {'exists': True, 'type': 'file', 'size': 12, 'modified': 1700000000}
+        )
+        self._fs_get_url_result = fs_get_url_result
+        self._deploy_status_result = (
+            deploy_status_result if deploy_status_result is not None else {'project_id': 'dep-1', 'state': 'active'}
+        )
+        self.fs_stat_calls = []
+        self.fs_get_url_calls = []
+        self.deploy_status_calls = []
+        self.deploy_removed = []
+        self.deploy_updated = []
 
         # -- introspection (list_components / describe_component / validate) --
         self._services = (
@@ -155,6 +172,24 @@ class FakeEngineClient:
         if isinstance(response, type) and issubclass(response, BaseException):
             raise response()
         return dict(response)
+
+    async def fs_stat(self, path):
+        self.fs_stat_calls.append(path)
+        return dict(self._fs_stat_result)
+
+    async def fs_get_url(self, path, expires_in=3600, download_name=None):
+        self.fs_get_url_calls.append({'path': path, 'expires_in': expires_in, 'download_name': download_name})
+        return self._fs_get_url_result
+
+    async def deploy_status(self, project_id):
+        self.deploy_status_calls.append(project_id)
+        return dict(self._deploy_status_result)
+
+    async def deploy_remove(self, project_id):
+        self.deploy_removed.append(project_id)
+
+    async def deploy_update(self, project_id, pipeline=None, schedule=None):
+        self.deploy_updated.append({'project_id': project_id, 'pipeline': pipeline, 'schedule': schedule})
 
 
 @pytest.fixture

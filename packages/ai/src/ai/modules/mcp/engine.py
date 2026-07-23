@@ -40,6 +40,13 @@ class EngineClient(Protocol):
     async def deploy_add(self, pipeline: dict, schedule: Optional[str] = None) -> Dict[str, Any]: ...
     async def deploy_list(self) -> List[Dict[str, Any]]: ...
     async def get_task_status(self, token: str) -> Dict[str, Any]: ...
+    async def fs_stat(self, path: str) -> Dict[str, Any]: ...
+    async def fs_get_url(self, path: str, expires_in: int = 3600, download_name: Optional[str] = None) -> str: ...
+    async def deploy_status(self, project_id: str) -> Dict[str, Any]: ...
+    async def deploy_remove(self, project_id: str) -> None: ...
+    async def deploy_update(
+        self, project_id: str, pipeline: Optional[dict] = None, schedule: Optional[str] = None
+    ) -> None: ...
 
 
 class WsEngineClient:
@@ -168,6 +175,28 @@ class WsEngineClient:
     async def get_task_status(self, token: str) -> Dict[str, Any]:
         await self._ensure_connected()
         return await self._client.get_task_status(token)
+
+    async def fs_stat(self, path: str) -> Dict[str, Any]:
+        await self._ensure_connected()
+        return await self._client.fs_stat(path)
+
+    async def fs_get_url(self, path: str, expires_in: int = 3600, download_name: Optional[str] = None) -> str:
+        await self._ensure_connected()
+        return await self._client.fs_get_url(path, expires_in=expires_in, download_name=download_name)
+
+    async def deploy_status(self, project_id: str) -> Dict[str, Any]:
+        await self._ensure_connected()
+        return await self._client.deploy.status(project_id)
+
+    async def deploy_remove(self, project_id: str) -> None:
+        await self._ensure_connected()
+        await self._client.deploy.remove(project_id)
+
+    async def deploy_update(
+        self, project_id: str, pipeline: Optional[dict] = None, schedule: Optional[str] = None
+    ) -> None:
+        await self._ensure_connected()
+        await self._client.deploy.update(project_id, pipeline=pipeline, schedule=schedule)
 
 
 def make_engine_client(config: Dict[str, Any]) -> EngineClient:

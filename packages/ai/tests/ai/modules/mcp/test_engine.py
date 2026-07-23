@@ -29,6 +29,9 @@ class _FakeDeployApi:
     def __init__(self) -> None:
         self.add_calls = []
         self.list_calls = 0
+        self.status_calls = []
+        self.remove_calls = []
+        self.update_calls = []
 
     async def add(self, pipeline, *, schedule=None) -> dict:
         self.add_calls.append({'pipeline': pipeline, 'schedule': schedule})
@@ -37,6 +40,16 @@ class _FakeDeployApi:
     async def list(self) -> list:
         self.list_calls += 1
         return [{'project_id': 'dep-1'}]
+
+    async def status(self, project_id) -> dict:
+        self.status_calls.append(project_id)
+        return {'project_id': project_id, 'state': 'active'}
+
+    async def remove(self, project_id) -> None:
+        self.remove_calls.append(project_id)
+
+    async def update(self, project_id, *, pipeline=None, schedule=None) -> None:
+        self.update_calls.append({'project_id': project_id, 'pipeline': pipeline, 'schedule': schedule})
 
 
 class _FakeUnderlyingClient:
@@ -58,6 +71,8 @@ class _FakeUnderlyingClient:
         self.save_template_calls = []
         self.get_template_calls = []
         self.get_task_status_calls = []
+        self.fs_stat_calls = []
+        self.fs_get_url_calls = []
         self.deploy = _FakeDeployApi()
 
     async def connect(self) -> None:
@@ -127,6 +142,14 @@ class _FakeUnderlyingClient:
     async def get_task_status(self, token: str) -> dict:
         self.get_task_status_calls.append(token)
         return {'state': 5, 'completed': True}
+
+    async def fs_stat(self, path: str) -> dict:
+        self.fs_stat_calls.append(path)
+        return {'exists': True, 'type': 'file', 'size': 12, 'modified': 1700000000}
+
+    async def fs_get_url(self, path: str, expires_in: int = 3600, download_name: str = None) -> str:
+        self.fs_get_url_calls.append({'path': path, 'expires_in': expires_in, 'download_name': download_name})
+        return 'https://signed.example/f?sig=abc'
 
 
 def _make_client_with_fake(monkeypatch):
@@ -355,6 +378,71 @@ async def test_get_task_status_calls_sdk_with_token(monkeypatch):
 
     assert fake.get_task_status_calls == ['tok-3']
     assert result == {'state': 5, 'completed': True}
+
+
+async def test_fs_stat_calls_sdk_with_path(monkeypatch):
+    client, fake = _make_client_with_fake(monkeypatch)
+
+    result = await client.fs_stat('a/b.txt')
+
+    assert fake.fs_stat_calls == ['a/b.txt']
+    assert result == {'exists': True, 'type': 'file', 'size': 12, 'modified': 1700000000}
+
+
+async def test_fs_get_url_passes_expires_in_and_download_name(monkeypatch):
+    client, fake = _make_client_with_fake(monkeypatch)
+
+    result = await client.fs_get_url('a/b.txt', expires_in=60, download_name='x.txt')
+
+    assert fake.fs_get_url_calls == [{'path': 'a/b.txt', 'expires_in': 60, 'download_name': 'x.txt'}]
+    assert result == 'https://signed.example/f?sig=abc'
+
+
+async def test_fs_get_url_defaults_expires_in_and_download_name(monkeypatch):
+    client, fake = _make_client_with_fake(monkeypatch)
+
+    await client.fs_get_url('a/b.txt')
+
+    assert fake.fs_get_url_calls == [{'path': 'a/b.txt', 'expires_in': 3600, 'download_name': None}]
+
+
+async def test_deploy_status_calls_sdk_namespace(monkeypatch):
+    """Footgun: seam calls client.deploy.status(project_id) (sub-API), not a top-level method."""
+    client, fake = _make_client_with_fake(monkeypatch)
+
+    result = await client.deploy_status('dep-1')
+
+    assert fake.deploy.status_calls == ['dep-1']
+    assert result == {'project_id': 'dep-1', 'state': 'active'}
+
+
+async def test_deploy_remove_calls_sdk_namespace(monkeypatch):
+    """Footgun: seam calls client.deploy.remove(project_id) (sub-API), not a top-level method."""
+    client, fake = _make_client_with_fake(monkeypatch)
+
+    result = await client.deploy_remove('dep-1')
+
+    assert fake.deploy.remove_calls == ['dep-1']
+    assert result is None
+
+
+async def test_deploy_update_passes_pipeline_and_schedule_as_keywords(monkeypatch):
+    """Footgun: client.deploy.update(project_id, pipeline=..., schedule=...) — keyword-only kwargs."""
+    client, fake = _make_client_with_fake(monkeypatch)
+    pipeline = {'components': []}
+
+    result = await client.deploy_update('dep-1', pipeline=pipeline, schedule='0 * * * *')
+
+    assert fake.deploy.update_calls == [{'project_id': 'dep-1', 'pipeline': pipeline, 'schedule': '0 * * * *'}]
+    assert result is None
+
+
+async def test_deploy_update_defaults_pipeline_and_schedule_to_none(monkeypatch):
+    client, fake = _make_client_with_fake(monkeypatch)
+
+    await client.deploy_update('dep-1')
+
+    assert fake.deploy.update_calls == [{'project_id': 'dep-1', 'pipeline': None, 'schedule': None}]
 
 
 def test_base_url_normalizes_scheme_and_strips_trailing_slash():
