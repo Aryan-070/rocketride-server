@@ -471,6 +471,44 @@ async def test_run_dropper_pipe_subscribe_failure_is_best_effort(fake_engine, mo
 
 
 @pytest.mark.asyncio
+async def test_run_pipeline_pipeline_trace_level_none_does_not_subscribe(fake_engine):
+    """'none' is a truthy string in the enum but means "don't trace" -- must
+    not gate the subscribe truthiness check on, only on `not in (None, 'none')`.
+    """
+    registry = ToolRegistry()
+    execution.register(registry)
+    tasks = TaskRegistry()
+
+    result = await registry.handler('run_pipeline')(
+        fake_engine, tasks, {'filepath': 'p.pipe', 'pipelineTraceLevel': 'none'}
+    )
+
+    assert result['ok'] is True
+    assert 'flow_subscribed' not in result
+    assert fake_engine.add_monitor_calls == []
+    assert not tasks.is_flow_subscribed(fake_engine._token)
+    # 'none' is still forwarded to use() -- the engine understands it as explicit no-trace.
+    assert fake_engine.used == [{'filepath': 'p.pipe', 'pipelineTraceLevel': 'none'}]
+
+
+@pytest.mark.asyncio
+async def test_run_dropper_pipe_pipeline_trace_level_none_does_not_subscribe(fake_engine):
+    registry = ToolRegistry()
+    execution.register(registry)
+    tasks = TaskRegistry()
+
+    result = await registry.handler('run_dropper_pipe')(
+        fake_engine, tasks, {'filepath': 'p.pipe', 'pipelineTraceLevel': 'none'}
+    )
+
+    assert result['ok'] is True
+    assert 'flow_subscribed' not in result
+    assert fake_engine.add_monitor_calls == []
+    assert not tasks.is_flow_subscribed(fake_engine._token)
+    assert fake_engine.used == [{'filepath': 'p.pipe', 'pipelineTraceLevel': 'none'}]
+
+
+@pytest.mark.asyncio
 async def test_run_pipeline_inline_send_removes_token_but_flow_still_drainable(fake_engine):
     """One-shot inline-send run: the token is removed from `_tasks` (#1) but
     the flow buffer must survive so trace events remain drainable after.

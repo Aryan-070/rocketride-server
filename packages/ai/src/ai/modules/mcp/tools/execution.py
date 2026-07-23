@@ -145,7 +145,7 @@ async def _run_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
 
     result_payload: Dict[str, Any] = {'ok': True, 'task_token': token}
 
-    if args.get('pipelineTraceLevel'):
+    if args.get('pipelineTraceLevel') not in (None, 'none'):
         tasks.set_flow_id(token, (started or {}).get('id'))
         try:
             await client.add_monitor({'token': token}, ['flow'])
@@ -220,7 +220,7 @@ async def _run_dropper_pipe(client, tasks, args: Dict[str, Any]) -> dict:
         'dropper_url': f'{client.base_url}/dropper?auth={public_token}',
     }
 
-    if args.get('pipelineTraceLevel'):
+    if args.get('pipelineTraceLevel') not in (None, 'none'):
         tasks.set_flow_id(token, started.get('id'))
         try:
             await client.add_monitor({'token': token}, ['flow'])
