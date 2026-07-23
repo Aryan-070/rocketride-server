@@ -29,7 +29,7 @@ async def test_webserver_use_mcp_does_not_raise_and_mounts_route(monkeypatch, fa
     from ai.web.server import WebServer
     import ai.modules.mcp as mcp_module
 
-    monkeypatch.setattr(mcp_module, 'make_engine_client', lambda cfg: fake_engine)
+    monkeypatch.setattr(mcp_module, 'make_engine_client', lambda cfg, on_event=None: fake_engine)
 
     server = WebServer()
     server.use('mcp', {'mcp_dev_no_auth': True})

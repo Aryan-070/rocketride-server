@@ -9,7 +9,8 @@ from starlette.routing import Mount
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
 from .engine import make_engine_client
-from .handlers import build_mcp_server
+from .handlers import build_mcp_server, make_flow_dispatcher
+from .registry import TaskRegistry
 
 _MOUNT_PATH = '/mcp'
 
@@ -30,7 +31,17 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
             - ``mcp_dev_no_auth`` (bool): skip auth for ``/mcp`` in dev.
     """
     # ------------------------------------------------------------------
-    # 1. Lazy-singleton engine factory
+    # 1. Hoisted TaskRegistry + flow-event dispatcher
+    # Created before the engine factory so the dispatcher can be threaded
+    # through as `on_event` on first (lazy) engine-client construction, and
+    # the same registry instance is handed to build_mcp_server below —
+    # tools and the dispatcher must share one registry.
+    # ------------------------------------------------------------------
+    task_registry = TaskRegistry()
+    dispatcher = make_flow_dispatcher(task_registry)
+
+    # ------------------------------------------------------------------
+    # 2. Lazy-singleton engine factory
     # Deferring make_engine_client means missing ROCKETRIDE_URI/AUTH env
     # vars don't raise ValueError at engine boot — only on first request.
     # ------------------------------------------------------------------
@@ -38,13 +49,13 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
 
     def engine_factory() -> Any:
         if _state['client'] is None:
-            _state['client'] = make_engine_client(config)
+            _state['client'] = make_engine_client(config, on_event=dispatcher)
         return _state['client']
 
     # ------------------------------------------------------------------
-    # 2. Build MCP server + stateless StreamableHTTP session manager
+    # 3. Build MCP server + stateless StreamableHTTP session manager
     # ------------------------------------------------------------------
-    mcp_server = build_mcp_server(engine_factory)
+    mcp_server = build_mcp_server(engine_factory, task_registry)
 
     session_manager = StreamableHTTPSessionManager(
         app=mcp_server,
@@ -54,7 +65,7 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     )
 
     # ------------------------------------------------------------------
-    # 3. Mount the raw ASGI handler at /mcp
+    # 4. Mount the raw ASGI handler at /mcp
     # app.add_api_route / add_route expect FastAPI callables with Request
     # signatures; a raw ASGI app must be mounted via starlette.routing.Mount.
     # ------------------------------------------------------------------
@@ -64,7 +75,7 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     server.app.router.routes.append(Mount(_MOUNT_PATH, app=handle_mcp))
 
     # ------------------------------------------------------------------
-    # 4. Session-manager lifespan + engine-client teardown
+    # 5. Session-manager lifespan + engine-client teardown
     #
     # Strategy: register via app.router.add_event_handler for the
     # FakeServer case (no custom lifespan → router events fire).
@@ -125,7 +136,7 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
         server._user_shutdown = _chained_shutdown
 
     # ------------------------------------------------------------------
-    # 5. Auth seam
+    # 6. Auth seam
     # Dev bypass: mark /mcp public so AuthMiddleware skips it.
     # Real WebServer: _public_paths is the backing list; we append and
     #   invalidate the compiled-regex cache.

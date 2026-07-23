@@ -190,3 +190,111 @@ async def test_read_status_resource_calls_list_tasks(fake_engine):
     )
 
     assert fake_engine.list_tasks_calls == 1
+
+
+# --- make_flow_dispatcher -----------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_flow_dispatcher_routes_apaevt_flow_event_into_registry():
+    import ai.modules.mcp.handlers as handlers_mod
+    from ai.modules.mcp.registry import TaskRegistry
+
+    tasks = TaskRegistry()
+    tasks.set_flow_id('tok-1', 'flow-123')
+    dispatcher = handlers_mod.make_flow_dispatcher(tasks)
+
+    await dispatcher(
+        {
+            'event': 'apaevt_flow',
+            'body': {
+                '__id': 'flow-123',
+                'id': 'pipe-1',
+                'op': 'start',
+                'pipes': ['a'],
+                'trace': {'x': 1},
+                'source': 'src',
+            },
+        }
+    )
+
+    events = tasks.flow_since('tok-1')['events']
+    assert len(events) == 1
+    assert events[0]['pipe'] == 'pipe-1'
+    assert events[0]['op'] == 'start'
+    assert events[0]['pipes'] == ['a']
+    assert events[0]['trace'] == {'x': 1}
+    assert events[0]['source'] == 'src'
+
+
+@pytest.mark.asyncio
+async def test_flow_dispatcher_ignores_non_flow_event():
+    import ai.modules.mcp.handlers as handlers_mod
+    from ai.modules.mcp.registry import TaskRegistry
+
+    tasks = TaskRegistry()
+    tasks.set_flow_id('tok-1', 'flow-123')
+    dispatcher = handlers_mod.make_flow_dispatcher(tasks)
+
+    await dispatcher({'event': 'apaevt_other', 'body': {'__id': 'flow-123'}})
+
+    assert tasks.flow_since('tok-1')['events'] == []
+
+
+@pytest.mark.asyncio
+async def test_flow_dispatcher_ignores_message_with_no_body():
+    import ai.modules.mcp.handlers as handlers_mod
+    from ai.modules.mcp.registry import TaskRegistry
+
+    tasks = TaskRegistry()
+    tasks.set_flow_id('tok-1', 'flow-123')
+    dispatcher = handlers_mod.make_flow_dispatcher(tasks)
+
+    # Must not raise even with no `body` key at all.
+    await dispatcher({'event': 'apaevt_flow'})
+
+    assert tasks.flow_since('tok-1')['events'] == []
+
+
+@pytest.mark.asyncio
+async def test_flow_dispatcher_ignores_body_with_missing_flow_id():
+    import ai.modules.mcp.handlers as handlers_mod
+    from ai.modules.mcp.registry import TaskRegistry
+
+    tasks = TaskRegistry()
+    tasks.set_flow_id('tok-1', 'flow-123')
+    dispatcher = handlers_mod.make_flow_dispatcher(tasks)
+
+    await dispatcher({'event': 'apaevt_flow', 'body': {'id': 'pipe-1'}})
+
+    assert tasks.flow_since('tok-1')['events'] == []
+
+
+# --- build_mcp_server honoring an externally-created registry ----------------
+
+
+@pytest.mark.asyncio
+async def test_build_mcp_server_uses_passed_in_task_registry(monkeypatch, fake_engine):
+    import ai.modules.mcp.handlers as handlers_mod
+    import mcp.types as types
+    from ai.modules.mcp.registry import TaskRegistry
+
+    tasks = TaskRegistry()
+    tasks.add('preexisting-token', pipeline_ref='/tmp/a.pipe')
+
+    def _register_all(registry):
+        @registry.register('registry_probe', 'desc', _dummy_schema())
+        async def _handler(client, tasks_arg, args):
+            return {'sees_preexisting': tasks_arg.get('preexisting-token') is not None}
+
+    monkeypatch.setattr(handlers_mod.tools_pkg, 'register_all', _register_all)
+
+    server = handlers_mod.build_mcp_server(lambda: fake_engine, task_registry=tasks)
+    handler = server.request_handlers[types.CallToolRequest]
+    req = types.CallToolRequest(
+        method='tools/call', params=types.CallToolRequestParams(name='registry_probe', arguments={})
+    )
+    result = await handler(req)
+
+    payload = json.loads(result.root.content[0].text)
+    assert payload == {'sees_preexisting': True}
