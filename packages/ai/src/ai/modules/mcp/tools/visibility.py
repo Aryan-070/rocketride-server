@@ -1,5 +1,5 @@
 # Copyright 2026 Aparavi Software AG. MIT License.
-"""Visibility tool: `monitor`.
+"""Visibility tools: `monitor`, `list_running_pipelines`.
 
 **REDESIGNED from the original event-streaming design.** The design (see
 tool-specs.md Visibility section) originally specified `monitor` as
@@ -39,6 +39,11 @@ On a terminal state, `monitor` also removes the token from the server-owned
 `TaskRegistry` (`tasks.remove(token)`) -- once a task is terminal there is
 nothing left to poll or terminate, and leaving it registered would leak
 memory for the life of the process (see `registry.py`).
+
+`list_running_pipelines` is a thin wrapper over the pre-existing
+`client.list_tasks()` seam (the same one backing the `rocketride://status`
+resource) -- server-authoritative, so it reflects reality identically
+whether the connected engine is local or cloud.
 """
 
 import asyncio
@@ -145,8 +150,13 @@ async def _monitor(client, tasks, args: Dict[str, Any]) -> dict:
         await asyncio.sleep(interval)
 
 
+async def _list_running_pipelines(client, tasks, args: Dict[str, Any]) -> dict:
+    running = await client.list_tasks()
+    return {'ok': True, 'tasks': running, 'count': len(running)}
+
+
 def register(registry: ToolRegistry) -> None:
-    """Register the visibility tool (`monitor`) against ``registry``."""
+    """Register the visibility tools (`monitor`, `list_running_pipelines`) against ``registry``."""
     registry.register(
         'monitor',
         'Poll a running pipeline task (by task_token) until it reaches a terminal state or the '
@@ -154,3 +164,9 @@ def register(registry: ToolRegistry) -> None:
         'reach a terminal state -- the snapshot returned at timeout has terminal=false.',
         _MONITOR_SCHEMA,
     )(_monitor)
+    registry.register(
+        'list_running_pipelines',
+        'List running pipelines on the connected server with their task tokens, names, and state. '
+        'Use the tokens with monitor, send_data, or terminate.',
+        {'type': 'object', 'properties': {}},
+    )(_list_running_pipelines)

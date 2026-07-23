@@ -28,9 +28,9 @@ def register_all(registry: ToolRegistry) -> None:
     (`run_pipeline`, `send_data`, `terminate`, `send_files`), the capability
     tools (`store_read`, `store_list`, `store_stat`, `store_get_url`,
     `save_template`, `load_template`, `deploy_add`, `deploy_list`,
-    `deploy_status`, `deploy_remove`, `deploy_update`), the visibility tool
-    (`monitor`), and the convenience query tools (`sql_query`, `graph_query`,
-    `vector_search`).
+    `deploy_status`, `deploy_remove`, `deploy_update`), the visibility tools
+    (`monitor`, `list_running_pipelines`), and the convenience query tools
+    (`sql_query`, `graph_query`, `vector_search`).
     """
     introspection.register(registry)
     execution.register(registry)

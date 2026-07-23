@@ -43,12 +43,12 @@ def test_visibility_register_binds_handler_directly():
     assert registry.handler('monitor') is not None
 
 
-def test_register_all_yields_twenty_four_tools_total():
+def test_register_all_yields_twenty_five_tools_total():
     registry = ToolRegistry()
 
     register_all(registry)
 
-    assert len(registry.names()) == 24
+    assert len(registry.names()) == 25
 
 
 # --- monitor -------------------------------------------------------------
@@ -235,3 +235,26 @@ async def test_monitor_single_poll_timeout_returns_current_snapshot_not_hard_err
     assert fake_engine.get_task_status_calls == ['tok-1']
     # Not terminal -- the token must remain registered.
     assert tasks.get('tok-1') is not None
+
+
+# --- list_running_pipelines ---------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_running_pipelines_returns_tasks(fake_engine):
+    registry = ToolRegistry()
+    visibility.register(registry)
+
+    result = await registry.handler('list_running_pipelines')(fake_engine, None, {})
+
+    assert result['ok'] is True
+    assert result['count'] == len(result['tasks'])
+    assert result['tasks'][0]['token']
+
+
+def test_list_running_pipelines_registered():
+    registry = ToolRegistry()
+
+    visibility.register(registry)
+
+    assert 'list_running_pipelines' in set(registry.names())

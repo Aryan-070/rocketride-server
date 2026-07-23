@@ -140,6 +140,7 @@ async def test_list_tools_reflects_real_register_all(fake_engine):
         'deploy_remove',
         'deploy_update',
         'monitor',
+        'list_running_pipelines',
         'sql_query',
         'graph_query',
         'vector_search',
