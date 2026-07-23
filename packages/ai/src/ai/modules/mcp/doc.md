@@ -298,12 +298,12 @@ design in `claude/tasks/rocketride-mcp-server/` via
 `claude/tasks/http-mcp-tools-port/`. The dynamic per-pipeline tools, the convenience
 tool, `rocketride://nodes`, and all 3 prompts are removed.
 
-The surface then grew to today's **25 tools**: the 3 `sql_query`/`graph_query`/
-`vector_search` query tools landed first (16 → 19); `set_env`/`list_env_keys` were
-then dropped as out of scope (19 → 17); and `store_stat`, `store_get_url`,
-`deploy_list`, `deploy_status`, `deploy_remove`, `deploy_update`, and
-`list_running_pipelines` were added to round out store/deployment/visibility
-lifecycles (17 → 25). `get_pipeline_trace` was designed as part of the same pass but
+The surface then grew to today's **25 tools**: `run_dropper_pipe` landed with the
+ingress work (16 → 17); the 3 `sql_query`/`graph_query`/`vector_search` query tools
+followed (17 → 20); `set_env`/`list_env_keys` were then dropped as out of scope
+(20 → 18); and `store_stat`, `store_get_url`, `deploy_list`, `deploy_status`,
+`deploy_remove`, `deploy_update`, and `list_running_pipelines` were added to round
+out store/deployment/visibility lifecycles (18 → 25). `get_pipeline_trace` was designed as part of the same pass but
 deferred (see Query above and `claude/tasks/http-mcp-tools-port/final-tool-surface.md`
 for the definitive 26-tool target and per-tool rationale).
 
