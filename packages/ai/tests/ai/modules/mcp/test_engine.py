@@ -73,6 +73,7 @@ class _FakeUnderlyingClient:
         self.get_task_status_calls = []
         self.fs_stat_calls = []
         self.fs_get_url_calls = []
+        self.add_monitor_calls = []
         self.deploy = _FakeDeployApi()
 
     async def connect(self) -> None:
@@ -150,6 +151,9 @@ class _FakeUnderlyingClient:
     async def fs_get_url(self, path: str, expires_in: int = 3600, download_name: str = None) -> str:
         self.fs_get_url_calls.append({'path': path, 'expires_in': expires_in, 'download_name': download_name})
         return 'https://signed.example/f?sig=abc'
+
+    async def add_monitor(self, key: dict, types: list) -> None:
+        self.add_monitor_calls.append({'key': key, 'types': types})
 
 
 def _make_client_with_fake(monkeypatch):
@@ -451,3 +455,59 @@ def test_base_url_normalizes_scheme_and_strips_trailing_slash():
     assert WsEngineClient(uri='ws://localhost:5565/', auth='k').base_url == 'http://localhost:5565'
     assert WsEngineClient(uri='wss://host/', auth='k').base_url == 'https://host'
     assert WsEngineClient(uri='http://localhost:5565', auth='k').base_url == 'http://localhost:5565'
+
+
+def test_ctor_forwards_on_event_to_sdk_client(monkeypatch):
+    """WsEngineClient must forward `on_event` through to the RocketRideClient ctor."""
+    import ai.modules.mcp.engine as engine_module
+
+    captured_kwargs = {}
+
+    class _FakeRocketRideClient:
+        def __init__(self, **kwargs):
+            captured_kwargs.update(kwargs)
+
+    import rocketride
+
+    monkeypatch.setattr(rocketride, 'RocketRideClient', _FakeRocketRideClient)
+
+    def _on_event(event):  # pragma: no cover - identity/passthrough check only
+        pass
+
+    engine_module.WsEngineClient(uri='ws://localhost:5565', auth='test-auth', on_event=_on_event)
+
+    assert captured_kwargs.get('on_event') is _on_event
+
+
+async def test_add_monitor_calls_sdk_with_key_and_types(monkeypatch):
+    client, fake = _make_client_with_fake(monkeypatch)
+
+    result = await client.add_monitor({'token': 'tk-1'}, ['flow'])
+
+    assert fake.add_monitor_calls == [{'key': {'token': 'tk-1'}, 'types': ['flow']}]
+    assert result is None
+
+
+def test_make_engine_client_forwards_on_event(monkeypatch):
+    """make_engine_client must forward `on_event` through to WsEngineClient (and the SDK ctor)."""
+    from ai.modules.mcp.engine import make_engine_client
+
+    monkeypatch.setenv('ROCKETRIDE_URI', 'ws://localhost:5565')
+    monkeypatch.setenv('ROCKETRIDE_AUTH', 'k')
+
+    captured_kwargs = {}
+
+    class _FakeRocketRideClient:
+        def __init__(self, **kwargs):
+            captured_kwargs.update(kwargs)
+
+    import rocketride
+
+    monkeypatch.setattr(rocketride, 'RocketRideClient', _FakeRocketRideClient)
+
+    def _on_event(event):  # pragma: no cover - identity/passthrough check only
+        pass
+
+    make_engine_client({}, on_event=_on_event)
+
+    assert captured_kwargs.get('on_event') is _on_event

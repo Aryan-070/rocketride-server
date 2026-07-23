@@ -61,6 +61,7 @@ class FakeEngineClient:
         self.deploy_status_calls = []
         self.deploy_removed = []
         self.deploy_updated = []
+        self.add_monitor_calls = []
 
         # -- introspection (list_components / describe_component / validate) --
         self._services = (
@@ -125,7 +126,7 @@ class FakeEngineClient:
 
     async def use(self, **kwargs):
         self.used.append(kwargs)
-        return {'token': self._token, 'publicToken': self._public_token, **kwargs}
+        return {'token': self._token, 'publicToken': self._public_token, 'id': 'abcd1234.websrc', **kwargs}
 
     async def tool(self, token, tool, node_id='', input=None):
         self.tooled.append({'token': token, 'tool': tool, 'node_id': node_id, 'input': input or {}})
@@ -190,6 +191,9 @@ class FakeEngineClient:
 
     async def deploy_update(self, project_id, pipeline=None, schedule=None):
         self.deploy_updated.append({'project_id': project_id, 'pipeline': pipeline, 'schedule': schedule})
+
+    async def add_monitor(self, key, types):
+        self.add_monitor_calls.append((key, types))
 
 
 @pytest.fixture

@@ -47,6 +47,7 @@ class EngineClient(Protocol):
     async def deploy_update(
         self, project_id: str, pipeline: Optional[dict] = None, schedule: Optional[str] = None
     ) -> None: ...
+    async def add_monitor(self, key: Dict[str, Any], types: List[str]) -> None: ...
 
 
 class WsEngineClient:
@@ -61,10 +62,10 @@ class WsEngineClient:
     to open the socket twice.
     """
 
-    def __init__(self, uri: str, auth: str) -> None:
+    def __init__(self, uri: str, auth: str, on_event: Optional[Any] = None) -> None:
         from rocketride import RocketRideClient  # deferred import; SDK on the engine env
 
-        self._client = RocketRideClient(uri=uri, auth=auth)
+        self._client = RocketRideClient(uri=uri, auth=auth, on_event=on_event)
         self._uri = uri
         self._connected = False
         self._connect_lock = asyncio.Lock()
@@ -198,12 +199,16 @@ class WsEngineClient:
         await self._ensure_connected()
         await self._client.deploy.update(project_id, pipeline=pipeline, schedule=schedule)
 
+    async def add_monitor(self, key: Dict[str, Any], types: List[str]) -> None:
+        await self._ensure_connected()
+        await self._client.add_monitor(key, types)
 
-def make_engine_client(config: Dict[str, Any]) -> EngineClient:
+
+def make_engine_client(config: Dict[str, Any], on_event: Optional[Any] = None) -> EngineClient:
     uri = os.environ.get('ROCKETRIDE_URI') or ''
     auth = os.environ.get('ROCKETRIDE_AUTH') or os.environ.get('ROCKETRIDE_APIKEY') or ''
     if not uri:
         raise ValueError('Missing required environment variable: ROCKETRIDE_URI')
     if not auth:
         raise ValueError('Missing required environment variable: ROCKETRIDE_AUTH or ROCKETRIDE_APIKEY')
-    return WsEngineClient(uri=uri, auth=auth)
+    return WsEngineClient(uri=uri, auth=auth, on_event=on_event)
