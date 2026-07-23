@@ -43,12 +43,12 @@ def test_visibility_register_binds_handler_directly():
     assert registry.handler('monitor') is not None
 
 
-def test_register_all_yields_twenty_tools_total():
+def test_register_all_yields_twenty_four_tools_total():
     registry = ToolRegistry()
 
     register_all(registry)
 
-    assert len(registry.names()) == 20
+    assert len(registry.names()) == 24
 
 
 # --- monitor -------------------------------------------------------------

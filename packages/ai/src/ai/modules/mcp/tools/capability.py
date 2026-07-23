@@ -1,7 +1,8 @@
 # Copyright 2026 Aparavi Software AG. MIT License.
 """Capability tools: store + templates (`store_read`, `store_list`,
 `store_stat`, `store_get_url`, `save_template`, `load_template`), and
-deployments (`deploy_add`).
+deployments (`deploy_add`, `deploy_list`, `deploy_status`, `deploy_remove`,
+`deploy_update`).
 """
 
 from typing import Any, Dict
@@ -75,6 +76,27 @@ _DEPLOY_ADD_SCHEMA = {
     'anyOf': [{'required': ['pipeline']}, {'required': ['filepath']}],
 }
 
+_DEPLOY_STATUS_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'project_id': {'type': 'string', 'description': 'Project ID of the deployment'},
+    },
+    'required': ['project_id'],
+}
+
+_DEPLOY_REMOVE_SCHEMA = _DEPLOY_STATUS_SCHEMA
+
+_DEPLOY_UPDATE_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'project_id': {'type': 'string', 'description': 'Project ID of the deployment'},
+        **_PIPELINE_OR_FILEPATH_SCHEMA_PROPS,
+        'schedule': {'type': 'string', 'description': 'Replacement cron schedule (or "manual")'},
+    },
+    'required': ['project_id'],
+    'anyOf': [{'required': ['pipeline']}, {'required': ['filepath']}, {'required': ['schedule']}],
+}
+
 
 async def _store_read(client, tasks, args: Dict[str, Any]) -> dict:
     path = args.get('path')
@@ -139,8 +161,54 @@ async def _deploy_add(client, tasks, args: Dict[str, Any]) -> dict:
     return {'ok': True, 'deployment': deployment}
 
 
+async def _deploy_list(client, tasks, args: Dict[str, Any]) -> dict:
+    deployments = await client.deploy_list()
+    return {'ok': True, 'deployments': deployments, 'count': len(deployments)}
+
+
+async def _deploy_status(client, tasks, args: Dict[str, Any]) -> dict:
+    project_id = args.get('project_id')
+    if not project_id:
+        return _bad('project_id is required', 'pass a deployment project_id (see deploy_list)')
+
+    deployment = await client.deploy_status(project_id)
+    return {'ok': True, 'deployment': deployment}
+
+
+async def _deploy_remove(client, tasks, args: Dict[str, Any]) -> dict:
+    project_id = args.get('project_id')
+    if not project_id:
+        return _bad('project_id is required', 'pass a deployment project_id (see deploy_list)')
+
+    await client.deploy_remove(project_id)
+    return {'ok': True, 'removed': project_id}
+
+
+async def _deploy_update(client, tasks, args: Dict[str, Any]) -> dict:
+    project_id = args.get('project_id')
+    if not project_id:
+        return _bad('project_id is required', 'pass a deployment project_id (see deploy_list)')
+
+    pipeline = None
+    if args.get('pipeline') or args.get('filepath'):
+        pipeline = load_pipeline(args)  # raises ValueError -> normalized by the dispatch layer
+    schedule = args.get('schedule')
+    if pipeline is None and schedule is None:
+        return _bad('nothing to update', 'pass a replacement pipeline/filepath and/or a schedule')
+
+    await client.deploy_update(project_id, pipeline=pipeline, schedule=schedule)
+    updated = [k for k, v in (('pipeline', pipeline), ('schedule', schedule)) if v is not None]
+    return {'ok': True, 'project_id': project_id, 'updated': updated}
+
+
 def register(registry: ToolRegistry) -> None:
-    """Register the store, template, and deployment tools against ``registry``."""
+    """Register the store, template, and deployment tools against ``registry``.
+
+    Store: `store_read`, `store_list`, `store_stat`, `store_get_url`.
+    Templates: `save_template`, `load_template`.
+    Deployments: `deploy_add`, `deploy_list`, `deploy_status`, `deploy_remove`,
+    `deploy_update`.
+    """
     registry.register(
         'store_read',
         'Read a text file from the RocketRide store by its store-relative path.',
@@ -183,3 +251,27 @@ def register(registry: ToolRegistry) -> None:
         'Register a pipeline (inline or from filepath) as a deployment, optionally on a cron schedule.',
         _DEPLOY_ADD_SCHEMA,
     )(_deploy_add)
+
+    registry.register(
+        'deploy_list',
+        "List the user's deployments with their status and schedule.",
+        {'type': 'object', 'properties': {}},
+    )(_deploy_list)
+
+    registry.register(
+        'deploy_status',
+        'Get detailed status of one deployment by project_id.',
+        _DEPLOY_STATUS_SCHEMA,
+    )(_deploy_status)
+
+    registry.register(
+        'deploy_remove',
+        'Undeploy and remove a deployment by project_id.',
+        _DEPLOY_REMOVE_SCHEMA,
+    )(_deploy_remove)
+
+    registry.register(
+        'deploy_update',
+        "Update a deployment's pipeline and/or schedule by project_id.",
+        _DEPLOY_UPDATE_SCHEMA,
+    )(_deploy_update)
