@@ -1,6 +1,7 @@
 # Copyright 2026 Aparavi Software AG. MIT License.
 """Tests for the capability tools (`tools/capability.py`): `store_read`,
-`store_list`, `save_template`, `load_template`, `deploy_add`.
+`store_list`, `store_stat`, `store_get_url`, `save_template`, `load_template`,
+`deploy_add`.
 """
 
 import pytest
@@ -21,6 +22,8 @@ def test_register_all_registers_all_capability_tools():
     assert {
         'store_read',
         'store_list',
+        'store_stat',
+        'store_get_url',
         'save_template',
         'load_template',
         'deploy_add',
@@ -35,6 +38,8 @@ def test_capability_register_binds_handlers_directly():
     for name in (
         'store_read',
         'store_list',
+        'store_stat',
+        'store_get_url',
         'save_template',
         'load_template',
         'deploy_add',
@@ -95,6 +100,79 @@ async def test_store_list_with_explicit_path(fake_engine):
     result = await registry.handler('store_list')(fake_engine, None, {'path': 'sub/dir'})
 
     assert result == {'ok': True, 'path': 'sub/dir', 'listing': {'entries': []}}
+
+
+# --- store_stat ----------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_store_stat_requires_path(fake_engine):
+    registry = ToolRegistry()
+    capability.register(registry)
+
+    result = await registry.handler('store_stat')(fake_engine, None, {})
+
+    assert result['ok'] is False
+    assert result['error_type'] == 'BadRequest'
+
+
+@pytest.mark.asyncio
+async def test_store_stat_returns_stat(fake_engine):
+    registry = ToolRegistry()
+    capability.register(registry)
+
+    result = await registry.handler('store_stat')(fake_engine, None, {'path': 'a/b.txt'})
+
+    assert result == {
+        'ok': True,
+        'path': 'a/b.txt',
+        'stat': {'exists': True, 'type': 'file', 'size': 12, 'modified': 1700000000},
+    }
+    assert fake_engine.fs_stat_calls == ['a/b.txt']
+
+
+# --- store_get_url -------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_store_get_url_requires_path(fake_engine):
+    registry = ToolRegistry()
+    capability.register(registry)
+
+    result = await registry.handler('store_get_url')(fake_engine, None, {})
+
+    assert result['ok'] is False
+    assert result['error_type'] == 'BadRequest'
+
+
+@pytest.mark.asyncio
+async def test_store_get_url_returns_url(fake_engine):
+    registry = ToolRegistry()
+    capability.register(registry)
+
+    result = await registry.handler('store_get_url')(fake_engine, None, {'path': 'a/b.txt'})
+
+    assert result == {
+        'ok': True,
+        'path': 'a/b.txt',
+        'url': 'https://signed.example/f?sig=abc',
+        'expires_in': 3600,
+    }
+    assert fake_engine.fs_get_url_calls == [{'path': 'a/b.txt', 'expires_in': 3600, 'download_name': None}]
+
+
+@pytest.mark.asyncio
+async def test_store_get_url_forwards_expires_in_and_download_name(fake_engine):
+    registry = ToolRegistry()
+    capability.register(registry)
+
+    result = await registry.handler('store_get_url')(
+        fake_engine, None, {'path': 'a/b.txt', 'expires_in': 60, 'download_name': 'x.txt'}
+    )
+
+    assert result['ok'] is True
+    assert result['url'] == 'https://signed.example/f?sig=abc'
+    assert fake_engine.fs_get_url_calls == [{'path': 'a/b.txt', 'expires_in': 60, 'download_name': 'x.txt'}]
 
 
 # --- save_template -----------------------------------------------------------

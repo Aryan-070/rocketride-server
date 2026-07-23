@@ -1,6 +1,7 @@
 # Copyright 2026 Aparavi Software AG. MIT License.
 """Capability tools: store + templates (`store_read`, `store_list`,
-`save_template`, `load_template`), and deployments (`deploy_add`).
+`store_stat`, `store_get_url`, `save_template`, `load_template`), and
+deployments (`deploy_add`).
 """
 
 from typing import Any, Dict
@@ -27,6 +28,24 @@ _STORE_LIST_SCHEMA = {
     'properties': {
         'path': {'type': 'string', 'description': "Store-relative directory path (default '' = root)"},
     },
+}
+
+_STORE_STAT_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'path': {'type': 'string', 'description': 'Store-relative file or directory path'},
+    },
+    'required': ['path'],
+}
+
+_STORE_GET_URL_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'path': {'type': 'string', 'description': 'Store-relative file path'},
+        'expires_in': {'type': 'integer', 'description': 'URL lifetime in seconds (default 3600)'},
+        'download_name': {'type': 'string', 'description': 'Optional filename for the browser download'},
+    },
+    'required': ['path'],
 }
 
 _SAVE_TEMPLATE_SCHEMA = {
@@ -72,6 +91,25 @@ async def _store_list(client, tasks, args: Dict[str, Any]) -> dict:
     return {'ok': True, 'path': path, 'listing': listing}
 
 
+async def _store_stat(client, tasks, args: Dict[str, Any]) -> dict:
+    path = args.get('path')
+    if not path:
+        return _bad('path is required', 'pass a store file or directory path (see store_list)')
+
+    stat = await client.fs_stat(path)
+    return {'ok': True, 'path': path, 'stat': stat}
+
+
+async def _store_get_url(client, tasks, args: Dict[str, Any]) -> dict:
+    path = args.get('path')
+    if not path:
+        return _bad('path is required', 'pass a store file path (see store_list)')
+
+    expires_in = args.get('expires_in') or 3600
+    url = await client.fs_get_url(path, expires_in=expires_in, download_name=args.get('download_name'))
+    return {'ok': True, 'path': path, 'url': url, 'expires_in': expires_in}
+
+
 async def _save_template(client, tasks, args: Dict[str, Any]) -> dict:
     template_id = args.get('template_id')
     if not template_id:
@@ -114,6 +152,19 @@ def register(registry: ToolRegistry) -> None:
         "List entries under a store-relative directory path (default '' = root).",
         _STORE_LIST_SCHEMA,
     )(_store_list)
+
+    registry.register(
+        'store_stat',
+        'Get metadata for a store file or directory: exists, type (file|dir), size, modified.',
+        _STORE_STAT_SCHEMA,
+    )(_store_stat)
+
+    registry.register(
+        'store_get_url',
+        'Get a time-limited signed download URL for a store file -- the out-of-band '
+        'counterpart to store_read for large files that cannot ride an in-band result.',
+        _STORE_GET_URL_SCHEMA,
+    )(_store_get_url)
 
     registry.register(
         'save_template',

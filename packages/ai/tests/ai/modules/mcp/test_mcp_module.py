@@ -37,6 +37,8 @@ async def test_build_mcp_server_lists_tools_from_real_registry(fake_engine):
         'send_files',
         'store_read',
         'store_list',
+        'store_stat',
+        'store_get_url',
         'save_template',
         'load_template',
         'deploy_add',

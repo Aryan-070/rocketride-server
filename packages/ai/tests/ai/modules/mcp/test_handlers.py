@@ -130,6 +130,8 @@ async def test_list_tools_reflects_real_register_all(fake_engine):
         'send_files',
         'store_read',
         'store_list',
+        'store_stat',
+        'store_get_url',
         'save_template',
         'load_template',
         'deploy_add',
