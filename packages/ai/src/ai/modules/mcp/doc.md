@@ -11,7 +11,7 @@ like every other module and mounted at:
 /mcp
 ```
 
-This module exposes a static, 17-tool RocketRide authoring/execution surface served
+This module exposes a static, 25-tool RocketRide authoring/execution surface served
 over HTTP from inside the running engine process — no separate process or transport
 bridge required. It supersedes the earlier 2-tool port, which exposed a dynamic
 per-pipeline `{filepath}` tool plus a `RocketRide_Document_Processor` convenience
@@ -50,7 +50,7 @@ tool; both are removed (see "History" below).
 Config key `mcp_dev_no_auth` (bool, in the module `config` dict passed to `initModule`)
 is the config-driven equivalent of `MCP_DEV_NO_AUTH=1`; either one enables the bypass.
 
-## The 17 tools
+## The 25 tools
 
 Dispatch is registry-based: `tooling.ToolRegistry` holds `{name -> (description,
 inputSchema, handler)}`; `tools/__init__.register_all(registry)` populates one shared
@@ -61,7 +61,14 @@ and wires them into a single `mcp.server.lowlevel.Server('rocketride-mcp')` via
 signature `async def handler(client: EngineClient, tasks: TaskRegistry, args: dict) -> dict`.
 
 All tools are static and typed (fixed name + JSON Schema) — there is no dynamic
-per-pipeline tool generation and no `filepath`-shaped convenience tool.
+per-pipeline tool generation and no `filepath`-shaped catch-all tool of the kind the
+legacy 2-tool port used. That said, the surface *does* include a convenience-tool
+group — `sql_query`/`graph_query`/`vector_search` (see Query below) — a different
+kind of convenience tool than the removed one, reintroduced by `tools/query.py` and
+available only when signed into the RocketRide cloud.
+
+The 25 tools are organized into 8 groups (plus 2 resources), matching
+`claude/tasks/http-mcp-tools-port/final-tool-surface.md`.
 
 **Introspection (4)** — `tools/introspection.py`, read-only/static-analysis, no task tokens:
 
@@ -87,34 +94,74 @@ per-pipeline tool generation and no `filepath`-shaped convenience tool.
 | --- | --- | --- |
 | `send_files` | Upload one or more store-relative file paths to a running task by `task_token`. | `task_token`, `files` |
 
-**Visibility (1)** — `tools/visibility.py`:
+**Visibility (2)** — `tools/visibility.py`:
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
 | `monitor` | Bounded poll of task status until a terminal state or `timeout` elapses, returning a snapshot. | `task_token`, `timeout` (default 30), `interval` (default 1) |
+| `list_running_pipelines` | Server-authoritative list of running tasks (task token, name, state) — thin wrapper over the same `client.list_tasks()` seam backing the `rocketride://status` resource. Makes tokens discoverable for `monitor`/`send_data`/`terminate` without having started the task yourself in this session. | none |
 
-**Env/secrets (2)** — `tools/capability.py`. Leak guard: both only ever echo
-`ROCKETRIDE_*` key *names*, never values:
-
-| Tool | Purpose | Key args |
-| --- | --- | --- |
-| `set_env` | Set one or more `ROCKETRIDE_*` env vars for the connection. | `env` (map) |
-| `list_env_keys` | List the names of currently-set `ROCKETRIDE_*` env vars. | none |
-
-**Store/templates (4)** — also in `tools/capability.py`:
+**Store (4)** — `tools/capability.py`, read-only, SDK: `rocketride.mixins.store`:
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
-| `store_read` | Read a text file from the RocketRide store by store-relative path. | `path` |
+| `store_read` | Read a text file from the RocketRide store by store-relative path (in-band). | `path` |
 | `store_list` | List entries under a store-relative directory path. | `path` (default `''` = root) |
+| `store_stat` | File/dir metadata: `exists`, `type` (file\|dir), `size`, `modified`. | `path` |
+| `store_get_url` | Time-limited signed download URL for a store file — the out-of-band counterpart to `store_read` for large files that can't ride an in-band JSON-RPC result. The returned URL is directly fetchable (plain HTTP GET, e.g. by a browser or the calling agent's sandbox) — no further MCP round-trip needed to retrieve the bytes. | `path`, `expires_in` (seconds, default 3600), `download_name` |
+
+**Templates (2)** — also in `tools/capability.py`:
+
+| Tool | Purpose | Key args |
+| --- | --- | --- |
 | `save_template` | Save a pipeline (inline or filepath) as a reusable template. | `template_id`, `pipeline`/`filepath` |
 | `load_template` | Load a previously saved pipeline template. | `template_id` |
 
-**Deployments (1)** — also in `tools/capability.py`:
+**Deployments (5)** — also in `tools/capability.py`, full lifecycle, SDK: `rocketride.deploy.DeployApi`:
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
 | `deploy_add` | Register a pipeline (inline or filepath) as a deployment, optionally on a cron schedule. | `pipeline`/`filepath`, `schedule` |
+| `deploy_list` | List the caller's deployments with status and schedule. | none |
+| `deploy_status` | Detailed status of one deployment by `project_id`. | `project_id` |
+| `deploy_remove` | Undeploy and remove a deployment by `project_id`. | `project_id` |
+| `deploy_update` | Update a deployment's pipeline and/or schedule by `project_id`. | `project_id`, `pipeline`/`filepath`, `schedule` |
+
+**Query (3)** — `tools/query.py`, read-only, guarded, **cloud-only availability**:
+
+| Tool | Purpose | Key args |
+| --- | --- | --- |
+| `sql_query` | Run a read-only SQL query (`SELECT`/`EXPLAIN`, enforced by `read_guards.assert_sql_read_only`) against the RocketRide SQL store, return rows. | `query`, `session_token`, `ttl` |
+| `graph_query` | Run a read-only Cypher query (`MATCH`/`RETURN`/`WITH`, enforced by `read_guards.assert_cypher_read_only`) against the RocketRide graph store, return records. | `query`, `session_token`, `ttl` |
+| `vector_search` | Search the RocketRide vector store by text or embedding, return matches. | `collection`, `query`/`embedding`, `k`, `filter`, `session_token`, `ttl` |
+
+Each query tool opens (or reuses, via `session_token`) a warm tool-lane session
+against a small `.pipe` under `tools/pipes/` — `sql_query.pipe` → node `postgres_1`,
+`graph_query.pipe` → node `neo4j_1`, `vector_search.pipe` → node `qdrant_1` — then
+calls that node's `execute`/`search` tool-function. Results are capped to a 40 KB
+in-band budget by `result_envelope.cap_rows` (truncates and adds a `notice` rather
+than risk blowing the JSON-RPC message size). Sessions default to a 300s TTL (max
+1800s, clamped) and can be reused across calls via `session_token` instead of
+re-spawning a task per query.
+
+**Availability.** These three tools query RocketRide-hosted SQL/graph/vector
+databases, so per `claude/tasks/http-mcp-tools-port/final-tool-surface.md` they are
+**only available when signed into the RocketRide cloud** — regardless of whether the
+connected engine itself is running locally or remotely. This module has no
+code-level gate for that today: a locally-run engine with no cloud DB provisioned
+will simply fail the `postgres_1`/`neo4j_1`/`qdrant_1` node lookup at call time. The
+gate is an operational/provisioning fact, not a flag this module checks.
+
+**Deferred: a 26th tool, `get_pipeline_trace`.** Node-level pipeline tracing (the
+per-node component flow — op, lane, input/output, result, error, i.e. the
+`apaevt_flow`/FLOW events) is designed but not implemented in this surface;
+`monitor` above covers only task-level state/counts, not per-node trace detail.
+Implementing it needs either reading a `_trace` block from a
+`pipelineTraceLevel`-enabled run or an MCP-side FLOW-event collector, plus exposing
+`pipelineTraceLevel` on `run_pipeline`/`run_dropper_pipe` to turn capture on — real
+design work, not a thin SDK wrapper like most of the tools above. See
+`claude/tasks/http-mcp-tools-port/final-tool-surface.md` §Visibility for the full
+design note; it is tracked for its own follow-up plan, not this one.
 
 Tool call dispatch (`handlers._call_tool`) looks up the handler by name in the
 registry and calls `await handler(engine_client, task_registry, arguments)`. Errors
@@ -144,9 +191,10 @@ prompt templates from the earlier port were removed along with their tests.
 
 ## The `EngineClient` seam
 
-`engine.py` defines one `Protocol`, `EngineClient`, with the ~19 async methods needed
-by the 17-tool surface (task lifecycle, services/validation, env, store/templates,
-deployments — see the `Protocol` definition in `engine.py` for exact signatures). All
+`engine.py` defines one `Protocol`, `EngineClient`, with the ~22 async methods needed
+by the 25-tool surface (task lifecycle, services/validation, store/templates/store
+metadata/signed URLs, full deployment lifecycle, query sessions — see the `Protocol`
+definition in `engine.py` for exact signatures). All
 tool/resource code depends only on this interface — never on a concrete client — so
 the implementation is swappable.
 
@@ -188,16 +236,17 @@ shared across event loops or accessed concurrently from multiple threads.
 ## Security
 
 - **`filepath` arguments read arbitrary server-local files — there is no
-  sandboxing today.** `run_pipeline`, `validate_pipeline`, `describe_pipeline`,
-  `save_template`, and `deploy_add` all accept a `filepath` in place of an
-  inline `pipeline`. For the four introspection/capability tools this goes
-  through `tools/_common.py`'s `load_pipeline()`, which does a plain
-  `open(filepath, ...)` on the engine process's local filesystem — any path
-  the process can read, it will read, with no root/prefix restriction.
-  `run_pipeline`'s `filepath` is forwarded to the engine's own `use()` seam
-  call, which resolves it server-side with the same lack of sandboxing.
-  Treat every `filepath` argument as equivalent to giving the calling agent
-  read access to the engine process's local file scope.
+  sandboxing today.** `run_pipeline`, `run_dropper_pipe`, `validate_pipeline`,
+  `describe_pipeline`, `save_template`, `deploy_add`, and `deploy_update` all
+  accept a `filepath` in place of an inline `pipeline`. For the
+  introspection/capability tools this goes through `tools/_common.py`'s
+  `load_pipeline()`, which does a plain `open(filepath, ...)` on the engine
+  process's local filesystem — any path the process can read, it will read,
+  with no root/prefix restriction. `run_pipeline`'s and `run_dropper_pipe`'s
+  `filepath` are forwarded to the engine's own `use()` seam call, which
+  resolves them server-side with the same lack of sandboxing. Treat every
+  `filepath` argument as equivalent to giving the calling agent read access to
+  the engine process's local file scope.
 - **Consequence for `MCP_DEV_NO_AUTH`.** Because there is no path sandboxing,
   the `MCP_DEV_NO_AUTH=1` / `mcp_dev_no_auth` bypass (see above) must **only**
   ever be enabled on a **loopback bind (`127.0.0.1`)** — never on `0.0.0.0` or
@@ -219,16 +268,13 @@ shared across event loops or accessed concurrently from multiple threads.
   reference-passing / egress-spill is deferred**; large payloads over HTTP (proxy
   buffering, timeouts, SSE framing) are a known future risk. See
   `claude/tasks/http-mcp-tools-port/tool-specs.md` §Data-handling.
-- **`set_env` is local-scope, not server-scope.** It calls the connection-mixin's
-  synchronous local setter (`client.set_env(env)`), which is a different scope from
-  `list_env_keys` (`client.account.get_environment_keys()`, server-scoped). A key set
-  via `set_env` will **not** appear in `list_env_keys` output. Acceptable for local
-  dev (the substitution still applies to pipelines run through the same connection);
-  see `claude/tasks/http-mcp-tools-port/open-questions.md` #1 for the deferred
-  follow-up (switch to `client.account.set_env(...)` if server-persistence or
-  cross-tool visibility is required).
-- **`deploy_add` requires a `project_id` in the pipeline** — an SDK requirement, not
-  enforced by this module's schema.
+- **`deploy_add`/`deploy_update` require a `project_id` in the pipeline** — an SDK
+  requirement, not enforced by this module's schema.
+- **Env/secrets tools (`set_env`, `list_env_keys`) are out of scope for this
+  surface.** They shipped briefly, then were removed: the env-var/integrations
+  surface is covered by a separate plan, not this module. `ROCKETRIDE_URI`/
+  `ROCKETRIDE_AUTH`/`ROCKETRIDE_APIKEY` (the *connection* env vars, unrelated to the
+  removed tools) are still read at boot — see "Environment variables / config" above.
 - **Known pre-existing follow-up:** `resources.read_resource` returns a bare `str`,
   which the MCP SDK now deprecates in favor of `Iterable[ReadResourceContents]`.
   Cleanup deferred; not a functional break today.
@@ -245,11 +291,21 @@ shared across event loops or accessed concurrently from multiple threads.
 This module originally shipped as a 2-tool port of the standalone stdio MCP server:
 one dynamic tool generated per pipeline file (a raw caller-supplied `{filepath}` read
 off the local filesystem with no sandboxing) plus a `RocketRide_Document_Processor`
-convenience tool, 3 `rocketride://` resources, and 3 MCP prompts. That surface has
-been fully replaced by the 17-tool static/typed surface described above, ported from
-the design in `claude/tasks/rocketride-mcp-server/` via
+convenience tool, 3 `rocketride://` resources, and 3 MCP prompts. That surface was
+first replaced by a 16-tool static/typed surface (introspection, execution,
+ingestion, `monitor`, env/secrets, store/templates, `deploy_add`), ported from the
+design in `claude/tasks/rocketride-mcp-server/` via
 `claude/tasks/http-mcp-tools-port/`. The dynamic per-pipeline tools, the convenience
 tool, `rocketride://nodes`, and all 3 prompts are removed.
+
+The surface then grew to today's **25 tools**: the 3 `sql_query`/`graph_query`/
+`vector_search` query tools landed first (16 → 19); `set_env`/`list_env_keys` were
+then dropped as out of scope (19 → 17); and `store_stat`, `store_get_url`,
+`deploy_list`, `deploy_status`, `deploy_remove`, `deploy_update`, and
+`list_running_pipelines` were added to round out store/deployment/visibility
+lifecycles (17 → 25). `get_pipeline_trace` was designed as part of the same pass but
+deferred (see Query above and `claude/tasks/http-mcp-tools-port/final-tool-surface.md`
+for the definitive 26-tool target and per-tool rationale).
 
 ## Running / testing locally
 
