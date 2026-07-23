@@ -39,7 +39,6 @@ class FakeEngineClient:
         self._tool_result = {}
         self.terminated = []
         self.sent_files = []
-        self.set_env_calls = []
         self.saved_templates = []
         self._template_store = {}
         self.deploys_added = []
@@ -121,12 +120,6 @@ class FakeEngineClient:
     async def send_files(self, files, token):
         self.sent_files.append({'files': files, 'token': token})
         return {'uploaded': len(files)}
-
-    async def set_env(self, env):
-        self.set_env_calls.append(env)
-
-    async def get_environment_keys(self):
-        return ['ROCKETRIDE_FOO']
 
     async def fs_read_string(self, path):
         return 'file contents'

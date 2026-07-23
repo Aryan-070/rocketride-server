@@ -128,8 +128,6 @@ async def test_list_tools_reflects_real_register_all(fake_engine):
         'send_data',
         'terminate',
         'send_files',
-        'set_env',
-        'list_env_keys',
         'store_read',
         'store_list',
         'save_template',

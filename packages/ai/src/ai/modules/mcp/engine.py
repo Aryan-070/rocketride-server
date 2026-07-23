@@ -33,8 +33,6 @@ class EngineClient(Protocol):
     async def tool(self, token: str, tool: str, node_id: str = '', input: dict | None = None) -> Any: ...
     async def terminate(self, token: str) -> None: ...
     async def send_files(self, files: List[Any], token: str) -> Any: ...
-    async def set_env(self, env: Dict[str, str]) -> None: ...
-    async def get_environment_keys(self) -> List[str]: ...
     async def fs_read_string(self, path: str) -> str: ...
     async def fs_list_dir(self, path: str = '') -> Dict[str, Any]: ...
     async def save_template(self, template_id: str, pipeline: dict) -> None: ...
@@ -142,19 +140,6 @@ class WsEngineClient:
     async def send_files(self, files: List[Any], token: str) -> Any:
         await self._ensure_connected()
         return await self._client.send_files(files, token)
-
-    async def set_env(self, env: Dict[str, str]) -> None:
-        """Local-only substitution env for pipeline templating (not a server write).
-
-        Deliberately calls the connection-mixin's synchronous local setter
-        (``client.set_env``), NOT ``client.account.set_env`` (the async
-        server-side write). See reconciliation.md G2.
-        """
-        self._client.set_env(env)
-
-    async def get_environment_keys(self) -> List[str]:
-        await self._ensure_connected()
-        return await self._client.account.get_environment_keys()
 
     async def fs_read_string(self, path: str) -> str:
         await self._ensure_connected()

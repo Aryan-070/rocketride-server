@@ -1,7 +1,6 @@
 # Copyright 2026 Aparavi Software AG. MIT License.
-"""Tests for the capability tools (`tools/capability.py`): `set_env`,
-`list_env_keys`, `store_read`, `store_list`, `save_template`,
-`load_template`, `deploy_add`.
+"""Tests for the capability tools (`tools/capability.py`): `store_read`,
+`store_list`, `save_template`, `load_template`, `deploy_add`.
 """
 
 import pytest
@@ -14,14 +13,12 @@ from ai.modules.mcp.tools import register_all
 # --- registration -------------------------------------------------------
 
 
-def test_register_all_registers_all_seven_capability_tools():
+def test_register_all_registers_all_capability_tools():
     registry = ToolRegistry()
 
     register_all(registry)
 
     assert {
-        'set_env',
-        'list_env_keys',
         'store_read',
         'store_list',
         'save_template',
@@ -36,8 +33,6 @@ def test_capability_register_binds_handlers_directly():
     capability.register(registry)
 
     for name in (
-        'set_env',
-        'list_env_keys',
         'store_read',
         'store_list',
         'save_template',
@@ -47,49 +42,12 @@ def test_capability_register_binds_handlers_directly():
         assert registry.handler(name) is not None
 
 
-# --- set_env --------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_set_env_requires_non_empty_env(fake_engine):
+def test_env_tools_are_gone():
     registry = ToolRegistry()
     capability.register(registry)
-
-    result = await registry.handler('set_env')(fake_engine, None, {})
-
-    assert result['ok'] is False
-    assert result['error_type'] == 'BadRequest'
-    assert fake_engine.set_env_calls == []
-
-
-@pytest.mark.asyncio
-async def test_set_env_returns_key_names_only_never_values(fake_engine):
-    registry = ToolRegistry()
-    capability.register(registry)
-    env = {'ROCKETRIDE_FOO': 'super-secret-value', 'ROCKETRIDE_BAR': 'another-secret'}
-
-    result = await registry.handler('set_env')(fake_engine, None, {'env': env})
-
-    assert result['ok'] is True
-    assert set(result['keys']) == {'ROCKETRIDE_FOO', 'ROCKETRIDE_BAR'}
-    assert fake_engine.set_env_calls == [env]
-    # Leak guard: no secret values anywhere in the returned payload.
-    serialized = str(result)
-    assert 'super-secret-value' not in serialized
-    assert 'another-secret' not in serialized
-
-
-# --- list_env_keys ----------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_list_env_keys_returns_names(fake_engine):
-    registry = ToolRegistry()
-    capability.register(registry)
-
-    result = await registry.handler('list_env_keys')(fake_engine, None, {})
-
-    assert result == {'ok': True, 'keys': ['ROCKETRIDE_FOO']}
+    names = {t.name for t in registry.tools()}
+    assert 'set_env' not in names
+    assert 'list_env_keys' not in names
 
 
 # --- store_read -------------------------------------------------------------

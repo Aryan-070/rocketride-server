@@ -61,7 +61,7 @@ def normalize_error(exc: Exception, *, hint: Optional[str] = None) -> dict:
     Hard failures (type name in ``HARD_EXC_NAMES``) raise ``HardError`` so
     the MCP dispatch layer surfaces them as a tool error. Everything else
     returns ``{ok: False, error_type, message, hint}`` so the agent can
-    self-correct (e.g. missing env -> call ``set_env``).
+    self-correct (e.g. missing required argument -> retry with it filled in).
     """
     error_type = type(exc).__name__
     if error_type in HARD_EXC_NAMES:

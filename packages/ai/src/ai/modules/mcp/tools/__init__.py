@@ -26,10 +26,9 @@ def register_all(registry: ToolRegistry) -> None:
     Wires the introspection tools (`list_components`, `describe_component`,
     `validate_pipeline`, `describe_pipeline`), the execution tools
     (`run_pipeline`, `send_data`, `terminate`, `send_files`), the capability
-    tools (`set_env`, `list_env_keys`, `store_read`, `store_list`,
-    `save_template`, `load_template`, `deploy_add`), the visibility tool
-    (`monitor`), and the convenience query tools (`sql_query`, `graph_query`,
-    `vector_search`).
+    tools (`store_read`, `store_list`, `save_template`, `load_template`,
+    `deploy_add`), the visibility tool (`monitor`), and the convenience query
+    tools (`sql_query`, `graph_query`, `vector_search`).
     """
     introspection.register(registry)
     execution.register(registry)

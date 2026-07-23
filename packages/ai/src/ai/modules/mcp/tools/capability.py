@@ -1,18 +1,6 @@
 # Copyright 2026 Aparavi Software AG. MIT License.
-"""Capability tools: environment/secrets (`set_env`, `list_env_keys`), store +
-templates (`store_read`, `store_list`, `save_template`, `load_template`), and
-deployments (`deploy_add`).
-
-Leak guard: `set_env` and `list_env_keys` only ever echo `ROCKETRIDE_*` key
-NAMES back to the agent, never the values that were set -- the whole point of
-a secrets seam is that secrets don't round-trip through the model.
-
-Open decision (set_env scope): the handler calls the connection-scoped
-`client.set_env(env)` seam, not the account-scoped `client.account.set_env(...)`
-variant the original design also named. This is a deliberate dev-loop choice
-per the plan; whether pipelines actually resolve `${ROCKETRIDE_*}` placeholders
-written this way is a live-engine check deferred to Task 8 (the controller
-task), not verified here.
+"""Capability tools: store + templates (`store_read`, `store_list`,
+`save_template`, `load_template`), and deployments (`deploy_add`).
 """
 
 from typing import Any, Dict
@@ -24,18 +12,6 @@ from ._common import load_pipeline
 _PIPELINE_OR_FILEPATH_SCHEMA_PROPS = {
     'pipeline': {'type': 'object', 'description': 'Inline pipeline definition'},
     'filepath': {'type': 'string', 'description': 'Path to a pipeline file (JSON, JSON5, or .pipe)'},
-}
-
-_SET_ENV_SCHEMA = {
-    'type': 'object',
-    'properties': {
-        'env': {
-            'type': 'object',
-            'description': 'Map of ROCKETRIDE_* env var name to value',
-            'additionalProperties': {'type': 'string'},
-        },
-    },
-    'required': ['env'],
 }
 
 _STORE_READ_SCHEMA = {
@@ -79,20 +55,6 @@ _DEPLOY_ADD_SCHEMA = {
     },
     'anyOf': [{'required': ['pipeline']}, {'required': ['filepath']}],
 }
-
-
-async def _set_env(client, tasks, args: Dict[str, Any]) -> dict:
-    env = args.get('env')
-    if not env:
-        return _bad('env is required and must be a non-empty object', 'pass a map of ROCKETRIDE_* name to value')
-
-    await client.set_env(env)
-    return {'ok': True, 'keys': list(env.keys())}
-
-
-async def _list_env_keys(client, tasks, args: Dict[str, Any]) -> dict:
-    keys = await client.get_environment_keys()
-    return {'ok': True, 'keys': list(keys)}
 
 
 async def _store_read(client, tasks, args: Dict[str, Any]) -> dict:
@@ -140,20 +102,7 @@ async def _deploy_add(client, tasks, args: Dict[str, Any]) -> dict:
 
 
 def register(registry: ToolRegistry) -> None:
-    """Register the 7 capability tools (env, store, templates, deploy) against ``registry``."""
-    registry.register(
-        'set_env',
-        'Set one or more ROCKETRIDE_* environment variables for the connection. '
-        'Returns the key names that were set -- never echoes values back.',
-        _SET_ENV_SCHEMA,
-    )(_set_env)
-
-    registry.register(
-        'list_env_keys',
-        'List the names (not values) of currently-set ROCKETRIDE_* environment variables.',
-        {'type': 'object', 'properties': {}},
-    )(_list_env_keys)
-
+    """Register the store, template, and deployment tools against ``registry``."""
     registry.register(
         'store_read',
         'Read a text file from the RocketRide store by its store-relative path.',

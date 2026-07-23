@@ -23,20 +23,6 @@ def test_make_engine_client_requires_auth(monkeypatch):
         make_engine_client({})
 
 
-class _FakeAccountApi:
-    """Stand-in for RocketRideClient.account (cached_property sub-API)."""
-
-    def __init__(self) -> None:
-        self.get_environment_keys_calls = 0
-
-    async def get_environment_keys(self) -> list:
-        self.get_environment_keys_calls += 1
-        return ['ROCKETRIDE_FOO']
-
-    async def set_env(self, scope, env, scope_id=None):  # pragma: no cover - must NOT be called
-        raise AssertionError('seam.set_env must call client.set_env, not client.account.set_env')
-
-
 class _FakeDeployApi:
     """Stand-in for RocketRideClient.deploy (cached_property sub-API)."""
 
@@ -67,13 +53,11 @@ class _FakeUnderlyingClient:
         self.send_calls = []
         self.terminate_calls = []
         self.send_files_calls = []
-        self.set_env_calls = []
         self.fs_read_string_calls = []
         self.fs_list_dir_calls = []
         self.save_template_calls = []
         self.get_template_calls = []
         self.get_task_status_calls = []
-        self.account = _FakeAccountApi()
         self.deploy = _FakeDeployApi()
 
     async def connect(self) -> None:
@@ -124,9 +108,6 @@ class _FakeUnderlyingClient:
     async def send_files(self, files, token: str) -> dict:
         self.send_files_calls.append({'files': files, 'token': token})
         return {'uploaded': len(files)}
-
-    def set_env(self, env: dict) -> None:
-        self.set_env_calls.append(env)
 
     async def fs_read_string(self, path: str) -> str:
         self.fs_read_string_calls.append(path)
@@ -290,27 +271,6 @@ async def test_send_files_passes_files_then_token(monkeypatch):
 
     assert fake.send_files_calls == [{'files': files, 'token': 'tok-2'}]
     assert result == {'uploaded': 2}
-
-
-async def test_set_env_calls_local_connection_setter_not_account(monkeypatch):
-    """Footgun: must call client.set_env (local), never client.account.set_env (server write)."""
-    client, fake = _make_client_with_fake(monkeypatch)
-
-    result = await client.set_env({'ROCKETRIDE_FOO': 'bar'})
-
-    assert fake.set_env_calls == [{'ROCKETRIDE_FOO': 'bar'}]
-    assert fake.account.get_environment_keys_calls == 0
-    assert result is None
-
-
-async def test_get_environment_keys_calls_account_sub_api(monkeypatch):
-    """Footgun: must call client.account.get_environment_keys(), not a top-level method."""
-    client, fake = _make_client_with_fake(monkeypatch)
-
-    result = await client.get_environment_keys()
-
-    assert fake.account.get_environment_keys_calls == 1
-    assert result == ['ROCKETRIDE_FOO']
 
 
 async def test_fs_read_string_calls_sdk_with_path(monkeypatch):

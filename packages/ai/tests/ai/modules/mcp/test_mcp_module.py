@@ -35,8 +35,6 @@ async def test_build_mcp_server_lists_tools_from_real_registry(fake_engine):
         'send_data',
         'terminate',
         'send_files',
-        'set_env',
-        'list_env_keys',
         'store_read',
         'store_list',
         'save_template',
