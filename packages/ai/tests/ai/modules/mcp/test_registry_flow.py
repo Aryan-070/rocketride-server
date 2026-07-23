@@ -139,6 +139,18 @@ def test_flow_since_pages_by_cursor():
     assert second['cursor'] == 3
 
 
+def test_flow_since_ahead_of_buffer_does_not_move_cursor_backward():
+    reg = TaskRegistry()
+    reg.set_flow_id('tok-1', 'flow-1')
+    reg.record_flow('flow-1', {'n': 1})
+    reg.record_flow('flow-1', {'n': 2})
+
+    result = reg.flow_since('tok-1', since=99)
+
+    assert result['events'] == []
+    assert result['cursor'] == 99
+
+
 def test_flow_since_unknown_token_returns_empty_with_since_as_cursor():
     reg = TaskRegistry()
 

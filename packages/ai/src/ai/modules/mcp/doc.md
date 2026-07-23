@@ -165,7 +165,11 @@ state/counts with per-node detail. The pieces:
   `run_pipeline`/`run_dropper_pipe`, or passed directly to the SDK's `use()`
   for an externally-started task. A task run without it produces no flow
   events to drain, regardless of how many times `get_pipeline_trace` is
-  called on its token.
+  called on its token. Mechanically, the run tools gate on
+  `pipelineTraceLevel not in (None, 'none')` and skip the MCP-side flow
+  subscription entirely when it is `'none'` — so their result payload has no
+  `flow_subscribed` key at all in that case (as opposed to `false`, which
+  means a subscription was attempted and failed).
 - **Subscribe-at-start vs. auto-subscribe.** `run_pipeline`/`run_dropper_pipe`
   flow-subscribe immediately (`client.add_monitor({'token': token}, ['flow'])`)
   when `pipelineTraceLevel` is set, and the tool result carries

@@ -146,7 +146,8 @@ class TaskRegistry:
     def flow_since(self, token: str, since: int = 0) -> Dict[str, Any]:
         """Return buffered flow events for ``token`` with ``seq > since``.
 
-        ``cursor`` is the highest seq currently buffered (pass it back as
+        ``cursor`` is the highest seq currently buffered, clamped so it never
+        moves backward past the caller's own ``since`` (pass it back as
         ``since`` next time to page); it falls back to ``since`` when the
         buffer is empty or the token is untracked.
         """
@@ -154,5 +155,5 @@ class TaskRegistry:
         if not buf:
             return {'events': [], 'cursor': since}
         events = [entry for entry in buf if entry['seq'] > since]
-        cursor = buf[-1]['seq']
+        cursor = max(since, buf[-1]['seq'])
         return {'events': events, 'cursor': cursor}
