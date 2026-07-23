@@ -125,15 +125,37 @@ class TestClientId:
 
 
 class TestResolveRocketrideDsn:
-    """The full seam: env client_id -> account singleton -> async bridge."""
+    """The full seam: injected env DSN first, else account singleton via async bridge."""
 
     def _install_fake_account(self, monkeypatch, resolver):
+        monkeypatch.delenv(rrdb.DB_DSN_ENV, raising=False)
         ai_pkg = types.ModuleType('ai')
         ai_pkg.__path__ = []
         account_mod = types.ModuleType('ai.account')
         account_mod.account = types.SimpleNamespace(resolve_db_dsn=resolver)
         monkeypatch.setitem(sys.modules, 'ai', ai_pkg)
         monkeypatch.setitem(sys.modules, 'ai.account', account_mod)
+
+    def test_injected_env_dsn_wins(self, monkeypatch):
+        """The task-engine-injected ROCKETRIDE_DB_DSN short-circuits everything."""
+
+        async def fake(client_id):  # pragma: no cover — must not be reached
+            raise AssertionError('account must not be consulted when the env DSN is present')
+
+        self._install_fake_account(monkeypatch, fake)
+        monkeypatch.setenv(rrdb.DB_DSN_ENV, f'  {TEST_DSN}  ')
+        # No client id needed on the injected path either.
+        monkeypatch.delenv(rrdb.CLIENT_ID_ENV, raising=False)
+        assert rrdb.resolve_rocketride_dsn() == TEST_DSN
+
+    def test_empty_env_dsn_falls_back_to_account(self, monkeypatch):
+        async def fake(client_id):
+            return TEST_DSN
+
+        self._install_fake_account(monkeypatch, fake)
+        monkeypatch.setenv(rrdb.DB_DSN_ENV, '   ')
+        monkeypatch.setenv(rrdb.CLIENT_ID_ENV, 'tenant-42')
+        assert rrdb.resolve_rocketride_dsn() == TEST_DSN
 
     def test_resolves_via_fake_account(self, monkeypatch):
         seen = {}
@@ -263,6 +285,7 @@ class TestRocketrideSqlConnection:
         account_mod.account = types.SimpleNamespace(resolve_db_dsn=fake)
         monkeypatch.setitem(sys.modules, 'ai.account', account_mod)
         monkeypatch.setenv('ROCKETRIDE_CLIENT_ID', 'tenant-42')
+        monkeypatch.delenv('ROCKETRIDE_DB_DSN', raising=False)
 
     def test_connection_params_come_from_resolved_dsn(self, monkeypatch):
         cls, _ = _sql_iglobal_cls(monkeypatch)
@@ -396,6 +419,7 @@ def _vector_store_cls(monkeypatch):
     account_mod.account = types.SimpleNamespace(resolve_db_dsn=fake)
     monkeypatch.setitem(sys.modules, 'ai.account', account_mod)
     monkeypatch.setenv('ROCKETRIDE_CLIENT_ID', 'tenant-42')
+    monkeypatch.delenv('ROCKETRIDE_DB_DSN', raising=False)
 
     iglobal = _load_from_path('nodes.rocketride_vector.IGlobal', _VEC_NODE_DIR / 'IGlobal.py')
     pkg = types.ModuleType('nodes.rocketride_vector')

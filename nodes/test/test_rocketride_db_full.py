@@ -226,6 +226,7 @@ def rr_env(monkeypatch):
     account_mod.account = types.SimpleNamespace(resolve_db_dsn=fake_resolve_db_dsn)
     monkeypatch.setitem(sys.modules, 'ai.account', account_mod)
     monkeypatch.setenv('ROCKETRIDE_CLIENT_ID', TEST_CLIENT_ID)
+    monkeypatch.delenv('ROCKETRIDE_DB_DSN', raising=False)
 
     return types.SimpleNamespace(schema=schema, warnings=warnings)
 
@@ -316,6 +317,27 @@ class TestRocketrideSqlE2E:
             assert written['affected_rows'] == 1
             back = inst.execute({'sql': f'SELECT count(*) AS n FROM {sql_table}'})
             assert back['rows'][0]['n'] == 3
+        finally:
+            glb.endGlobal()
+
+    def test_begin_global_via_injected_env_dsn(self, rr_env, monkeypatch, sql_table):
+        """The production delivery path: the task engine resolves server-side and
+        injects ROCKETRIDE_DB_DSN; the node-side account is never consulted.
+        """
+        import types as _types
+
+        async def poisoned(client_id):  # pragma: no cover — must not be reached
+            raise AssertionError('account must not be consulted when ROCKETRIDE_DB_DSN is injected')
+
+        monkeypatch.setitem(
+            sys.modules, 'ai.account', _types.SimpleNamespace(account=_types.SimpleNamespace(resolve_db_dsn=poisoned))
+        )
+        monkeypatch.setenv('ROCKETRIDE_DB_DSN', TEST_DSN)
+        glb, inst = self._begin(monkeypatch, {'table': sql_table, 'allow_execute': True})
+        try:
+            assert glb.database == 'rrtenant'
+            rows = inst.execute({'sql': f'SELECT count(*) AS n FROM {sql_table}'})
+            assert rows['rows'][0]['n'] == 2
         finally:
             glb.endGlobal()
 

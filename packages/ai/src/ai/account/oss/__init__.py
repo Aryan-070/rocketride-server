@@ -233,26 +233,9 @@ class Account(AccountBase):
 
     # audit() is inherited from AccountBase as a no-op — OSS has no database.
 
-    # =========================================================================
-    # CLOUD DATABASE  (not available in OSS)
-    # =========================================================================
-
-    async def resolve_db_dsn(self, client_id: str) -> str:
-        """
-        Resolve the per-tenant cloud database DSN for the RocketRide DB nodes.
-
-        Not available in OSS: the ``rocketride_sql`` / ``rocketride_vector`` /
-        ``rocketride_graph`` nodes connect only to the RocketRide cloud
-        data-core, which requires a cloud identity.  The open-source build has
-        no way to sign into the cloud, so there is no DSN to hand back.
-
-        Args:
-            client_id: The authenticated connection identity (unused in OSS).
-
-        Raises:
-            NotImplementedError: Always.
-        """
-        raise NotImplementedError('RocketRide cloud DB nodes require signing into RocketRide cloud')
+    # resolve_db_dsn is inherited from AccountBase: env-gated broker call
+    # (ROCKETRIDE_DB_BROKER_URL/_TOKEN); raises the cloud-sign-in error when
+    # the environment is not configured — the open-source default.
 
     # =========================================================================
     # APP MANIFEST — read from static apps.json

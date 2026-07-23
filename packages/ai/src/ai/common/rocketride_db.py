@@ -48,6 +48,11 @@ import urllib.parse
 # and cannot see the server-side AccountInfo directly).
 CLIENT_ID_ENV = 'ROCKETRIDE_CLIENT_ID'
 
+# The task engine resolves the per-tenant DSN server-side at task start (only
+# the server process has SaaS account context) and injects it here for
+# pipelines that contain RocketRide cloud DB nodes.
+DB_DSN_ENV = 'ROCKETRIDE_DB_DSN'
+
 
 def _run_async(coro):
     """Run a coroutine from synchronous node lifecycle code.
@@ -104,12 +109,26 @@ def to_sqlalchemy_url(dsn: str) -> str:
 
 
 def resolve_rocketride_dsn() -> str:
-    """Resolve the per-tenant libpq DSN for the current client via the account layer.
+    """Resolve the per-tenant libpq DSN for the current client.
 
-    Returns the raw DSN as handed back by ``Account.resolve_db_dsn`` (URL form,
-    directly usable by ``psycopg2.connect``).  Callers that need a SQLAlchemy
-    engine URL should wrap the result in :func:`to_sqlalchemy_url`.
+    Delivery order:
+
+    1. ``ROCKETRIDE_DB_DSN`` env — the production path. The task engine
+       resolves the DSN server-side at task start (the SaaS account context
+       exists only in the server process; node subprocesses always see the
+       OSS account) and injects it here, exactly like ``ROCKETRIDE_CLIENT_ID``.
+    2. ``Account.resolve_db_dsn(client_id)`` — fallback for callers running
+       inside the server process (or tests injecting a fake account). On an
+       unconfigured open-source build this raises the cloud-sign-in error.
+
+    Returns the raw DSN (URL form, directly usable by ``psycopg2.connect``).
+    Callers that need a SQLAlchemy engine URL should wrap the result in
+    :func:`to_sqlalchemy_url`.
     """
+    injected = os.environ.get(DB_DSN_ENV, '').strip()
+    if injected:
+        return injected
+
     # Lazy import: ai.common is imported very early, and ai.account pulls in the
     # OSS/SaaS overlay — importing at module load risks a cycle.
     from ai.account import account

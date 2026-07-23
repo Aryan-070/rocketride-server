@@ -162,6 +162,7 @@ def rr_env(monkeypatch):
     account_mod.account = types.SimpleNamespace(resolve_db_dsn=fake_resolve_db_dsn)
     monkeypatch.setitem(sys.modules, 'ai.account', account_mod)
     monkeypatch.setenv('ROCKETRIDE_CLIENT_ID', TEST_CLIENT_ID)
+    monkeypatch.delenv('ROCKETRIDE_DB_DSN', raising=False)
 
     iglobal = _load_from_path('nodes.rocketride_graph.IGlobal', _NODE_DIR / 'IGlobal.py')
     pkg = types.ModuleType('nodes.rocketride_graph')

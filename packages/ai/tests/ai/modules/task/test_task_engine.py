@@ -676,3 +676,28 @@ async def test_forward_task_event_debugger_swallows_send_failure():
 
     # Should not raise.
     await Task._forward_task_event(t, EVENT_TYPE.DEBUGGER, {'event': 'output'})
+
+
+# ---------------------------------------------------------------------------
+# _pipeline_uses_rocketride_db
+# ---------------------------------------------------------------------------
+
+
+def test_pipeline_uses_rocketride_db_detects_each_provider():
+    """Any of the three RocketRide cloud DB providers triggers DSN injection."""
+    for provider in ('rocketride_sql', 'rocketride_vector', 'rocketride_graph'):
+        t = _task(pipeline={'components': [{'id': 'a', 'provider': 'chat'}, {'id': 'b', 'provider': provider}]})
+        assert Task._pipeline_uses_rocketride_db(t), provider
+
+
+def test_pipeline_uses_rocketride_db_false_without_db_nodes():
+    """Ordinary pipelines never trigger provisioning."""
+    t = _task(pipeline={'components': [{'id': 'a', 'provider': 'chat'}, {'id': 'b', 'provider': 'db_postgres'}]})
+    assert not Task._pipeline_uses_rocketride_db(t)
+
+
+def test_pipeline_uses_rocketride_db_tolerates_malformed_components():
+    """Missing components / non-dict entries must not raise at task start."""
+    assert not Task._pipeline_uses_rocketride_db(_task(pipeline={}))
+    t = _task(pipeline={'components': ['not-a-dict', {'no-provider': True}]})
+    assert not Task._pipeline_uses_rocketride_db(t)
