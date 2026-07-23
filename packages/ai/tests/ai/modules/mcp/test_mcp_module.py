@@ -48,6 +48,7 @@ async def test_build_mcp_server_lists_tools_from_real_registry(fake_engine):
         'deploy_update',
         'monitor',
         'list_running_pipelines',
+        'get_pipeline_trace',
         'sql_query',
         'graph_query',
         'vector_search',
