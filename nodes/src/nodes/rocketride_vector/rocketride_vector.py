@@ -154,7 +154,7 @@ class Store(DocumentStoreBase):
         # DSN from the account layer, keyed by the authenticated client_id, and
         # connect directly. host/port/database are parsed only for bookkeeping
         # (the connection subKey); the DSN is the source of truth.
-        dsn = resolve_rocketride_dsn()
+        dsn = resolve_rocketride_dsn(config)
         fields = parse_dsn_fields(dsn)
         self.client_id = current_client_id()
         self.host = fields['host']

@@ -85,8 +85,9 @@ class IGlobal(GraphGlobalBase):
         self.max_rows = self._config_int(config, 'max_rows', DEFAULT_MAX_ROWS)
         self.query_timeout_ms = self._config_int(config, 'query_timeout_ms', DEFAULT_QUERY_TIMEOUT_MS)
 
-        # The one RocketRide difference: DSN from the account seam, no config.
-        dsn = resolve_rocketride_dsn()
+        # The one RocketRide difference: DSN from the account seam. The config
+        # may carry the OSS cloud_api_key; connection fields stay absent.
+        dsn = resolve_rocketride_dsn(config)
         self.client = psycopg2.connect(dsn)
 
         # Fail-fast round-trip: AGE present + the tenant graph exists.
@@ -121,7 +122,7 @@ class IGlobal(GraphGlobalBase):
         """Save-time probe: warn-only (the user is still editing the node)."""
         conn = None
         try:
-            dsn = resolve_rocketride_dsn()
+            dsn = resolve_rocketride_dsn(config)
             conn = psycopg2.connect(dsn, connect_timeout=3)
             with conn.cursor() as cur:
                 cur.execute('SELECT 1')

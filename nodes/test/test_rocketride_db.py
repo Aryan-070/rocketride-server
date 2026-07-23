@@ -192,6 +192,152 @@ class TestResolveRocketrideDsn:
             asyncio.run(call_from_loop())
 
 
+class TestCloudApiKeyDoor:
+    """OSS sign-in path: config cloud_api_key exchanged at the cloud door.
+
+    Precedence contract: injected env DSN > ambient account (broker) > config
+    key > sign-in error. A real localhost HTTP server plays the door so the
+    actual urllib request path is exercised (same pattern as the broker tests
+    in packages/ai).
+    """
+
+    DOOR_DSN = 'postgresql://r_t9:doorpass@pooler.example:5432/t_t9?sslmode=require'
+
+    def _install_fake_account(self, monkeypatch, resolver):
+        monkeypatch.delenv(rrdb.DB_DSN_ENV, raising=False)
+        ai_pkg = types.ModuleType('ai')
+        ai_pkg.__path__ = []
+        account_mod = types.ModuleType('ai.account')
+        account_mod.account = types.SimpleNamespace(resolve_db_dsn=resolver)
+        monkeypatch.setitem(sys.modules, 'ai', ai_pkg)
+        monkeypatch.setitem(sys.modules, 'ai.account', account_mod)
+
+    def _signin_account(self, monkeypatch):
+        """Fake account behaving like an unconfigured OSS build."""
+
+        async def fake(client_id):
+            raise NotImplementedError('RocketRide cloud DB nodes require signing into RocketRide cloud')
+
+        self._install_fake_account(monkeypatch, fake)
+
+    @pytest.fixture()
+    def door(self, monkeypatch):
+        """Localhost fake door: records requests, responds per Bearer key."""
+        import json as _json
+        import threading
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+
+        dsn = self.DOOR_DSN
+        requests: list = []
+
+        class _FakeDoor(BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(length).decode('utf-8')
+                requests.append({'auth': self.headers.get('Authorization'), 'body': body})
+                key = (self.headers.get('Authorization') or '').removeprefix('Bearer ')
+                if key == 'rr_bad':
+                    self.send_response(401)
+                    self.end_headers()
+                    return
+                if key == 'rr_boom':
+                    self.send_response(500)
+                    self.end_headers()
+                    return
+                payload = {'db_name': 't_t9'} if key == 'rr_nodsn' else {'db_name': 't_t9', 'dsn': dsn}
+                raw = _json.dumps(payload).encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+            def log_message(self, *args):
+                pass
+
+        server = HTTPServer(('127.0.0.1', 0), _FakeDoor)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        monkeypatch.setenv(rrdb.DB_DOOR_URL_ENV, f'http://127.0.0.1:{server.server_port}/db/dsn')
+        monkeypatch.delenv(rrdb.DB_DSN_ENV, raising=False)
+        monkeypatch.delenv(rrdb.CLIENT_ID_ENV, raising=False)
+        yield requests
+        server.shutdown()
+        server.server_close()
+
+    def test_injected_env_dsn_beats_config_key(self, monkeypatch, door):
+        monkeypatch.setenv(rrdb.DB_DSN_ENV, TEST_DSN)
+        assert rrdb.resolve_rocketride_dsn({'cloud_api_key': 'rr_good'}) == TEST_DSN
+        assert door == []
+
+    def test_ambient_account_beats_config_key(self, monkeypatch, door):
+        """Hosted identity wins: a stray pasted key must not retarget the tenant."""
+
+        async def fake(client_id):
+            return TEST_DSN
+
+        self._install_fake_account(monkeypatch, fake)
+        monkeypatch.setenv(rrdb.CLIENT_ID_ENV, 'tenant-42')
+        assert rrdb.resolve_rocketride_dsn({'cloud_api_key': 'rr_good'}) == TEST_DSN
+        assert door == []
+
+    def test_signin_error_falls_through_to_door(self, monkeypatch, door):
+        self._signin_account(monkeypatch)
+        monkeypatch.setenv(rrdb.CLIENT_ID_ENV, 'tenant-42')
+        assert rrdb.resolve_rocketride_dsn({'cloud_api_key': ' rr_good '}) == self.DOOR_DSN
+        # Bearer key stripped; body deliberately empty (tenant derived server-side).
+        assert door == [{'auth': 'Bearer rr_good', 'body': '{}'}]
+
+    def test_no_client_id_with_key_uses_door(self, monkeypatch, door):
+        """Save-time validation outside a task: the key alone must work."""
+        self._signin_account(monkeypatch)
+        assert rrdb.resolve_rocketride_dsn({'cloud_api_key': 'rr_good'}) == self.DOOR_DSN
+
+    def test_signin_error_without_key_names_field(self, monkeypatch, door):
+        self._signin_account(monkeypatch)
+        monkeypatch.setenv(rrdb.CLIENT_ID_ENV, 'tenant-42')
+        with pytest.raises(NotImplementedError, match='RocketRide API key'):
+            rrdb.resolve_rocketride_dsn({})
+
+    def test_no_identity_no_key_names_field(self, monkeypatch, door):
+        self._signin_account(monkeypatch)
+        with pytest.raises(NotImplementedError, match='RocketRide API key'):
+            rrdb.resolve_rocketride_dsn()
+
+    def test_broker_runtime_error_propagates_despite_key(self, monkeypatch, door):
+        """Real hosted broker failures stay loud — never masked by the key path."""
+
+        async def fake(client_id):
+            raise RuntimeError('DB broker unreachable: connection refused')
+
+        self._install_fake_account(monkeypatch, fake)
+        monkeypatch.setenv(rrdb.CLIENT_ID_ENV, 'tenant-42')
+        with pytest.raises(RuntimeError, match='DB broker unreachable'):
+            rrdb.resolve_rocketride_dsn({'cloud_api_key': 'rr_good'})
+        assert door == []
+
+    def test_rejected_key_raises_clear_error(self, monkeypatch, door):
+        self._signin_account(monkeypatch)
+        with pytest.raises(RuntimeError, match='rejected the API key.*401'):
+            rrdb.resolve_rocketride_dsn({'cloud_api_key': 'rr_bad'})
+
+    def test_door_5xx_raises(self, monkeypatch, door):
+        self._signin_account(monkeypatch)
+        with pytest.raises(RuntimeError, match='request failed.*500'):
+            rrdb.resolve_rocketride_dsn({'cloud_api_key': 'rr_boom'})
+
+    def test_missing_dsn_in_door_response_raises(self, monkeypatch, door):
+        self._signin_account(monkeypatch)
+        with pytest.raises(RuntimeError, match='did not include a DSN'):
+            rrdb.resolve_rocketride_dsn({'cloud_api_key': 'rr_nodsn'})
+
+    def test_unreachable_door_raises(self, monkeypatch):
+        self._signin_account(monkeypatch)
+        monkeypatch.delenv(rrdb.CLIENT_ID_ENV, raising=False)
+        monkeypatch.setenv(rrdb.DB_DOOR_URL_ENV, 'http://127.0.0.1:9/db/dsn')
+        with pytest.raises(RuntimeError, match='unreachable'):
+            rrdb.resolve_rocketride_dsn({'cloud_api_key': 'rr_good'})
+
+
 # ---------------------------------------------------------------------------
 # Account layer: OSS stub + base default
 # ---------------------------------------------------------------------------

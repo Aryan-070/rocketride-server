@@ -130,9 +130,18 @@
 			"minimum": 1,
 			"maximum": 1000
 		},
+		"rrvector.cloud_api_key": {
+			"type": "string",
+			"title": "RocketRide API key",
+			"default": "",
+			"description": "Only required when running the open-source build. Generate a personal API key in the RocketRide online editor and paste it here to connect this node to your RocketRide cloud database. Leave empty when running in RocketRide cloud — your signed-in identity is used automatically.",
+			"ui": {
+				"ui:widget": "password"
+			}
+		},
 		"rrvector.cloud": {
 			"object": "cloud",
-			"properties": ["rrvector.collection", "rrvector.score", "rrvector.similarity", "rrvector.hnsw_m", "rrvector.hnsw_ef_construction"]
+			"properties": ["rrvector.collection", "rrvector.score", "rrvector.similarity", "rrvector.hnsw_m", "rrvector.hnsw_ef_construction", "rrvector.cloud_api_key"]
 		},
 		"rrvector.profile": {
 			"hidden": true,

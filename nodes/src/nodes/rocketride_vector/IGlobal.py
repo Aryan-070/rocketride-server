@@ -94,8 +94,9 @@ class IGlobal(IGlobalTransform):
                 )
                 return
 
-            # No host/user/password fields — resolve the per-tenant DSN.
-            dsn = resolve_rocketride_dsn()
+            # No host/user/password fields — resolve the per-tenant DSN
+            # (the config may carry the OSS cloud_api_key).
+            dsn = resolve_rocketride_dsn(cfg)
 
             import psycopg2  # type: ignore
 

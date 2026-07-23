@@ -8,7 +8,7 @@ The same two roles as the generic `db_postgres` node. As a pipeline node, it rec
 
 The defining difference: **there are no connection fields**. Instead of host/user/password, the node resolves a ready per-tenant DSN from the account layer (`Account.resolve_db_dsn(client_id)`), keyed by the authenticated connection identity. The RocketRide cloud provisions one database per tenant; the same database backs `rocketride_sql`, `rocketride_vector`, and `rocketride_graph`, so raw SQL over the vector tables also goes through this node.
 
-Requires signing into RocketRide cloud. On the open-source build without a cloud identity the node fails at start with `RocketRide cloud DB nodes require signing into RocketRide cloud`.
+Requires a RocketRide cloud identity. In RocketRide cloud this is automatic (your signed-in identity is used). On the open-source build, generate a personal API key in the RocketRide online editor and paste it into the node's **RocketRide API key** field (`cloud_api_key`); the ambient platform identity always takes precedence over the pasted key, so the field is ignored when running in RocketRide cloud. Without either, the node fails at start with a sign-in error naming the field.
 
 Safety defaults match `db_postgres`: only `SELECT` statements are permitted for LLM-generated queries, generated SQL is validated with `EXPLAIN` before execution, and raw SQL execution (`QuestionType.EXECUTE`) is disabled by default via `allow_execute`. Isolation for raw execution comes from the database-per-tenant boundary, not query inspection.
 
@@ -46,8 +46,9 @@ Two special question types are handled on the `questions` lane:
 | `db_description` | string | Default empty. What is this database used for? Helps the LLM generate more accurate queries. |
 | `max_attempts` | integer | Default 5. Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL |
 | `allow_execute` | boolean | Default false. Permit QuestionType.EXECUTE callers to run raw SQL without LLM translation or safety checks. |
+| `cloud_api_key` | string (password) | Default empty. Only required on the open-source build: a personal RocketRide API key used to connect to your RocketRide cloud database. Ignored in RocketRide cloud. |
 
-There are intentionally no `host` / `user` / `password` / `database` fields — the connection is resolved from your signed-in RocketRide identity.
+There are intentionally no `host` / `user` / `password` / `database` fields — the connection is resolved from your signed-in RocketRide identity (or, on open source, from `cloud_api_key`).
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->
