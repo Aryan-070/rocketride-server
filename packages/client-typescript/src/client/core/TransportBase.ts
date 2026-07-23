@@ -24,6 +24,42 @@
 
 import { DAPMessage, TransportCallbacks } from '../types';
 
+const SENSITIVE_PROTOCOL_KEYS = new Set([
+	'apikey',
+	'rocketrideapikey',
+	'auth',
+	'authorization',
+	'accesstoken',
+	'refreshtoken',
+	'usertoken',
+	'credential',
+	'credentials',
+	'password',
+	'secret',
+	'clientsecret',
+	'verifier',
+]);
+
+/**
+ * Produce a logging-only copy with credential-bearing fields removed.
+ */
+export function redactProtocolMessage<T>(value: T): T {
+	const redact = (item: unknown): unknown => {
+		if (Array.isArray(item)) return item.map(redact);
+		if (!item || typeof item !== 'object' || item instanceof Uint8Array) return item;
+		return Object.fromEntries(
+			Object.entries(item as Record<string, unknown>).map(([key, child]) => {
+				const normalizedKey = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+				const isSensitive = SENSITIVE_PROTOCOL_KEYS.has(normalizedKey)
+					|| normalizedKey === 'token'
+					|| normalizedKey.endsWith('token');
+				return [key, isSensitive ? '<redacted>' : redact(child)];
+			}),
+		);
+	};
+	return redact(value) as T;
+}
+
 /**
  * Abstract base class for DAP transport implementations.
  *
@@ -68,10 +104,17 @@ export abstract class TransportBase {
 	 * Forward received message to callback if available.
 	 */
 	protected async _transportReceive(message: DAPMessage): Promise<void> {
-		this._debugProtocol(`RECV: ${JSON.stringify(message)}`);
+		this._debugProtocol(`RECV: ${JSON.stringify(this._redactProtocolMessage(message))}`);
 		if (this._onCallerReceive) {
 			await this._onCallerReceive(message);
 		}
+	}
+
+	/**
+	 * Produce a logging-only copy with credential-bearing fields removed.
+	 */
+	protected _redactProtocolMessage<T>(value: T): T {
+		return redactProtocolMessage(value);
 	}
 
 	/**
@@ -126,7 +169,8 @@ export abstract class TransportBase {
 	}
 
 	/**
-	 * Update connection URI. Takes effect on the next connect().
+	 * Update the connection URI. Concrete transports may invalidate an active
+	 * connection immediately so callbacks from the previous URI cannot publish.
 	 */
 	setUri(_uri: string): void {}
 

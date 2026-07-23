@@ -78,6 +78,27 @@ export class AuthenticationException extends ConnectionException {
 }
 
 /**
+ * Terminal reasons for an explicitly cancelled login attempt.
+ */
+export type LoginAttemptCancellationReason = 'superseded' | 'logout' | 'detached';
+
+/**
+ * Raised when a public login/connect attempt is cancelled by newer user intent.
+ *
+ * This deliberately extends Error directly: cancellation is control flow, not a
+ * RocketRide server or protocol failure.
+ */
+export class LoginAttemptCancelledError extends Error {
+	public readonly reason: LoginAttemptCancellationReason;
+
+	constructor(reason: LoginAttemptCancellationReason) {
+		super(reason);
+		this.name = 'LoginAttemptCancelledError';
+		this.reason = reason;
+	}
+}
+
+/**
  * Exception raised for data pipe operations.
  * 
  * Raised when there are problems with data pipes used for sending
