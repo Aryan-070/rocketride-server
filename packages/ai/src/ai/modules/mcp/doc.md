@@ -11,7 +11,7 @@ like every other module and mounted at:
 /mcp
 ```
 
-This module exposes a static, 25-tool RocketRide authoring/execution surface served
+This module exposes a static, 26-tool RocketRide authoring/execution surface served
 over HTTP from inside the running engine process — no separate process or transport
 bridge required. It supersedes the earlier 2-tool port, which exposed a dynamic
 per-pipeline `{filepath}` tool plus a `RocketRide_Document_Processor` convenience
@@ -50,7 +50,7 @@ tool; both are removed (see "History" below).
 Config key `mcp_dev_no_auth` (bool, in the module `config` dict passed to `initModule`)
 is the config-driven equivalent of `MCP_DEV_NO_AUTH=1`; either one enables the bypass.
 
-## The 25 tools
+## The 26 tools
 
 Dispatch is registry-based: `tooling.ToolRegistry` holds `{name -> (description,
 inputSchema, handler)}`; `tools/__init__.register_all(registry)` populates one shared
@@ -67,7 +67,7 @@ group — `sql_query`/`graph_query`/`vector_search` (see Query below) — a diff
 kind of convenience tool than the removed one, reintroduced by `tools/query.py` and
 available only when signed into the RocketRide cloud.
 
-The 25 tools are organized into 8 groups (plus 2 resources), matching
+The 26 tools are organized into 8 groups (plus 2 resources), matching
 `claude/tasks/http-mcp-tools-port/final-tool-surface.md`.
 
 **Introspection (4)** — `tools/introspection.py`, read-only/static-analysis, no task tokens:
@@ -83,8 +83,8 @@ The 25 tools are organized into 8 groups (plus 2 resources), matching
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
-| `run_pipeline` | Start a pipeline (inline or filepath), returning a `task_token`; optionally send `inputs` in the same call and get a result back. | `pipeline`/`filepath`, `inputs`, `ttl`, `use_existing`, `source`, `threads` |
-| `run_dropper_pipe` | Start a pipeline (inline or filepath) and return two self-contained URLs for getting files in over a separate HTTP data channel — file bytes cannot ride the MCP tool call: `upload_url` for programmatic POSTing and `dropper_url` for a human to drag-drop files in a browser. Same inputs as `run_pipeline` minus `inputs` (no inline-send path). `upload_url` is `POST {base}/task/data?token=<tk_>&auth=<pk_>` (multipart or raw body); `dropper_url` is `GET {base}/dropper?auth=<pk_>` (a browser page whose UI then POSTs to `/task/data`). Both embed the routing token and task's public auth key so no `Authorization` header is required. | `pipeline`/`filepath`, `ttl`, `use_existing`, `source`, `threads` |
+| `run_pipeline` | Start a pipeline (inline or filepath), returning a `task_token`; optionally send `inputs` in the same call and get a result back. | `pipeline`/`filepath`, `inputs`, `ttl`, `use_existing`, `source`, `threads`, `pipelineTraceLevel` |
+| `run_dropper_pipe` | Start a pipeline (inline or filepath) and return two self-contained URLs for getting files in over a separate HTTP data channel — file bytes cannot ride the MCP tool call: `upload_url` for programmatic POSTing and `dropper_url` for a human to drag-drop files in a browser. Same inputs as `run_pipeline` minus `inputs` (no inline-send path). `upload_url` is `POST {base}/task/data?token=<tk_>&auth=<pk_>` (multipart or raw body); `dropper_url` is `GET {base}/dropper?auth=<pk_>` (a browser page whose UI then POSTs to `/task/data`). Both embed the routing token and task's public auth key so no `Authorization` header is required. | `pipeline`/`filepath`, `ttl`, `use_existing`, `source`, `threads`, `pipelineTraceLevel` |
 | `send_data` | Send data to a running task by `task_token`, return its result. | `task_token`, `input` |
 | `terminate` | Tear down a running task by `task_token` — also the stop-runaway-task path. | `task_token` |
 
@@ -94,12 +94,13 @@ The 25 tools are organized into 8 groups (plus 2 resources), matching
 | --- | --- | --- |
 | `send_files` | Upload one or more store-relative file paths to a running task by `task_token`. | `task_token`, `files` |
 
-**Visibility (2)** — `tools/visibility.py`:
+**Visibility (3)** — `tools/visibility.py`:
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
 | `monitor` | Bounded poll of task status until a terminal state or `timeout` elapses, returning a snapshot. | `task_token`, `timeout` (default 30), `interval` (default 1) |
 | `list_running_pipelines` | Server-authoritative list of running tasks (task token, name, state) — thin wrapper over the same `client.list_tasks()` seam backing the `rocketride://status` resource. Makes tokens discoverable for `monitor`/`send_data`/`terminate` without having started the task yourself in this session. | none |
+| `get_pipeline_trace` | Drain the per-node trace stream (component enter/leave, `trace.error`/`trace.data`) for a task that ran with `pipelineTraceLevel` — the granular per-node detail `monitor` cannot see. Auto-subscribes on first call for a token; page forward with `since`. See "Per-node tracing" below. | `task_token`, `since` (cursor, default 0) |
 
 **Store (4)** — `tools/capability.py`, read-only, SDK: `rocketride.mixins.store`:
 
@@ -152,16 +153,47 @@ code-level gate for that today: a locally-run engine with no cloud DB provisione
 will simply fail the `postgres_1`/`neo4j_1`/`qdrant_1` node lookup at call time. The
 gate is an operational/provisioning fact, not a flag this module checks.
 
-**Deferred: a 26th tool, `get_pipeline_trace`.** Node-level pipeline tracing (the
-per-node component flow — op, lane, input/output, result, error, i.e. the
-`apaevt_flow`/FLOW events) is designed but not implemented in this surface;
-`monitor` above covers only task-level state/counts, not per-node trace detail.
-Implementing it needs either reading a `_trace` block from a
-`pipelineTraceLevel`-enabled run or an MCP-side FLOW-event collector, plus exposing
-`pipelineTraceLevel` on `run_pipeline`/`run_dropper_pipe` to turn capture on — real
-design work, not a thin SDK wrapper like most of the tools above. See
-`claude/tasks/http-mcp-tools-port/final-tool-surface.md` §Visibility for the full
-design note; it is tracked for its own follow-up plan, not this one.
+### Per-node tracing
+
+`get_pipeline_trace` drains node-level component flow (op, lane, input/output,
+result, error — the `apaevt_flow`/FLOW events the engine pushes over the
+subscribing WS connection) for a task, complementing `monitor`'s task-level
+state/counts with per-node detail. The pieces:
+
+- **`pipelineTraceLevel` gating.** Tracing only happens for tasks started with
+  `pipelineTraceLevel` set to something other than `'none'` (use `'full'`) on
+  `run_pipeline`/`run_dropper_pipe`, or passed directly to the SDK's `use()`
+  for an externally-started task. A task run without it produces no flow
+  events to drain, regardless of how many times `get_pipeline_trace` is
+  called on its token.
+- **Subscribe-at-start vs. auto-subscribe.** `run_pipeline`/`run_dropper_pipe`
+  flow-subscribe immediately (`client.add_monitor({'token': token}, ['flow'])`)
+  when `pipelineTraceLevel` is set, and the tool result carries
+  `flow_subscribed: true/false` (`false` plus a `flow_warning` if the
+  subscribe call itself failed — best-effort, since the pipeline already
+  started). `get_pipeline_trace` also auto-subscribes on a token's first call
+  if it isn't already subscribed — this is what makes it work for **adopted**
+  tasks (started outside this MCP session, e.g. directly via the SDK's
+  `use()`, so the server-owned `TaskRegistry` never saw them): call
+  `get_pipeline_trace(token)` once, before sending any work, to establish the
+  subscription, then send work, then call again to drain.
+- **Events-before-subscription are lost.** There is no server-side event
+  buffer prior to subscription — only events that arrive *after*
+  `add_monitor` is called are captured. The first call on a newly-subscribed
+  token returns whatever's already buffered (usually nothing yet) plus a
+  `note` explaining this; the caller is expected to send work and call again.
+- **Cursor paging.** Each buffered event carries a monotonic `seq`; a call
+  returns `{events, cursor, count}` where `cursor` is the highest `seq`
+  currently buffered. Pass that back as `since` on the next call to page
+  forward — `since=0` (the default) returns everything still buffered.
+- **Bounds.** Flow buffers are held in `registry.TaskRegistry`, keyed by
+  token, independent of task lifecycle (a one-shot task's registry entry is
+  removed by `run_pipeline`/`monitor` on completion, but its flow buffer stays
+  drainable). Bounded so a long-lived server process can't accumulate
+  unbounded memory: at most 32 distinct tokens tracked (oldest evicted,
+  FIFO, once a 33rd is seen) and at most 500 events per token (oldest
+  events dropped once the deque is full). Draining regularly (small `since`
+  steps) avoids ever hitting the per-token cap.
 
 Tool call dispatch (`handlers._call_tool`) looks up the handler by name in the
 registry and calls `await handler(engine_client, task_registry, arguments)`. Errors
@@ -192,7 +224,7 @@ prompt templates from the earlier port were removed along with their tests.
 ## The `EngineClient` seam
 
 `engine.py` defines one `Protocol`, `EngineClient`, with the ~22 async methods needed
-by the 25-tool surface (task lifecycle, services/validation, store/templates/store
+by the 26-tool surface (task lifecycle, services/validation, store/templates/store
 metadata/signed URLs, full deployment lifecycle, query sessions — see the `Protocol`
 definition in `engine.py` for exact signatures). All
 tool/resource code depends only on this interface — never on a concrete client — so
@@ -298,14 +330,18 @@ design in `claude/tasks/rocketride-mcp-server/` via
 `claude/tasks/http-mcp-tools-port/`. The dynamic per-pipeline tools, the convenience
 tool, `rocketride://nodes`, and all 3 prompts are removed.
 
-The surface then grew to today's **25 tools**: `run_dropper_pipe` landed with the
+The surface then grew to **25 tools**: `run_dropper_pipe` landed with the
 ingress work (16 → 17); the 3 `sql_query`/`graph_query`/`vector_search` query tools
 followed (17 → 20); `set_env`/`list_env_keys` were then dropped as out of scope
 (20 → 18); and `store_stat`, `store_get_url`, `deploy_list`, `deploy_status`,
 `deploy_remove`, `deploy_update`, and `list_running_pipelines` were added to round
-out store/deployment/visibility lifecycles (18 → 25). `get_pipeline_trace` was designed as part of the same pass but
-deferred (see Query above and `claude/tasks/http-mcp-tools-port/final-tool-surface.md`
-for the definitive 26-tool target and per-tool rationale).
+out store/deployment/visibility lifecycles (18 → 25). `get_pipeline_trace` (25 → 26)
+followed, adding node-level `pipelineTraceLevel`/FLOW-event tracing — its
+mechanics (registry routing, dispatcher shape, subscribe-at-start, event
+fields) were ported from the `feature/mcp-server-overhaul` branch, which had
+already proven them live; see "Per-node tracing" above and
+`claude/tasks/http-mcp-tools-port/final-tool-surface.md` for the per-tool
+rationale.
 
 ## Running / testing locally
 
