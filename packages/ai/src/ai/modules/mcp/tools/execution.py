@@ -37,7 +37,7 @@ from ..tooling import ToolRegistry
 # document-processing pipelines; not user-configurable in v1.
 DEFAULT_TIMEOUT_SECONDS = 120
 
-_OPTIONAL_USE_KWARGS = ('ttl', 'use_existing', 'source', 'threads')
+_OPTIONAL_USE_KWARGS = ('ttl', 'use_existing', 'source', 'threads', 'pipelineTraceLevel')
 
 _RUN_PIPELINE_SCHEMA = {
     'type': 'object',
@@ -49,6 +49,13 @@ _RUN_PIPELINE_SCHEMA = {
         'use_existing': {'type': 'boolean', 'description': 'Reuse an existing task instead of starting a new one'},
         'source': {'type': 'string', 'description': 'Optional source label forwarded to use()'},
         'threads': {'type': 'integer', 'description': 'Optional thread count forwarded to use()'},
+        'pipelineTraceLevel': {
+            'type': 'string',
+            'enum': ['none', 'metadata', 'summary', 'full'],
+            'description': (
+                'Capture the per-node trace stream at this detail level; drain it with get_pipeline_trace (use "full")'
+            ),
+        },
     },
     'anyOf': [{'required': ['pipeline']}, {'required': ['filepath']}],
 }
@@ -62,6 +69,13 @@ _RUN_DROPPER_PIPE_SCHEMA = {
         'use_existing': {'type': 'boolean', 'description': 'Reuse an existing task instead of starting a new one'},
         'source': {'type': 'string', 'description': 'Optional source label forwarded to use()'},
         'threads': {'type': 'integer', 'description': 'Optional thread count forwarded to use()'},
+        'pipelineTraceLevel': {
+            'type': 'string',
+            'enum': ['none', 'metadata', 'summary', 'full'],
+            'description': (
+                'Capture the per-node trace stream at this detail level; drain it with get_pipeline_trace (use "full")'
+            ),
+        },
     },
     'anyOf': [{'required': ['pipeline']}, {'required': ['filepath']}],
 }
@@ -131,6 +145,16 @@ async def _run_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
 
     result_payload: Dict[str, Any] = {'ok': True, 'task_token': token}
 
+    if args.get('pipelineTraceLevel'):
+        tasks.set_flow_id(token, (started or {}).get('id'))
+        try:
+            await client.add_monitor({'token': token}, ['flow'])
+            tasks.mark_flow_subscribed(token)
+            result_payload['flow_subscribed'] = True
+        except Exception as exc:  # noqa: BLE001 - pipeline started; subscription is best-effort
+            result_payload['flow_subscribed'] = False
+            result_payload['flow_warning'] = str(exc)
+
     inputs = args.get('inputs')
     if inputs is not None:
         try:
@@ -189,9 +213,24 @@ async def _run_dropper_pipe(client, tasks, args: Dict[str, Any]) -> dict:
         )
     tasks.add(token, pipeline_ref=filepath or '<inline>')
 
-    upload_url = f'{client.base_url}/task/data?token={token}&auth={public_token}'
-    dropper_url = f'{client.base_url}/dropper?auth={public_token}'
-    return {'ok': True, 'task_token': token, 'upload_url': upload_url, 'dropper_url': dropper_url}
+    result_payload: Dict[str, Any] = {
+        'ok': True,
+        'task_token': token,
+        'upload_url': f'{client.base_url}/task/data?token={token}&auth={public_token}',
+        'dropper_url': f'{client.base_url}/dropper?auth={public_token}',
+    }
+
+    if args.get('pipelineTraceLevel'):
+        tasks.set_flow_id(token, started.get('id'))
+        try:
+            await client.add_monitor({'token': token}, ['flow'])
+            tasks.mark_flow_subscribed(token)
+            result_payload['flow_subscribed'] = True
+        except Exception as exc:  # noqa: BLE001 - pipeline started; subscription is best-effort
+            result_payload['flow_subscribed'] = False
+            result_payload['flow_warning'] = str(exc)
+
+    return result_payload
 
 
 async def _send_data(client, tasks, args: Dict[str, Any]) -> dict:

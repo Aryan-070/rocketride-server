@@ -338,3 +338,158 @@ async def test_run_dropper_pipe_bad_request_when_engine_omits_public_token(fake_
     assert result['error_type'] == 'BadRequest'
     # no null-keyed task leaked into the registry
     assert tasks.get(None) is None
+
+
+# --- pipelineTraceLevel passthrough + flow subscription ----------------------
+
+
+@pytest.mark.asyncio
+async def test_run_pipeline_forwards_pipeline_trace_level(fake_engine):
+    registry = ToolRegistry()
+    execution.register(registry)
+    tasks = TaskRegistry()
+
+    await registry.handler('run_pipeline')(fake_engine, tasks, {'filepath': 'p.pipe', 'pipelineTraceLevel': 'full'})
+
+    assert fake_engine.used == [{'filepath': 'p.pipe', 'pipelineTraceLevel': 'full'}]
+
+
+@pytest.mark.asyncio
+async def test_run_dropper_pipe_forwards_pipeline_trace_level(fake_engine):
+    registry = ToolRegistry()
+    execution.register(registry)
+    tasks = TaskRegistry()
+
+    await registry.handler('run_dropper_pipe')(
+        fake_engine, tasks, {'filepath': 'p.pipe', 'pipelineTraceLevel': 'summary'}
+    )
+
+    assert fake_engine.used == [{'filepath': 'p.pipe', 'pipelineTraceLevel': 'summary'}]
+
+
+@pytest.mark.asyncio
+async def test_run_pipeline_stores_flow_id_and_subscribes_when_trace_level_present(fake_engine):
+    registry = ToolRegistry()
+    execution.register(registry)
+    tasks = TaskRegistry()
+
+    result = await registry.handler('run_pipeline')(
+        fake_engine, tasks, {'filepath': 'p.pipe', 'pipelineTraceLevel': 'full'}
+    )
+
+    assert result['ok'] is True
+    assert result['flow_subscribed'] is True
+    assert fake_engine.add_monitor_calls == [({'token': fake_engine._token}, ['flow'])]
+    assert tasks.is_flow_subscribed(fake_engine._token)
+    # flow_id from use()'s 'id' routes an event by exact id
+    assert tasks.record_flow('abcd1234.websrc', {'kind': 'node'}) is True
+    drained = tasks.flow_since(fake_engine._token)
+    assert [e['kind'] for e in drained['events']] == ['node']
+
+
+@pytest.mark.asyncio
+async def test_run_dropper_pipe_stores_flow_id_and_subscribes_when_trace_level_present(fake_engine):
+    registry = ToolRegistry()
+    execution.register(registry)
+    tasks = TaskRegistry()
+
+    result = await registry.handler('run_dropper_pipe')(
+        fake_engine, tasks, {'filepath': 'p.pipe', 'pipelineTraceLevel': 'full'}
+    )
+
+    assert result['ok'] is True
+    assert result['flow_subscribed'] is True
+    assert fake_engine.add_monitor_calls == [({'token': fake_engine._token}, ['flow'])]
+    assert tasks.record_flow('abcd1234.websrc', {'kind': 'node'}) is True
+    drained = tasks.flow_since(fake_engine._token)
+    assert [e['kind'] for e in drained['events']] == ['node']
+
+
+@pytest.mark.asyncio
+async def test_run_pipeline_does_not_subscribe_without_trace_level(fake_engine):
+    registry = ToolRegistry()
+    execution.register(registry)
+    tasks = TaskRegistry()
+
+    result = await registry.handler('run_pipeline')(fake_engine, tasks, {'filepath': 'p.pipe'})
+
+    assert 'flow_subscribed' not in result
+    assert fake_engine.add_monitor_calls == []
+    assert not tasks.is_flow_subscribed(fake_engine._token)
+
+
+@pytest.mark.asyncio
+async def test_run_dropper_pipe_does_not_subscribe_without_trace_level(fake_engine):
+    registry = ToolRegistry()
+    execution.register(registry)
+    tasks = TaskRegistry()
+
+    result = await registry.handler('run_dropper_pipe')(fake_engine, tasks, {'filepath': 'p.pipe'})
+
+    assert 'flow_subscribed' not in result
+    assert fake_engine.add_monitor_calls == []
+
+
+@pytest.mark.asyncio
+async def test_run_pipeline_subscribe_failure_is_best_effort(fake_engine, monkeypatch):
+    registry = ToolRegistry()
+    execution.register(registry)
+    tasks = TaskRegistry()
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError('monitor channel down')
+
+    monkeypatch.setattr(fake_engine, 'add_monitor', _boom)
+
+    result = await registry.handler('run_pipeline')(
+        fake_engine, tasks, {'filepath': 'p.pipe', 'pipelineTraceLevel': 'full'}
+    )
+
+    assert result['ok'] is True
+    assert result['flow_subscribed'] is False
+    assert result['flow_warning'] == 'monitor channel down'
+
+
+@pytest.mark.asyncio
+async def test_run_dropper_pipe_subscribe_failure_is_best_effort(fake_engine, monkeypatch):
+    registry = ToolRegistry()
+    execution.register(registry)
+    tasks = TaskRegistry()
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError('monitor channel down')
+
+    monkeypatch.setattr(fake_engine, 'add_monitor', _boom)
+
+    result = await registry.handler('run_dropper_pipe')(
+        fake_engine, tasks, {'filepath': 'p.pipe', 'pipelineTraceLevel': 'full'}
+    )
+
+    assert result['ok'] is True
+    assert result['flow_subscribed'] is False
+    assert result['flow_warning'] == 'monitor channel down'
+
+
+@pytest.mark.asyncio
+async def test_run_pipeline_inline_send_removes_token_but_flow_still_drainable(fake_engine):
+    """One-shot inline-send run: the token is removed from `_tasks` (#1) but
+    the flow buffer must survive so trace events remain drainable after.
+    """
+    registry = ToolRegistry()
+    execution.register(registry)
+    tasks = TaskRegistry()
+
+    result = await registry.handler('run_pipeline')(
+        fake_engine,
+        tasks,
+        {'filepath': 'p.pipe', 'inputs': 'hello world', 'pipelineTraceLevel': 'full'},
+    )
+
+    assert result['ok'] is True
+    assert result['flow_subscribed'] is True
+    # one-shot run: token dropped from the task registry...
+    assert tasks.get(fake_engine._token) is None
+    # ...but the flow buffer is untouched by remove() and still routes/drains.
+    assert tasks.record_flow('abcd1234.websrc', {'kind': 'node'}) is True
+    drained = tasks.flow_since(fake_engine._token)
+    assert [e['kind'] for e in drained['events']] == ['node']
