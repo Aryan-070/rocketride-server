@@ -1,4 +1,6 @@
 # =============================================================================
+# RocketRide Engine
+# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -21,27 +23,29 @@
 # SOFTWARE.
 # =============================================================================
 
-# ------------------------------------------------------------------------------
-# This class controls the data shared between all threads for the task
-# ------------------------------------------------------------------------------
-from typing import Any, Dict
+"""Base classes and driver interface for vector store nodes.
 
-from ai.common.store import StoreGlobalBase
+``store_qdrant`` is the reference the IGlobal/IInstance abstraction was
+extracted from; the other ``store_*`` drivers still carry their own copies and
+migrate onto these bases one at a time. The store interface itself
+(``DocumentStoreBase``, ``getStore``) and the agent-tool mixin
+(``VectorStoreToolMixin``) live in ``document_store`` and are re-exported here so
+``from ai.common.store import ...`` keeps working after the module became a
+package.
+"""
 
+from .document_store import (
+    DocumentStoreBase,
+    VectorStoreToolMixin,
+    getStore,
+)
+from .store_global_base import StoreGlobalBase
+from .store_instance_base import StoreInstanceBase
 
-class IGlobal(StoreGlobalBase):
-    serverName: str = 'chroma'
-
-    def _open_store(self, logical_type: str, conn_config: Dict[str, Any], bag: Dict[str, Any]):
-        """Return the driver's Store, imported lazily so config mode never loads the driver."""
-        from .chroma import Store
-
-        return Store(logical_type, conn_config, bag)
-
-    def _sub_key(self) -> str:
-        """Return the transform sub-key: host/port/collection."""
-        return f'{self.store.host}/{self.store.port}/{self.store.collection}'
-
-    def _probe_connection(self, config: Dict[str, Any]) -> None:
-        """Chroma has no save-time probe; nothing to validate here."""
-        return
+__all__ = [
+    'DocumentStoreBase',
+    'StoreGlobalBase',
+    'StoreInstanceBase',
+    'VectorStoreToolMixin',
+    'getStore',
+]
