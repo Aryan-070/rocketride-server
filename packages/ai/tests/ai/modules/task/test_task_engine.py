@@ -63,6 +63,9 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t.id = 'task-test'
     t.token = 'tk_test'
     t.source = source
+    # Real tasks always carry their project id; _forward_task_event stamps
+    # it into every forwarded body (identity safety net).
+    t.project_id = 'proj-test'
     t._task_name = task_name
     t._pipeline = pipeline if pipeline is not None else {}
     t._threads = 4
@@ -74,6 +77,10 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t._status_updated = False
     t.public_auth = 'pk_test'
     t.info = {}
+    # Run-log continuum state consulted by _forward_task_event's stamping
+    # safety net (see Task.stamp_log_event): fresh-stream counter + no writer.
+    t._log_seq_next = 1
+    t._run_log = None
     # debug_message is normally inherited from DAPBase and requires
     # _call_debug_message to be wired by __init__. Bypass with a MagicMock.
     t.debug_message = MagicMock()
