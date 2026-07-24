@@ -65,38 +65,10 @@
 		"questions": ["questions"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration optoins used by the driver
-	//		itself
-	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "miniLM",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"custom": {
-				"title": "Custom model"
-			},
-			"miniLM": {
-				"title": "miniLM  - General use embeddings, good performance",
-				"model": "sentence-transformers/multi-qa-MiniLM-L6-cos-v1"
-			},
-			"miniAll": {
-				"title": "miniAll - Another good one",
-				"model": "sentence-transformers/all-MiniLM-L6-v2"
-			},
-			"mpnet": {
-				"title": "mpnet   - Yet another good one",
-				"model": "sentence-transformers/multi-qa-mpnet-base-cos-v1"
-			}
-		}
-	},
-	//
 	// Optional:
 	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		in the config
 	//
 	"fields": {
 		"embedding.model": {
@@ -129,15 +101,26 @@
 		"embedding.profile": {
 			"title": "Model",
 			"description": "Embedding model",
-			"type": "string",
+			"type": "enum",
 			"default": "miniLM",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "custom",
-					"properties": ["embedding.custom"]
+			"enum": {
+				"custom": {
+					"title": "Custom model",
+					"config": ["embedding.custom"]
+				},
+				"miniLM": {
+					"title": "miniLM  - General use embeddings, good performance",
+					"preset": { "model": "sentence-transformers/multi-qa-MiniLM-L6-cos-v1" }
+				},
+				"miniAll": {
+					"title": "miniAll - Another good one",
+					"preset": { "model": "sentence-transformers/all-MiniLM-L6-v2" }
+				},
+				"mpnet": {
+					"title": "mpnet   - Yet another good one",
+					"preset": { "model": "sentence-transformers/multi-qa-mpnet-base-cos-v1" }
 				}
-			]
+			}
 		},
 		"embedding.preprocessor": {
 			"default": "preprocessor_langchain",
@@ -146,17 +129,17 @@
 		}
 	},
 	//
-	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
+	// Optional:
+	//		Per-section titles; a section title defaults to the node title
+	//		when not listed here
 	//
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Sentence Transformer",
-			"properties": ["embedding.profile"]
-		}
-	],
+	"sections": { "Pipe": "Sentence Transformer" },
+	//
+	// Required:
+	//		Defines the fields of the service as an ordered list. Each entry
+	//		references a field by name, or defines one inline
+	//
+	"config": ["embedding.profile"],
 	//
 	//	Test configuration for automated node testing
 	//
