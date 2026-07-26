@@ -114,7 +114,7 @@ const ExplorerSidebar: React.FC = () => {
 	const refresh = useCallback(async () => {
 		if (!client || !isConnected) { setEntries([]); return; }
 		try {
-			const allEntries = await listRecursive(client, '');
+			const allEntries = await listRecursive(client, '@');
 			setEntries(allEntries);
 		} catch {
 			setEntries([]);

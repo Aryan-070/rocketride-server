@@ -53,6 +53,8 @@ from ai.modules.task.run_log import (
     truncate_event,
 )
 from ai.account.file_store import FileStore
+from ai.account.store import Store
+from ai.account.models import RequestContext
 from ai.account.store_providers.filesystem import FilesystemStore
 
 CLIENT = 'user-1'
@@ -136,7 +138,14 @@ async def open_writer(istore, spool_root, stamp=None, raise_floor=None, kind=KIN
     if stamp is None:
         stamp, raise_floor, _ = make_stamp()
     writer = RunLogWriter(
-        FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, kind, stamp, raise_floor, spool_root=spool_root
+        FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+        CLIENT,
+        PROJECT,
+        SOURCE,
+        kind,
+        stamp,
+        raise_floor,
+        spool_root=spool_root,
     )
     await writer.open(trigger='manual', user=CLIENT, pipeline_hash='abc123', trace_level='summary')
     return writer
@@ -408,7 +417,14 @@ class TestSegmentCodec:
         # A FRESH process (new writer) resumes the stream: its first keyframe
         # must be marked incomplete (pre-existing open state is unknown).
         writer2 = RunLogWriter(
-            FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, stamp, raise_floor, spool_root=spool_root
+            FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+            CLIENT,
+            PROJECT,
+            SOURCE,
+            KIND,
+            stamp,
+            raise_floor,
+            spool_root=spool_root,
         )
         await writer2.open(trigger='manual', user=CLIENT, pipeline_hash='h2', trace_level=None)
         writer2.append(stamp(output_event('run-2')))
@@ -548,7 +564,14 @@ class TestContinuum:
         # so the catalog floor lift is what carries the continuum forward.
         stamp2, raise_floor2, state2 = make_stamp()
         writer2 = RunLogWriter(
-            FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, stamp2, raise_floor2, spool_root=spool_root
+            FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+            CLIENT,
+            PROJECT,
+            SOURCE,
+            KIND,
+            stamp2,
+            raise_floor2,
+            spool_root=spool_root,
         )
         await writer2.open(trigger='manual', user=CLIENT, pipeline_hash='abc123', trace_level='summary')
         writer2.append(stamp2(output_event('run2')))
@@ -648,7 +671,14 @@ class TestRetention:
         writer = None
         for i in range(5):
             writer = RunLogWriter(
-                FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, stamp, raise_floor, spool_root=spool_root
+                FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+                CLIENT,
+                PROJECT,
+                SOURCE,
+                KIND,
+                stamp,
+                raise_floor,
+                spool_root=spool_root,
             )
             await writer.open(trigger='manual', user=CLIENT, pipeline_hash='h', trace_level=None)
             await writer.end_run('ok')
@@ -689,7 +719,14 @@ class TestRecovery:
         try:
             stamp2, raise_floor2, state2 = make_stamp()
             writer2 = RunLogWriter(
-                FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, stamp2, raise_floor2, spool_root=fresh_spool
+                FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+                CLIENT,
+                PROJECT,
+                SOURCE,
+                KIND,
+                stamp2,
+                raise_floor2,
+                spool_root=fresh_spool,
             )
             await writer2.open(trigger='manual', user=CLIENT, pipeline_hash='h', trace_level=None)
 

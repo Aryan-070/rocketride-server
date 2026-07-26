@@ -37,6 +37,7 @@ def _make_conn(*, account_info=None, server=None, debug_token=None, debug_id=Non
     conn.send_event = AsyncMock()
     conn.debug_message = MagicMock()
     conn.verify_permission = MagicMock()
+    conn.verify_team_permission = MagicMock()  # granted by default
     conn.get_task = MagicMock()
     conn.get_task_token = MagicMock(return_value='tk_x')
     # request() is defined on TaskConn (not DebugCommands); on_pause /
@@ -106,12 +107,27 @@ async def test_on_launch_rejects_when_already_debugging():
 
 
 @pytest.mark.asyncio
-async def test_on_launch_rejects_when_default_team_not_in_any_org():
-    """If the default team is not part of any org, PermissionError is raised."""
-    account = _account_info(organization={'id': 'org-X', 'teams': [{'id': 'team-other'}]})
-    conn = _make_conn(account_info=account)
-    with pytest.raises(PermissionError, match='does not belong to any organisation'):
-        await DebugCommands.on_launch(conn, {'arguments': {}})
+async def test_on_launch_rejects_foreign_or_unpermitted_team():
+    """A team the caller lacks task.debug on is denied by the team permission
+    check before any task is started.
+    """
+    server = MagicMock()
+    server.start_task = AsyncMock()
+    conn = _make_conn(account_info=_account_info(), server=server)
+    conn.verify_team_permission = MagicMock(side_effect=PermissionError('denied for team'))
+    with pytest.raises(PermissionError, match='denied for team'):
+        await DebugCommands.on_launch(conn, {'arguments': {'teamId': 'team-foreign'}})
+    server.start_task.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_on_launch_checks_task_debug_on_target_team():
+    """on_launch verifies task.debug against the client-supplied teamId."""
+    server = MagicMock()
+    server.start_task = AsyncMock(return_value={'id': 'task-1', 'token': 'tk_1'})
+    conn = _make_conn(account_info=_account_info(), server=server)
+    await DebugCommands.on_launch(conn, {'arguments': {'teamId': 'team-target'}})
+    conn.verify_team_permission.assert_called_once_with('team-target', 'task.debug')
 
 
 # ---------------------------------------------------------------------------
