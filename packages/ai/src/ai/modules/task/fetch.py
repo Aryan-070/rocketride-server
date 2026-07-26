@@ -74,13 +74,16 @@ async def handle_fetch(request: Request):
         return JSONResponse({'error': 'Token missing required claims'}, status_code=400)
 
     # ── Resolve the absolute file path via the store ─────────────────────
-    task_server = request.app.state.task
-    file_store = task_server.store.get_file_store(user_id)
+    # Internal identity: authorization happened at URL ISSUANCE (get_url ran
+    # under the requesting session's identity); the signed JWT is the capability.
+    from ai.account import RequestContext, Store
+
+    file_store = Store.file_store(RequestContext.internal('fetch'), client_id=user_id)
 
     # Build the full storage path and resolve it through the filesystem backend.
     # A malformed `path` claim can raise ValueError; return 400 rather than 500.
     try:
-        full_store_path = file_store._full_path(path)
+        full_store_path = file_store.resolve(path)
     except ValueError:
         return JSONResponse({'error': 'Invalid path'}, status_code=400)
     backend = file_store._store

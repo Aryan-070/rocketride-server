@@ -5,12 +5,16 @@ A RocketRide tool node that gives an AI agent read/write access to the account-s
 ## What it does
 
 Exposes the account file store, the same storage area the client SDK reaches via its
-`fs_*` methods, to an agent as a set of callable tools. All paths are relative to
-`users/<client_id>/files/`, so files written by the agent are visible to the client SDK
-and vice versa. The account is resolved automatically from the `ROCKETRIDE_CLIENT_ID`
-env var injected by the task engine, no account configuration is needed on the node.
-If that env var is missing or the account store fails to initialise, a warning is logged
-and **all** tool methods are hidden from the agent.
+`fs_*` methods, to an agent as a set of callable tools. All paths are plain and
+relative to the task's **storage anchor**, which the task file provides: the owning
+user's file tree (`users/<client_id>/files/`) for development runs, or a task-specific
+subtree of the deployment team's storage (`teams/<teamId>/files/tasks/<projectId>/`)
+for deployed runs — so files written by the agent are visible in the file browser and
+vice versa, and node behavior is identical in both modes. Identity and the anchor are
+resolved automatically from the running task (`rocketlib.getTask()`), never from the
+environment; no account configuration is needed on the node. If no task identity is
+available or the account store fails to initialise, a warning is logged and **all**
+tool methods are hidden from the agent.
 
 The node has no pipeline lanes: it is connected to agents via the `tool` invoke channel.
 

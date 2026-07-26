@@ -93,8 +93,12 @@ class StoreCommands(DAPConn):
             DAP response (format depends on subcommand).
         """
         try:
-            # Require store permission (once for all subcommands)
-            self.verify_permission('task.store')
+            # NO permission check here: the STORE is the security boundary.
+            # Every path resolution inside the identity-bound FileStore
+            # enforces the policy-required permission for the addressed scope
+            # (plain paths behave like the old defaultTeam task.store hoist;
+            # @/Team/@/Org paths check the addressed team/org; reserved
+            # subtrees like .logs apply their own rules).
 
             # Extract subcommand
             args = request.get('arguments', {})
@@ -119,15 +123,16 @@ class StoreCommands(DAPConn):
 
     def _get_file_store(self):
         """
-        Get a FileStore scoped to the authenticated user.
+        Get a FileStore bound to the authenticated session's identity.
 
         Returns:
-            FileStore instance that isolates all paths under the current
-            user's storage namespace.
+            FileStore whose every path resolution authorizes against THIS
+            session (plain paths under the user's namespace as before; the
+            @/Team|@/Org grammar against the addressed scope's permissions).
         """
-        # Scope the file store to the calling user so users cannot access each
-        # other's files through the store API.
-        return self._server.store.get_file_store(self._account_info.userId)
+        from ai.account import Store
+
+        return Store.file_store(self.request_context())
 
     # =========================================================================
     # FS SUBCOMMAND HANDLERS
@@ -150,11 +155,11 @@ class StoreCommands(DAPConn):
 
         if mode == 'w':
             # Create a write handle tied to this connection for cleanup on disconnect
-            handle_id = await fs.open_write(path, self._connection_id)
+            handle_id = await fs.open_write(path)
             return self.build_response(request, body={'handle': handle_id})
         else:
             # Open for reading; returns handle ID plus file metadata
-            result = await fs.open_read(path, self._connection_id)
+            result = await fs.open_read(path)
             return self.build_response(request, body=result)
 
     async def _store_fs_read(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
@@ -182,7 +187,7 @@ class StoreCommands(DAPConn):
         length = min(length, 4_194_304)
 
         # Read the chunk
-        data = await fs.read_chunk(handle, offset, length, connection_id=self._connection_id)
+        data = await fs.read_chunk(handle, offset, length)
 
         # body carries byte count; arguments carries raw data separately
         response = self.build_response(request, body={'size': len(data)})
@@ -208,7 +213,7 @@ class StoreCommands(DAPConn):
         if isinstance(data, str):
             data = data.encode('utf-8')
 
-        written = await fs.write_chunk(handle, data, connection_id=self._connection_id)
+        written = await fs.write_chunk(handle, data)
         return self.build_response(request, body={'bytesWritten': written})
 
     async def _store_fs_close(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
@@ -227,9 +232,9 @@ class StoreCommands(DAPConn):
         mode = args.get('mode', 'r')
 
         if mode == 'w':
-            await fs.close_write(handle, connection_id=self._connection_id)
+            await fs.close_write(handle)
         else:
-            await fs.close_read(handle, connection_id=self._connection_id)
+            await fs.close_read(handle)
         return self.build_response(request)
 
     async def _store_fs_delete(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
@@ -246,9 +251,73 @@ class StoreCommands(DAPConn):
         await self._get_file_store().delete(args.get('path'))
         return self.build_response(request)
 
+    def _virtual_scope_mounts(self) -> list:
+        """The '@' listing: the joined filesystem's scope mounts.
+
+        `User/` and `Team/` always appear; `Org/` only for org.admin (or
+        sys.admin) holders — org storage is admin-only, a dead entry would
+        just confuse. Entry names compose by ordinary path joining
+        ('@' + '/' + 'Team' -> '@/Team'). Entries are VIRTUAL — synthesized
+        from the session, never from a physical listing (which would leak
+        other orgs' scopes).
+        """
+        org = getattr(self._account_info, 'organization', None) or {}
+        sys_perms = getattr(self._account_info, 'sysPermissions', None) or []
+        entries = [
+            {'name': 'User', 'type': 'dir', 'virtual': True},
+            {'name': 'Team', 'type': 'dir', 'virtual': True},
+        ]
+        if 'org.admin' in (org.get('permissions') or []) or 'sys.admin' in sys_perms:
+            entries.append({'name': 'Org', 'type': 'dir', 'virtual': True})
+        return entries
+
+    def _list_scope_mount(self, mount: str) -> Dict[str, Any]:
+        """Directory listing for the virtual mounts ('@' and '@/Team').
+
+        '@' lists the scope mounts themselves; '@/Team' lists the caller's
+        teams by DISPLAY NAME with the id in the entry body, so the file
+        browser can show names while scripts address ids. ('@/User' and
+        '@/Org' are REAL trees — the store lists them.)
+        """
+        if mount == '@':
+            entries = self._virtual_scope_mounts()
+            return {'entries': entries, 'count': len(entries)}
+        org = getattr(self._account_info, 'organization', None) or {}
+        entries = [
+            {'name': row.get('name') or row['id'], 'type': 'dir', 'id': row['id'], 'virtual': True}
+            for row in (org.get('teams') or [])
+            if row.get('id')
+        ]
+        return {'entries': entries, 'count': len(entries)}
+
+    @staticmethod
+    def _is_scope_root(path: str) -> bool:
+        """True when ``path`` lists the TOP of a user/team/org tree.
+
+        Scope roots are where the system trees live and where reserved
+        names get filtered: '' and '@/User' (own root), '@/Org' (own org
+        root), '@/Team/<ref>' (a team root), and the cross-boundary
+        '@/User/=<uid>' / '@/Org/=<oid>' spellings.
+        """
+        if not path:
+            return True
+        segments = path.split('/')
+        if segments[0] != '@' or len(segments) < 2:
+            return False
+        if segments[1] in ('User', 'Org'):
+            return len(segments) == 2 or (len(segments) == 3 and segments[2].startswith('='))
+        return segments[1] == 'Team' and len(segments) == 3
+
     async def _store_fs_list_dir(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """
-        List directory contents.
+        List directory contents of the joined filesystem.
+
+        Plain paths list the caller's own tree (simple mode). '@' lists the
+        scope mounts and '@/Team' the caller's memberships — both virtual.
+        Everything else ('@/User/...', '@/Team/<ref>/...', '@/Org/...') is
+        a real store listing. Scope-root listings hide the system trees
+        from non-sys.admin callers and drop reserved '@'/'='-prefixed
+        physical names (unaddressable legacy artifacts).
 
         Args:
             request: Original DAP request.
@@ -257,7 +326,31 @@ class StoreCommands(DAPConn):
         Returns:
             DAP response with directory listing.
         """
+        path = (args.get('path', '') or '').strip('/')
+
+        # The virtual mounts list from the session, not storage.
+        if path in ('@', '@/Team'):
+            return self.build_response(request, body=self._list_scope_mount(path))
+
         result = await self._get_file_store().list_dir(args.get('path', ''))
+
+        if self._is_scope_root(path):
+            entries = result['entries']
+            # SYSTEM TREES (.logs, .deployments) are invisible at scope
+            # roots for everyone except sys.admin: they are engine-written,
+            # served by their own domain APIs, and may hold data the user
+            # must not see raw.
+            sys_perms = getattr(self._account_info, 'sysPermissions', None) or []
+            if 'sys.admin' not in sys_perms:
+                from ai.account.file_store import SYSTEM_TREES
+
+                entries = [e for e in entries if e['name'] not in SYSTEM_TREES]
+            # Reserved sigils: physical '@*' / '=*' names at a scope root
+            # predate the grammar, cannot be created or addressed anymore —
+            # drop them rather than show dead entries.
+            entries = [e for e in entries if not e['name'].startswith(('@', '='))]
+            result = {'entries': entries, 'count': len(entries)}
+
         return self.build_response(request, body=result)
 
     async def _store_fs_mkdir(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
@@ -308,6 +401,14 @@ class StoreCommands(DAPConn):
         Returns:
             DAP response with metadata (size, modified time, type, etc.).
         """
+        # The scope mounts stat as directories: '@' and '@/Team' have no
+        # physical existence at all, and '@/User'/'@/Org' roots always
+        # exist conceptually (access control applies on ENTRY, not on the
+        # mount).
+        path = (args.get('path') or '').strip('/')
+        if path in ('@', '@/User', '@/Team', '@/Org'):
+            return self.build_response(request, body={'exists': True, 'type': 'dir', 'virtual': True})
+
         result = await self._get_file_store().stat(args.get('path'))
         return self.build_response(request, body=result)
 

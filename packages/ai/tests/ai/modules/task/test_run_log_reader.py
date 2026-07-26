@@ -56,6 +56,8 @@ from .test_run_log import (
     output_event,
 )
 from ai.account.file_store import FileStore
+from ai.account.store import Store
+from ai.account.models import RequestContext
 
 
 # =============================================================================
@@ -88,7 +90,14 @@ async def seed_stream(istore, spool_root, monkeypatch, events=30):
     await writer.end_run('ok')
 
     writer2 = run_log.RunLogWriter(
-        FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, stamp, raise_floor, spool_root=spool_root
+        FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+        CLIENT,
+        PROJECT,
+        SOURCE,
+        KIND,
+        stamp,
+        raise_floor,
+        spool_root=spool_root,
     )
     await writer2.open(trigger='manual', user=CLIENT, pipeline_hash='h2', trace_level=None)
     for i in range(5):
@@ -96,7 +105,14 @@ async def seed_stream(istore, spool_root, monkeypatch, events=30):
     await writer2._drain_uploads()
     await writer2.end_run('error', 'boom')
 
-    return run_log.RunLogReader(FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, spool_root=spool_root)
+    return run_log.RunLogReader(
+        FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+        CLIENT,
+        PROJECT,
+        SOURCE,
+        KIND,
+        spool_root=spool_root,
+    )
 
 
 # =============================================================================
@@ -119,7 +135,14 @@ class TestChapters:
 
     @pytest.mark.asyncio
     async def test_missing_stream_raises(self, istore, spool_root):
-        reader = run_log.RunLogReader(FileStore(istore, CLIENT), CLIENT, 'nope', SOURCE, KIND, spool_root=spool_root)
+        reader = run_log.RunLogReader(
+            FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+            CLIENT,
+            'nope',
+            SOURCE,
+            KIND,
+            spool_root=spool_root,
+        )
         with pytest.raises(FileNotFoundError):
             await reader.chapters()
 
@@ -175,7 +198,14 @@ class TestSegmentRaw:
         writer.append(stamp(output_event('big-' + 'y' * 5000)))
         await writer._drain_uploads()
         await writer.end_run('ok')
-        reader = run_log.RunLogReader(FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, spool_root=spool_root)
+        reader = run_log.RunLogReader(
+            FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+            CLIENT,
+            PROJECT,
+            SOURCE,
+            KIND,
+            spool_root=spool_root,
+        )
         # Ceiling smaller than the line: the line must still arrive whole
         chunk = await reader.segment_raw(0, offset=0, max_bytes=64)
         first_line = chunk['data'].splitlines()[0]
@@ -255,7 +285,14 @@ class TestRead:
         monkeypatch.setattr(run_log, 'CONST_LOG_SEGMENTS', 1)
         stamp, raise_floor, _ = make_stamp(start=SEED + 10**9)
         writer = run_log.RunLogWriter(
-            FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, stamp, raise_floor, spool_root=spool_root
+            FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+            CLIENT,
+            PROJECT,
+            SOURCE,
+            KIND,
+            stamp,
+            raise_floor,
+            spool_root=spool_root,
         )
         await writer.open(trigger='manual', user=CLIENT, pipeline_hash='h3', trace_level=None)
         for _ in range(30):
@@ -329,7 +366,14 @@ class TestLiveCoordination:
             writer.append(stamp(output_event('live-' + 'z' * 40)))
         # No drain, no end_run: sealed segments exist only as spool copies and
         # the freshest control lives on the writer, not in the store.
-        reader = run_log.RunLogReader(FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, spool_root=spool_root)
+        reader = run_log.RunLogReader(
+            FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+            CLIENT,
+            PROJECT,
+            SOURCE,
+            KIND,
+            spool_root=spool_root,
+        )
         chapters = await reader.chapters()
         assert chapters['completed'] is False
         body = await reader.read(from_seq=0)

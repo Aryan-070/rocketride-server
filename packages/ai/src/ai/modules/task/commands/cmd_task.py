@@ -125,18 +125,21 @@ class TaskCommands(DAPConn):
             Exception: If task creation or execution startup fails
         """
         try:
-            # Verify permission
-            self.verify_permission('task.control')
+            # Use client-supplied teamId if present, otherwise fall back to defaultTeam.
+            args = request.get('arguments') or {}
+            team_id = args.get('teamId') or self._account_info.defaultTeam
+
+            # Verify task.control ON THE TARGET TEAM — not defaultTeam — and
+            # BEFORE any secret handling. A client-supplied teamId outside the
+            # caller's permissions previously slipped through with org_id=''
+            # and pulled that team's secrets in the env merge below.
+            self.verify_team_permission(team_id, 'task.control')
 
             # Verify required pipeline plans
-            args = request.get('arguments') or {}
             pipeline = args.get('pipeline')
             if pipeline is not None:
                 # Check that the pipeline's required plan is available for this account.
                 self.verify_plans(self._account_info, pipeline)
-
-            # Use client-supplied teamId if present, otherwise fall back to defaultTeam.
-            team_id = args.get('teamId') or self._account_info.defaultTeam
 
             # Resolve org_id from the user's single organization.
             org_id = ''
@@ -210,8 +213,12 @@ class TaskCommands(DAPConn):
             Exception: If task creation or execution startup fails
         """
         try:
-            # Verify permission
-            self.verify_permission('task.control')
+            # Authorize against the TASK'S team, not defaultTeam: get_task
+            # resolves the token to its control entry and requires
+            # task.control on that team (sys.admin bypasses). A defaultTeam
+            # check alone let any task.control holder restart other teams'
+            # token-addressed tasks.
+            self.get_task(request, 'task.control')
 
             # Start the task without debugger attachment
             response = await self._server.restart_task(

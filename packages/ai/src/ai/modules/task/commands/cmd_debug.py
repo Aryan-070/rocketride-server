@@ -203,9 +203,6 @@ class DebugCommands(DAPConn):
             Exception: If task creation or debugger attachment fails
         """
         try:
-            # Verify permission - don't have a task yet
-            self.verify_permission('task.debug')
-
             # Each debug session must have it's own unique connection
             if self._debug_token:
                 raise RuntimeError('Debugger already active on this session')
@@ -213,6 +210,12 @@ class DebugCommands(DAPConn):
             # Use client-supplied teamId if present, otherwise fall back to defaultTeam.
             args = request.get('arguments') or {}
             team_id = args.get('teamId') or self._account_info.defaultTeam
+
+            # Verify task.debug ON THE TARGET TEAM — membership alone is not
+            # enough (the previous check only proved the team exists in the
+            # caller's org), and a defaultTeam check alone would miss a
+            # foreign teamId entirely.
+            self.verify_team_permission(team_id, 'task.debug')
 
             # Resolve org_id from the user's single organization.
             org_id: Optional[str] = None
@@ -223,9 +226,9 @@ class DebugCommands(DAPConn):
                         org_id = org.get('id', '')
                         break
             if org_id is None:
-                raise PermissionError(
-                    f'Team {team_id!r} does not belong to any organisation for user {self._account_info.userId!r}'
-                )
+                # Reachable only via the sys.admin bypass (a foreign team
+                # cannot pass verify_team_permission otherwise).
+                org_id = ''
 
             # Create and start the new task, obtaining a unique token
             response = await self._server.start_task(
