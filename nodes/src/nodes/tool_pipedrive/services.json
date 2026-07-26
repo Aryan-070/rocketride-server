@@ -1,0 +1,83 @@
+{
+	"title": "Pipedrive",
+	"protocol": "tool_pipedrive://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_pipedrive",
+	"prefix": "pipedrive",
+	"icon": "pipedrive.svg",
+	"documentation": "https://docs.rocketride.org",
+	"description": ["Exposes the Pipedrive CRM REST API v1 as agent tools.", "Covers deals, persons, organizations, activities, pipelines, stages, notes, leads,", "products, files, users, teams, goals, projects, and every other v1 resource."],
+	"tile": ["Pipedrive${parameters.pipedrive.companyDomain ? ': ' + parameters.pipedrive.companyDomain : ''}"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Pipedrive",
+				"apiToken": "",
+				"companyDomain": "",
+				"readOnly": false,
+				"toolGroups": ["deals", "persons", "organizations", "activities", "pipelines", "stages", "notes", "search"],
+				"allowRawRequest": true
+			}
+		}
+	},
+	"fields": {
+		"pipedrive.apiToken": {
+			"type": "string",
+			"title": "API Token",
+			"description": "Pipedrive API token (Settings -> Personal preferences -> API), or an OAuth access token. Tokens starting with a JWT-style prefix are sent as a Bearer header; everything else is sent as the api_token query parameter.",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"pipedrive.companyDomain": {
+			"type": "string",
+			"title": "Company Domain",
+			"description": "Your Pipedrive company domain, i.e. the \"acme\" in https://acme.pipedrive.com. When set, requests go to https://{domain}.pipedrive.com/api/v1; otherwise https://api.pipedrive.com/api/v1 is used.",
+			"default": "",
+			"optional": true
+		},
+		"pipedrive.readOnly": {
+			"type": "boolean",
+			"title": "Read-only mode",
+			"description": "When enabled, every create, update and delete tool is blocked, and the generic request tool only accepts GET. Safe for agents that should only inspect the CRM.",
+			"default": false,
+			"enum": [
+				[true, "Yes: read only"],
+				[false, "No: allow writes"]
+			]
+		},
+		"pipedrive.toolGroups": {
+			"type": "array",
+			"title": "Tool groups",
+			"description": "Which groups of Pipedrive tools this node publishes to the agent. The full API is ~230 tools, which is more than an LLM can choose between reliably, so only the listed groups are exposed. Use <b>all</b> to publish everything. Available groups: deals, persons, organizations, org_relationships, activities, pipelines, stages, notes, search, fields, leads, products, files, users, roles, permission_sets, teams, goals, filters, webhooks, subscriptions, mailbox, call_logs, projects, misc.",
+			"items": {
+				"type": "string"
+			},
+			"default": ["deals", "persons", "organizations", "activities", "pipelines", "stages", "notes", "search"]
+		},
+		"pipedrive.allowRawRequest": {
+			"type": "boolean",
+			"title": "Allow raw API requests",
+			"description": "Publishes the generic <b>request</b> tool, which can call any Pipedrive v1 endpoint by method and path. It uses the same authentication, rate-limit handling and read-only enforcement as the typed tools. Disable to restrict the agent to the typed tools only.",
+			"default": true,
+			"enum": [
+				[true, "Yes: expose the request tool"],
+				[false, "No: typed tools only"]
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Pipedrive",
+			"properties": ["type", "pipedrive.apiToken", "pipedrive.companyDomain", "pipedrive.readOnly", "pipedrive.toolGroups", "pipedrive.allowRawRequest"]
+		}
+	]
+}

@@ -1,0 +1,747 @@
+"""
+Unit tests for tool_pipedrive.
+
+Covers the HTTP client (auth, envelope handling, error mapping, rate-limit
+retries), the tool-group publication filter, and read-only enforcement. No
+credentials and no network access are needed — see test_tools.py for the
+env-gated live suite.
+"""
+
+from __future__ import annotations
+
+import sys
+import types
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
+from unittest.mock import Mock, patch
+
+import pytest
+import requests
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src' / 'nodes'))
+
+_STUB_MODULE_NAMES = ('rocketlib', 'ai', 'ai.common', 'ai.common.config', 'ai.common.utils')
+
+# Obviously fake. A real personal token is 40 hex characters, but a literal one
+# here trips secret scanners, so use a placeholder of the same shape class:
+# short, dot-free and under 64 characters, which is what selects api_token auth.
+TEST_TOKEN = 'pipedrive-test-not-a-real-token'
+PERSONAL_TOKEN = 'pipedrive-personal-token-placeholder'
+
+
+def _install_stubs() -> None:
+    mod_rl = types.ModuleType('rocketlib')
+
+    def mock_tool_function(*args, **kwargs):
+        def decorator(fn):
+            fn.__tool_meta__ = kwargs
+            return fn
+
+        return decorator
+
+    mod_rl.tool_function = mock_tool_function
+
+    class IInstanceBase:
+        def _collect_tool_methods(self):
+            methods = {}
+            for name in dir(type(self)):
+                attr = getattr(type(self), name, None)
+                if attr is not None and hasattr(attr, '__tool_meta__'):
+                    methods[name] = getattr(self, name)
+            return methods
+
+    class IGlobalBase:
+        pass
+
+    mod_rl.IInstanceBase = IInstanceBase
+    mod_rl.IGlobalBase = IGlobalBase
+    mod_rl.OPEN_MODE = Mock()
+    mod_rl.warning = Mock()
+    sys.modules['rocketlib'] = mod_rl
+
+    sys.modules['ai'] = types.ModuleType('ai')
+    sys.modules['ai.common'] = types.ModuleType('ai.common')
+
+    mod_config = types.ModuleType('ai.common.config')
+
+    class Config:
+        pass
+
+    mod_config.Config = Config
+    sys.modules['ai.common.config'] = mod_config
+
+    mod_utils = types.ModuleType('ai.common.utils')
+
+    def normalize_tool_input(value, **kwargs):
+        return value if isinstance(value, dict) else {}
+
+    def require_str(args, key, **kwargs):
+        value = args.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f'{key} is required')
+        return value.strip()
+
+    def require_int(args, key, **kwargs):
+        value = args.get(key)
+        if isinstance(value, bool) or value is None:
+            raise ValueError(f'{key} is required')
+        return int(value)
+
+    mod_utils.normalize_tool_input = normalize_tool_input
+    mod_utils.require_str = require_str
+    mod_utils.require_int = require_int
+    sys.modules['ai.common.utils'] = mod_utils
+
+
+@contextmanager
+def _scoped_stubs() -> Iterator[None]:
+    original = {name: sys.modules.get(name) for name in _STUB_MODULE_NAMES}
+    _install_stubs()
+    try:
+        yield
+    finally:
+        for name, module in original.items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
+
+
+with _scoped_stubs():
+    from tool_pipedrive.IInstance import IInstance
+    from tool_pipedrive.pipedrive_client import (
+        BASE_URL,
+        MAX_LIMIT,
+        PipedriveAPIError,
+        _auth,
+        _use_bearer,
+        base_url_for,
+        call,
+        call_envelope,
+        clean_deal,
+        clean_person,
+        paginated,
+        split_custom_fields,
+    )
+    from tool_pipedrive.tool_groups import ALL_GROUPS, DEFAULT_GROUPS, normalize_groups, pipedrive_tool
+    from tool_pipedrive.tools._base import body_from, paging_params
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _resp(status=200, *, json_data=None, headers=None, text='', content=b'{}', ok=None):
+    resp = Mock(spec=requests.Response)
+    resp.status_code = status
+    resp.ok = (200 <= status < 300) if ok is None else ok
+    resp.headers = headers or {}
+    resp.text = text
+    resp.content = content
+    resp.reason = 'reason'
+    if json_data is None:
+        resp.json.side_effect = ValueError('no json')
+    else:
+        resp.json.return_value = json_data
+    return resp
+
+
+def _ok(data, *, additional=None):
+    payload = {'success': True, 'data': data}
+    if additional is not None:
+        payload['additional_data'] = additional
+    return _resp(200, json_data=payload, content=b'{"success": true}')
+
+
+def _instance(**overrides):
+    """Build an IInstance without running the engine lifecycle."""
+    inst = IInstance.__new__(IInstance)
+    glob = Mock()
+    glob.token = TEST_TOKEN
+    glob.base_url = BASE_URL
+    glob.read_only = False
+    glob.tool_groups = DEFAULT_GROUPS
+    glob.allow_raw_request = True
+    for key, value in overrides.items():
+        setattr(glob, key, value)
+    inst.IGlobal = glob
+    return inst
+
+
+# ---------------------------------------------------------------------------
+# Base URL and auth
+# ---------------------------------------------------------------------------
+
+
+class TestBaseUrl:
+    def test_default(self):
+        assert base_url_for('') == BASE_URL
+        assert base_url_for(None) == BASE_URL
+
+    @pytest.mark.parametrize(
+        'domain',
+        ['acme', 'acme.pipedrive.com', 'https://acme.pipedrive.com', 'https://acme.pipedrive.com/', 'ACME'.lower()],
+    )
+    def test_company_domain_forms(self, domain):
+        assert base_url_for(domain) == 'https://acme.pipedrive.com/api/v1'
+
+    def test_garbage_domain_falls_back(self):
+        assert base_url_for('https://') == BASE_URL
+
+
+class TestAuth:
+    def test_personal_token_uses_query_param(self):
+        headers, params = _auth(PERSONAL_TOKEN)
+        assert headers == {}
+        assert params == {'api_token': PERSONAL_TOKEN}
+        assert _use_bearer(PERSONAL_TOKEN) is False
+
+    def test_jwt_uses_bearer_header(self):
+        token = 'header.payload.signature'
+        headers, params = _auth(token)
+        assert headers == {'Authorization': f'Bearer {token}'}
+        assert params == {}
+
+    def test_explicit_bearer_prefix_is_stripped(self):
+        headers, params = _auth('Bearer abc123')
+        assert headers == {'Authorization': 'Bearer abc123'}
+        assert params == {}
+
+    def test_long_opaque_token_uses_bearer(self):
+        token = 'x' * 70
+        assert _use_bearer(token) is True
+
+
+# ---------------------------------------------------------------------------
+# Envelope handling
+# ---------------------------------------------------------------------------
+
+
+class TestEnvelope:
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_call_unwraps_data(self, mock_request):
+        mock_request.return_value = _ok({'id': 7, 'title': 'Deal'})
+        assert call(TEST_TOKEN, 'GET', '/deals/7') == {'id': 7, 'title': 'Deal'}
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_null_data_becomes_empty_dict(self, mock_request):
+        mock_request.return_value = _ok(None)
+        assert call(TEST_TOKEN, 'DELETE', '/deals/7') == {}
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_204_returns_success_envelope(self, mock_request):
+        mock_request.return_value = _resp(204, content=b'')
+        assert call_envelope(TEST_TOKEN, 'DELETE', '/deals/7') == {'success': True, 'data': {}}
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_raw_returns_bytes(self, mock_request):
+        mock_request.return_value = _resp(200, json_data={'success': True}, content=b'binary-bytes')
+        assert call(TEST_TOKEN, 'GET', '/files/1/download', raw=True) == b'binary-bytes'
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_path_and_params_are_built(self, mock_request):
+        mock_request.return_value = _ok([])
+        call(TEST_TOKEN, 'GET', 'deals', params={'limit': 10, 'start': None})
+        _, kwargs = mock_request.call_args
+        assert mock_request.call_args[0] == ('GET', f'{BASE_URL}/deals')
+        assert kwargs['params'] == {'limit': 10, 'api_token': TEST_TOKEN}
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_custom_base_url_is_used(self, mock_request):
+        mock_request.return_value = _ok([])
+        call(TEST_TOKEN, 'GET', '/deals', base_url='https://acme.pipedrive.com/api/v1')
+        assert mock_request.call_args[0][1] == 'https://acme.pipedrive.com/api/v1/deals'
+
+    def test_paginated_wraps_items(self):
+        envelope = {
+            'data': [],
+            'additional_data': {'pagination': {'more_items_in_collection': True, 'next_start': 100}},
+        }
+        assert paginated(envelope, [{'id': 1}]) == {
+            'items': [{'id': 1}],
+            'count': 1,
+            'more_items_in_collection': True,
+            'next_start': 100,
+        }
+
+    def test_paginated_without_pagination_block(self):
+        assert paginated({'data': []}, [])['more_items_in_collection'] is False
+
+
+# ---------------------------------------------------------------------------
+# Errors
+# ---------------------------------------------------------------------------
+
+
+class TestErrors:
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_error_message_includes_info_and_code(self, mock_request):
+        mock_request.return_value = _resp(
+            403,
+            json_data={
+                'success': False,
+                'error': 'Deal limit reached',
+                'error_info': 'Upgrade your plan',
+                'code': 'feature_capping_deals_limit',
+            },
+            text='Deal limit reached',
+        )
+        with pytest.raises(PipedriveAPIError) as exc:
+            call(TEST_TOKEN, 'POST', '/deals', body={'title': 'x'})
+        assert exc.value.status_code == 403
+        assert 'Deal limit reached' in exc.value.message
+        assert 'Upgrade your plan' in exc.value.message
+        assert exc.value.code == 'feature_capping_deals_limit'
+        assert mock_request.call_count == 1  # a plain 403 is not retried
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_success_false_on_200_is_an_error(self, mock_request):
+        mock_request.return_value = _resp(
+            200, json_data={'success': False, 'error': 'Invalid filter'}, text='Invalid filter'
+        )
+        with pytest.raises(PipedriveAPIError) as exc:
+            call(TEST_TOKEN, 'GET', '/deals')
+        assert 'Invalid filter' in exc.value.message
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_non_json_error_falls_back_to_text(self, mock_request):
+        mock_request.return_value = _resp(500, text='<html>boom</html>')
+        with pytest.raises(PipedriveAPIError) as exc:
+            call(TEST_TOKEN, 'GET', '/deals')
+        assert 'boom' in exc.value.message
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_transport_failure_raises_value_error(self, mock_request):
+        mock_request.side_effect = requests.ConnectionError('dns failure')
+        with pytest.raises(ValueError, match='Pipedrive request failed'):
+            call(TEST_TOKEN, 'GET', '/deals')
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting
+# ---------------------------------------------------------------------------
+
+
+class TestRateLimit:
+    @patch('time.sleep')
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_429_retry_after_is_honoured(self, mock_request, mock_sleep):
+        limited = _resp(
+            429, json_data={'success': False, 'error': 'rate limit'}, headers={'Retry-After': '5'}, text='rate limit'
+        )
+        mock_request.side_effect = [limited, limited, _ok({'id': 1})]
+
+        assert call(TEST_TOKEN, 'GET', '/deals/1') == {'id': 1}
+        assert mock_request.call_count == 3
+        assert mock_sleep.call_count == 2
+        mock_sleep.assert_called_with(5.0)
+
+    @patch('time.sleep')
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_ratelimit_reset_is_seconds_remaining_not_epoch(self, mock_request, mock_sleep):
+        """Pipedrive's x-ratelimit-reset counts down; it is not a GitHub-style epoch."""
+        limited = _resp(
+            429,
+            json_data={'success': False, 'error': 'rate limit'},
+            headers={'x-ratelimit-reset': '10', 'x-ratelimit-remaining': '0'},
+            text='rate limit',
+        )
+        mock_request.side_effect = [limited, _ok({'id': 1})]
+
+        assert call(TEST_TOKEN, 'GET', '/deals/1') == {'id': 1}
+        mock_sleep.assert_called_once_with(10.0)
+
+    @patch('time.sleep')
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_403_with_rate_limit_markers_is_retried(self, mock_request, mock_sleep):
+        limited = _resp(
+            403,
+            json_data={'success': False, 'error': 'rate limit exceeded'},
+            headers={'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '2'},
+            text='rate limit exceeded',
+        )
+        mock_request.side_effect = [limited, limited, limited]
+
+        with pytest.raises(PipedriveAPIError) as exc:
+            call(TEST_TOKEN, 'GET', '/deals')
+        assert exc.value.status_code == 403
+        assert mock_request.call_count == 3
+        assert mock_sleep.call_count == 2
+
+    @patch('time.sleep')
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    @pytest.mark.parametrize('bad_value', ['malformed', '-5', 'NaN', 'Inf'])
+    def test_malformed_retry_after_falls_back_to_backoff(self, mock_request, mock_sleep, bad_value):
+        limited = _resp(
+            429,
+            json_data={'success': False, 'error': 'rate limit'},
+            headers={'Retry-After': bad_value},
+            text='rate limit',
+        )
+        mock_request.side_effect = [limited, _ok({'id': 1})]
+
+        assert call(TEST_TOKEN, 'GET', '/deals/1') == {'id': 1}
+        assert mock_sleep.call_count == 1
+        assert mock_sleep.call_args[0][0] >= 2.0
+
+    @patch('time.sleep')
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_excessive_wait_fails_fast_with_hint(self, mock_request, mock_sleep):
+        limited = _resp(
+            429,
+            json_data={'success': False, 'error': 'rate limit'},
+            headers={'Retry-After': '3600'},
+            text='rate limit',
+        )
+        mock_request.return_value = limited
+
+        with pytest.raises(PipedriveAPIError) as exc:
+            call(TEST_TOKEN, 'GET', '/deals')
+        assert exc.value.status_code == 429
+        assert 'retry after 3600s' in exc.value.message
+        assert mock_request.call_count == 1
+        assert mock_sleep.call_count == 0
+
+    @patch('time.sleep')
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_daily_budget_hint(self, mock_request, mock_sleep):
+        limited = _resp(
+            429,
+            json_data={'success': False, 'error': 'rate limit'},
+            headers={'x-ratelimit-reset': '99999', 'x-daily-requests-left': '0'},
+            text='rate limit',
+        )
+        mock_request.return_value = limited
+
+        with pytest.raises(PipedriveAPIError) as exc:
+            call(TEST_TOKEN, 'GET', '/deals')
+        assert 'daily API token budget exhausted' in exc.value.message
+        assert mock_sleep.call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Cleaners
+# ---------------------------------------------------------------------------
+
+
+class TestCleaners:
+    def test_clean_deal_flattens_references_and_splits_custom_fields(self):
+        custom_key = 'a' * 40
+        cleaned = clean_deal(
+            {
+                'id': 1,
+                'title': 'Big deal',
+                'value': 1000,
+                'person_id': {'value': 5, 'name': 'Ada'},
+                'org_id': {'value': 9, 'name': 'Acme'},
+                'user_id': {'id': 3, 'name': 'Rep'},
+                'creator_user_id': {'id': 3, 'name': 'Rep'},
+                custom_key: 'custom value',
+                'noise_field': 'dropped',
+            }
+        )
+        assert cleaned['id'] == 1
+        assert cleaned['person'] == {'id': 5, 'name': 'Ada'}
+        assert cleaned['organization'] == {'id': 9, 'name': 'Acme'}
+        assert cleaned['custom_fields'] == {custom_key: 'custom value'}
+        assert 'noise_field' not in cleaned
+
+    def test_clean_person_flattens_contacts(self):
+        cleaned = clean_person(
+            {
+                'id': 2,
+                'name': 'Ada',
+                'email': [{'value': 'ada@example.com', 'primary': True}],
+                'phone': [{'value': '+123', 'primary': True}],
+                'org_id': {'value': 9, 'name': 'Acme'},
+            }
+        )
+        assert cleaned['emails'] == ['ada@example.com']
+        assert cleaned['phones'] == ['+123']
+        assert cleaned['organization'] == {'id': 9, 'name': 'Acme'}
+
+    def test_split_custom_fields_only_matches_hex_keys(self):
+        assert split_custom_fields({'a' * 40: 1, 'title': 2, 'z' * 40: 3}) == {'a' * 40: 1}
+
+
+# ---------------------------------------------------------------------------
+# Argument helpers
+# ---------------------------------------------------------------------------
+
+
+class TestArgHelpers:
+    def test_paging_clamps_limit(self):
+        assert paging_params({'limit': 10_000})['limit'] == MAX_LIMIT
+        assert paging_params({'limit': 0})['limit'] == 1
+        assert paging_params({'start': -5})['start'] == 0
+        assert paging_params({}) == {}
+
+    def test_body_from_omits_missing_and_merges_extra(self):
+        custom_key = 'b' * 40
+        body = body_from({'title': 'x', 'value': None, 'extra': {custom_key: 'v'}}, ('title', 'value', 'currency'))
+        assert body == {'title': 'x', custom_key: 'v'}
+
+
+# ---------------------------------------------------------------------------
+# Tool groups
+# ---------------------------------------------------------------------------
+
+
+class TestToolGroups:
+    def test_defaults_when_empty_or_invalid(self):
+        assert normalize_groups(None) == DEFAULT_GROUPS
+        assert normalize_groups([]) == DEFAULT_GROUPS
+        assert normalize_groups(['nonsense']) == DEFAULT_GROUPS
+        assert normalize_groups(42) == DEFAULT_GROUPS
+
+    def test_all_sentinel(self):
+        assert normalize_groups(['all']) == ALL_GROUPS
+        assert normalize_groups('all') == ALL_GROUPS
+
+    def test_comma_separated_string(self):
+        assert normalize_groups('deals, leads') == frozenset({'deals', 'leads'})
+
+    def test_unknown_names_are_dropped(self):
+        assert normalize_groups(['deals', 'nope']) == frozenset({'deals'})
+
+    def test_pipedrive_tool_rejects_unknown_group(self):
+        with pytest.raises(ValueError, match='unknown group'):
+            pipedrive_tool(group='not_a_group')
+
+
+class TestToolPublication:
+    def test_defaults_publish_core_groups_only(self):
+        published = _instance()._collect_tool_methods()
+        assert 'deal_list' in published
+        assert 'person_search' in published
+        assert 'lead_list' not in published
+        assert 'project_task_create' not in published
+
+    def test_all_groups_publish_everything(self):
+        published = _instance(tool_groups=ALL_GROUPS)._collect_tool_methods()
+        assert 'lead_list' in published
+        assert 'webhook_create' in published
+        assert 'currency_list' in published
+
+    def test_request_tool_follows_its_own_switch(self):
+        assert 'request' in _instance()._collect_tool_methods()
+        assert 'request' not in _instance(allow_raw_request=False)._collect_tool_methods()
+
+    def test_every_tool_belongs_to_a_known_group(self):
+        untagged = []
+        for name in dir(IInstance):
+            attr = getattr(IInstance, name, None)
+            if attr is None or not hasattr(attr, '__tool_meta__') or name == 'request':
+                continue
+            group = getattr(attr, '__pipedrive_group__', None)
+            if group not in ALL_GROUPS:
+                untagged.append(name)
+        assert untagged == []
+
+    def test_full_surface_is_large(self):
+        """Guards against a mixin silently dropping out of the composition."""
+        published = _instance(tool_groups=ALL_GROUPS)._collect_tool_methods()
+        assert len(published) > 150
+
+
+# ---------------------------------------------------------------------------
+# Read-only mode
+# ---------------------------------------------------------------------------
+
+
+class TestReadOnly:
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_reads_are_allowed(self, mock_request):
+        mock_request.return_value = _ok({'id': 1, 'title': 'Deal'})
+        assert _instance(read_only=True).deal_get({'deal_id': 1})['id'] == 1
+
+    @pytest.mark.parametrize(
+        'tool,args',
+        [
+            ('deal_create', {'title': 'x'}),
+            ('deal_update', {'deal_id': 1, 'title': 'x'}),
+            ('deal_delete', {'deal_id': 1}),
+            ('person_create', {'name': 'Ada'}),
+            ('organization_delete', {'org_id': 1}),
+            ('activity_create', {'subject': 'call'}),
+            ('note_create', {'content': 'hi'}),
+            ('lead_create', {'title': 'x'}),
+            ('product_create', {'name': 'x'}),
+            ('webhook_delete', {'webhook_id': 1}),
+            ('field_delete', {'entity': 'deal', 'field_id': 1}),
+            ('project_task_delete', {'task_id': 1}),
+        ],
+    )
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_writes_are_blocked(self, mock_request, tool, args):
+        inst = _instance(read_only=True)
+        with pytest.raises(ValueError, match='read-only mode'):
+            getattr(inst, tool)(args)
+        mock_request.assert_not_called()
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_bulk_delete_is_blocked(self, mock_request):
+        with pytest.raises(ValueError, match='read-only mode'):
+            _instance(read_only=True).deal_delete_bulk({'ids': [1, 2]})
+        mock_request.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# The raw request escape hatch
+# ---------------------------------------------------------------------------
+
+
+class TestRawRequest:
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_get_passes_through_and_returns_envelope(self, mock_request):
+        mock_request.return_value = _ok([{'id': 1}], additional={'pagination': {'next_start': 10}})
+        result = _instance().request({'method': 'get', 'path': '/goals', 'params': {'limit': 1}})
+        assert result['data'] == [{'id': 1}]
+        assert result['additional_data']['pagination']['next_start'] == 10
+        assert mock_request.call_args[0] == ('GET', f'{BASE_URL}/goals')
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_write_blocked_in_read_only(self, mock_request):
+        with pytest.raises(ValueError, match='read-only mode'):
+            _instance(read_only=True).request({'method': 'POST', 'path': '/goals', 'body': {}})
+        mock_request.assert_not_called()
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_get_allowed_in_read_only(self, mock_request):
+        mock_request.return_value = _ok({'ok': True})
+        assert _instance(read_only=True).request({'method': 'GET', 'path': '/currencies'})['data'] == {'ok': True}
+
+    def test_rejects_full_url(self):
+        with pytest.raises(ValueError, match='must be a path'):
+            _instance().request({'method': 'GET', 'path': 'https://api.pipedrive.com/api/v1/deals'})
+
+    def test_rejects_unknown_method(self):
+        with pytest.raises(ValueError, match='method must be one of'):
+            _instance().request({'method': 'TRACE', 'path': '/deals'})
+
+    def test_rejects_non_object_body(self):
+        with pytest.raises(ValueError, match='"body" must be an object'):
+            _instance().request({'method': 'POST', 'path': '/deals', 'body': 'oops'})
+
+
+# ---------------------------------------------------------------------------
+# A few representative request shapes
+# ---------------------------------------------------------------------------
+
+
+class TestRequestShapes:
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_deal_list_sends_filters_and_paging(self, mock_request):
+        mock_request.return_value = _ok(
+            [{'id': 1, 'title': 'Deal'}],
+            additional={'pagination': {'more_items_in_collection': True, 'next_start': 50}},
+        )
+        result = _instance().deal_list({'status': 'open', 'limit': 50, 'start': 0, 'user_id': 3})
+
+        params = mock_request.call_args[1]['params']
+        assert params['status'] == 'open'
+        assert params['limit'] == 50
+        assert params['start'] == 0
+        assert params['user_id'] == 3
+        assert result['items'][0]['title'] == 'Deal'
+        assert result['next_start'] == 50
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_person_create_expands_plain_email_strings(self, mock_request):
+        mock_request.return_value = _ok({'id': 2, 'name': 'Ada'})
+        _instance().person_create({'name': 'Ada', 'email': ['ada@example.com', 'a2@example.com']})
+
+        body = mock_request.call_args[1]['json']
+        assert body['email'] == [
+            {'value': 'ada@example.com', 'primary': True},
+            {'value': 'a2@example.com', 'primary': False},
+        ]
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_search_unwraps_items(self, mock_request):
+        mock_request.return_value = _ok({'items': [{'result_score': 0.9, 'item': {'id': 4, 'title': 'Acme deal'}}]})
+        result = _instance().deal_search({'term': 'acme'})
+        assert result['items'] == [{'id': 4, 'title': 'Acme deal', 'result_score': 0.9}]
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_field_entity_selects_the_endpoint(self, mock_request):
+        mock_request.return_value = _ok([])
+        _instance(tool_groups=ALL_GROUPS).field_list({'entity': 'organization'})
+        assert mock_request.call_args[0][1] == f'{BASE_URL}/organizationFields'
+
+    def test_field_entity_is_validated(self):
+        with pytest.raises(ValueError, match='must be one of'):
+            _instance(tool_groups=ALL_GROUPS).field_list({'entity': 'spaceship'})
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_goal_find_uses_dotted_query_keys(self, mock_request):
+        mock_request.return_value = _ok({'goals': []})
+        _instance(tool_groups=ALL_GROUPS).goal_find({'assignee_id': 1, 'assignee_type': 'person'})
+        params = mock_request.call_args[1]['params']
+        assert params['assignee.id'] == 1
+        assert params['assignee.type'] == 'person'
+        assert 'assignee_id' not in params
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_project_list_uses_cursor_pagination(self, mock_request):
+        mock_request.return_value = _ok([{'id': 1, 'title': 'P'}], additional={'next_cursor': 'abc'})
+        result = _instance(tool_groups=ALL_GROUPS).project_list({'limit': 10})
+        assert result['next_cursor'] == 'abc'
+        assert mock_request.call_args[1]['params']['limit'] == 10
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_file_download_returns_base64(self, mock_request):
+        mock_request.return_value = _resp(200, json_data={'success': True}, content=b'hello')
+        result = _instance(tool_groups=ALL_GROUPS).file_download({'file_id': 1})
+        assert result['content_base64'] == 'aGVsbG8='
+        assert result['size'] == 5
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_file_create_rejects_bad_base64(self, mock_request):
+        with pytest.raises(ValueError, match='not valid base64'):
+            _instance(tool_groups=ALL_GROUPS).file_create({'file_name': 'a.txt', 'content_base64': 'not base64!!'})
+        mock_request.assert_not_called()
+
+
+class TestNonDictPayloads:
+    """Some endpoints answer with a bare list; the cleaner must not assume a dict."""
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_team_user_add_accepts_list_payload(self, mock_request):
+        mock_request.return_value = _ok([1, 2, 3])
+        result = _instance(tool_groups=ALL_GROUPS).team_user_add({'team_id': 1, 'users': [2]})
+        assert result == [1, 2, 3]
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_note_comment_create_accepts_list_payload(self, mock_request):
+        mock_request.return_value = _ok([{'uuid': 'x'}])
+        assert _instance().note_comment_create({'note_id': 1, 'content': 'hi'}) == [{'uuid': 'x'}]
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_team_user_delete_sends_form_not_json(self, mock_request):
+        mock_request.return_value = _ok(True)
+        _instance(tool_groups=ALL_GROUPS).team_user_delete({'team_id': 1, 'users': [2]})
+        kwargs = mock_request.call_args[1]
+        assert kwargs['data'] == {'users': [2]}
+        assert kwargs['json'] is None
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_role_assignment_delete_sends_form_not_json(self, mock_request):
+        mock_request.return_value = _ok(True)
+        _instance(tool_groups=ALL_GROUPS).role_assignment_delete({'role_id': 1, 'user_id': 2})
+        kwargs = mock_request.call_args[1]
+        assert kwargs['data'] == {'user_id': 2}
+        assert kwargs['json'] is None
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_file_create_sends_multipart(self, mock_request):
+        mock_request.return_value = _ok({'id': 5, 'name': 'a.txt'})
+        _instance(tool_groups=ALL_GROUPS).file_create(
+            {'file_name': 'a.txt', 'content_base64': 'aGVsbG8=', 'deal_id': 3}
+        )
+        kwargs = mock_request.call_args[1]
+        assert kwargs['files']['file'][0] == 'a.txt'
+        assert kwargs['files']['file'][1] == b'hello'
+        assert kwargs['data'] == {'deal_id': 3}
