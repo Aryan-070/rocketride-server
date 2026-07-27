@@ -26,11 +26,16 @@
 """
 Tool grouping for the Pipedrive node.
 
-Full v1 coverage is ~230 tools, which is far more than an LLM can choose between
+Full v1 coverage is 256 tools, which is far more than an LLM can choose between
 reliably. Every tool is therefore tagged with a resource group, and the node only
 publishes the groups named in the ``pipedrive.toolGroups`` config field. The
 filtering happens in ``IInstance._collect_tool_methods()``, so a group that is not
 published is invisible to ``tool.query`` and rejected by ``tool.invoke`` alike.
+
+Group sizes are very uneven (``deals`` is 28 tools, ``permission_sets`` is 3), so
+the guard rail counts published *tools* rather than groups. Crossing it only warns:
+scripted callers legitimately want a wide surface, and silently dropping tools an
+operator asked for is worse than a noisy config panel.
 """
 
 from __future__ import annotations
@@ -78,6 +83,47 @@ DEFAULT_GROUPS = frozenset(
 #: The generic escape-hatch tool, gated by ``pipedrive.allowRawRequest`` instead
 #: of by a tool group.
 RAW_REQUEST_TOOL = 'request'
+
+#: Publishing more tools than this makes an LLM's tool choice unreliable, and some
+#: providers reject a larger list outright (OpenAI caps a request at 128 functions).
+#: Crossing it is a warning, never an error, and ``all`` is exempt — see
+#: ``IGlobal.validateConfig``.
+RECOMMENDED_TOOL_LIMIT = 120
+
+
+def wants_all_groups(raw) -> bool:
+    """Whether the operator asked for every group by name rather than by listing them.
+
+    ``all`` is an explicit opt-in to the full surface, so it is exempt from the
+    tool-count guard rail; selecting the same groups one by one is not.
+    """
+    if isinstance(raw, str):
+        raw = raw.split(',')
+    if not isinstance(raw, (list, tuple, set, frozenset)):
+        return False
+    names = {str(g).strip().lower() for g in raw if str(g).strip()}
+    return 'all' in names or '*' in names
+
+
+def tool_counts_by_group() -> dict[str, int]:
+    """Map each group to the number of tools it publishes.
+
+    ``IInstance`` is imported lazily because the mixins it composes import this
+    module; a top-level import would be circular.
+    """
+    from .IInstance import IInstance
+
+    counts: dict[str, int] = {}
+    for name in dir(IInstance):
+        group = getattr(getattr(IInstance, name, None), '__pipedrive_group__', None)
+        if group:
+            counts[group] = counts.get(group, 0) + 1
+    return counts
+
+
+def published_tool_count(groups) -> int:
+    """How many tools the given set of groups publishes."""
+    return sum(count for group, count in tool_counts_by_group().items() if group in groups)
 
 
 def normalize_groups(raw) -> frozenset:

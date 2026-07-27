@@ -56,7 +56,7 @@
 		"pipedrive.toolGroups": {
 			"type": "array",
 			"title": "Tool groups",
-			"description": "Which groups of Pipedrive tools this node publishes to the agent. The full API is ~230 tools, which is more than an LLM can choose between reliably, so only the listed groups are exposed. Use <b>all</b> to publish everything. Available groups: deals, persons, organizations, org_relationships, activities, pipelines, stages, notes, search, fields, leads, products, files, users, roles, permission_sets, teams, goals, filters, webhooks, subscriptions, mailbox, call_logs, projects, misc.",
+			"description": "Which groups of Pipedrive tools this node publishes to the agent. The full API is 256 tools, which is more than an LLM can choose between reliably, so only the listed groups are exposed. Group sizes vary a lot (deals is 28 tools, permission_sets is 3); selections that publish more than 120 tools log a warning but still run, and <b>all</b> publishes everything without warning. Available groups: deals, persons, organizations, org_relationships, activities, pipelines, stages, notes, search, fields, leads, products, files, users, roles, permission_sets, teams, goals, filters, webhooks, subscriptions, mailbox, call_logs, projects, misc.",
 			"items": {
 				"type": "string"
 			},

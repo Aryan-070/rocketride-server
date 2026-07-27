@@ -36,7 +36,14 @@ from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 
 from .pipedrive_client import BASE_URL, base_url_for
-from .tool_groups import ALL_GROUPS, DEFAULT_GROUPS, normalize_groups
+from .tool_groups import (
+    ALL_GROUPS,
+    DEFAULT_GROUPS,
+    RECOMMENDED_TOOL_LIMIT,
+    normalize_groups,
+    published_tool_count,
+    wants_all_groups,
+)
 
 
 class IGlobal(IGlobalBase):
@@ -64,6 +71,10 @@ class IGlobal(IGlobalBase):
         if not self.token:
             raise Exception('tool_pipedrive: apiToken is required')
 
+        oversized = _oversized_warning(cfg.get('toolGroups'), self.tool_groups)
+        if oversized:
+            warning(oversized)
+
     def validateConfig(self) -> None:
         try:
             cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
@@ -72,6 +83,9 @@ class IGlobal(IGlobalBase):
             unknown = _unknown_groups(cfg.get('toolGroups'))
             if unknown:
                 warning(f'unknown tool group(s): {", ".join(unknown)}')
+            oversized = _oversized_warning(cfg.get('toolGroups'), normalize_groups(cfg.get('toolGroups')))
+            if oversized:
+                warning(oversized)
         except Exception as e:
             warning(str(e))
 
@@ -82,6 +96,27 @@ class IGlobal(IGlobalBase):
         self.read_only = False
         self.tool_groups = DEFAULT_GROUPS
         self.allow_raw_request = True
+
+
+def _oversized_warning(raw, groups) -> str:
+    """Warn when the selected groups publish more tools than an LLM handles well.
+
+    Advisory only — the tools are still published. ``all`` is an explicit opt-in
+    to the whole surface and is exempt.
+    """
+    if wants_all_groups(raw):
+        return ''
+    try:
+        total = published_tool_count(groups)
+    except Exception:
+        return ''
+    if total <= RECOMMENDED_TOOL_LIMIT:
+        return ''
+    return (
+        f'toolGroups publishes {total} tools, above the recommended {RECOMMENDED_TOOL_LIMIT}. '
+        'Agents pick the wrong tool more often at this size, and some providers reject more '
+        'than 128 tools in one request. Drop a group, or use "all" if this is deliberate.'
+    )
 
 
 def _unknown_groups(raw) -> list[str]:

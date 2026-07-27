@@ -124,7 +124,17 @@ with _scoped_stubs():
         paginated,
         split_custom_fields,
     )
-    from tool_pipedrive.tool_groups import ALL_GROUPS, DEFAULT_GROUPS, normalize_groups, pipedrive_tool
+    from tool_pipedrive.IGlobal import _oversized_warning
+    from tool_pipedrive.tool_groups import (
+        ALL_GROUPS,
+        DEFAULT_GROUPS,
+        RECOMMENDED_TOOL_LIMIT,
+        normalize_groups,
+        pipedrive_tool,
+        published_tool_count,
+        tool_counts_by_group,
+        wants_all_groups,
+    )
     from tool_pipedrive.tools._base import body_from, paging_params
 
 
@@ -745,3 +755,45 @@ class TestNonDictPayloads:
         assert kwargs['files']['file'][0] == 'a.txt'
         assert kwargs['files']['file'][1] == b'hello'
         assert kwargs['data'] == {'deal_id': 3}
+
+
+class TestToolCountGuardRail:
+    """The cap counts published tools, warns rather than blocks, and exempts `all`."""
+
+    def test_every_group_has_a_count(self):
+        counts = tool_counts_by_group()
+        assert set(counts) == ALL_GROUPS
+        assert counts['deals'] > counts['permission_sets']  # sizes really are uneven
+
+    def test_published_count_sums_only_selected_groups(self):
+        counts = tool_counts_by_group()
+        selection = {'deals', 'persons'}
+        assert published_tool_count(selection) == counts['deals'] + counts['persons']
+
+    def test_defaults_stay_under_the_limit(self):
+        assert published_tool_count(DEFAULT_GROUPS) <= RECOMMENDED_TOOL_LIMIT
+
+    def test_full_surface_exceeds_the_limit(self):
+        assert published_tool_count(ALL_GROUPS) > RECOMMENDED_TOOL_LIMIT
+
+    def test_no_warning_for_the_defaults(self):
+        assert _oversized_warning(sorted(DEFAULT_GROUPS), DEFAULT_GROUPS) == ''
+
+    def test_warns_when_an_explicit_selection_is_too_large(self):
+        msg = _oversized_warning(sorted(ALL_GROUPS), ALL_GROUPS)
+        assert str(published_tool_count(ALL_GROUPS)) in msg
+        assert str(RECOMMENDED_TOOL_LIMIT) in msg
+
+    @pytest.mark.parametrize('raw', [['all'], 'all', ['*'], ['deals', 'all']])
+    def test_all_is_exempt(self, raw):
+        assert wants_all_groups(raw) is True
+        assert _oversized_warning(raw, ALL_GROUPS) == ''
+
+    def test_listing_every_group_by_name_is_not_exempt(self):
+        assert wants_all_groups(sorted(ALL_GROUPS)) is False
+        assert _oversized_warning(sorted(ALL_GROUPS), ALL_GROUPS) != ''
+
+    def test_warning_never_reduces_the_published_tools(self):
+        """The guard rail is advisory: an oversized selection still publishes everything."""
+        published = _instance(tool_groups=ALL_GROUPS)._collect_tool_methods()
+        assert len(published) > RECOMMENDED_TOOL_LIMIT

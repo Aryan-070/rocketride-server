@@ -50,6 +50,24 @@ Available groups:
 A tool in a group that is not published is invisible to the agent and refused if
 invoked anyway.
 
+### Tool-count guard rail
+
+Group sizes are uneven — `deals` is 28 tools, `permission_sets` is 3 — so counting
+groups tells you little. The node counts **published tools** instead and warns when
+a selection exceeds **120**, both in the config panel and at pipeline start:
+
+```
+toolGroups publishes 148 tools, above the recommended 120. Agents pick the wrong
+tool more often at this size, and some providers reject more than 128 tools in one
+request. Drop a group, or use "all" if this is deliberate.
+```
+
+It is a warning, not a block: the tools are still published and the pipeline still
+runs. Silently dropping tools an operator asked for fails later and more
+confusingly than a noisy config panel. `all` is exempt, since it is already an
+explicit opt-in to the full 256-tool surface and suits scripted callers that do not
+route through an LLM.
+
 ### Pagination
 
 List tools take `start` (offset, default 0) and `limit` (1-500, default 100), and
