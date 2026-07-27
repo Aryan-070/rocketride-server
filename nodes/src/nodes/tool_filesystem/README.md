@@ -59,26 +59,43 @@ non-trivial regex).
 
 Besides the agent tools, the node doubles as a **pipeline sink**. Each input lane —
 `documents`, `text`, `table`, `image`, `audio`, `video` — writes whatever flows in to the
-account store, then emits a single `documents` metadata reference on its output lane.
+account store, then emits `documents` metadata references on its output lane: one per file
+written, so an object that carries several documents yields one reference per document.
 
-- **Where it writes:** `targetDir` (default `output/`) + the source object's original
-  name. Nameless inputs fall back to the object id; the extension comes from the original
-  name, the mime type (media), or `.md` (text/table). Existing paths are auto-suffixed
-  (`name.md`, `name_1.md`, …).
+- **Where it writes:** `targetDir` (default `output/`) + the object's original name stem,
+  with the lane's extension rule applied — e.g. `output/report.txt` (nameless inputs fall
+  back to the object id). If that name is already taken the sink appends `_1`, `_2`, …,
+  and gives up with an error after `MAX_COLLISION_SUFFIX` (100) attempts rather than
+  probing indefinitely. When one object emits several documents they also carry an index
+  (`report_0.txt`, `report_1.txt`, …).
+  Every candidate is whitelist-checked *before* it is probed, so a path the whitelist
+  would reject never reveals whether files exist in the store.
+- **How the extension is chosen:** each lane owns its own rule, keyed to what the lane
+  actually carries. `text`/`table` carry markdown, so they always store `.md`;
+  `documents` carries parsed text (`page_content`), so it always stores `.txt` — a parsed
+  `report.pdf` stores as `report.txt`, keeping the extension truthful about the bytes;
+  media derive it from the stream's mime type, then the source extension, then `.bin`.
+- **Media streaming:** image/audio/video chunks stream straight to the store, so memory
+  stays bounded regardless of file size. The file is created only once the first non-empty
+  chunk arrives — an empty stream writes nothing.
 - **What it emits:** a document whose `page_content` is the store path, carrying that path
   (and, when **Emit download URL** is on, a time-limited signed URL) in its metadata —
-  only when a downstream node listens on `documents`.
+  only when a downstream node listens on `documents`. Each reference gets a distinct
+  `chunkId`, so downstream vector stores keyed on object id + chunk id never overwrite
+  one another.
 - **Guards:** the sink honours the same `allowWrite` toggle and path whitelist as the
-  `write_file` tool.
+  `write_file` tool; the whitelist is checked before anything touches the store. The sink
+  also suppresses default routing, so downstream nodes receive the emitted references
+  rather than the original payload as well.
 
 The signed URL is minted server-side via the store's `get_url` (no agent `task.store`
 permission needed); **URL expiry (seconds)** (default 3600, max 3600) sets its TTL.
 
 | Lane in | Lane out | Description |
 | --- | --- | --- |
-| `documents` | `documents` | Persist each document's content; emit store-path reference |
+| `documents` | `documents` | Persist each document (source extension, else `.txt`); emit one reference per document |
 | `text` / `table` | `documents` | Persist as `.md`; emit reference |
-| `image` / `audio` / `video` | `documents` | Accumulate streamed chunks, persist on end; emit reference |
+| `image` / `audio` / `video` | `documents` | Stream chunks to the store, commit on end; emit reference |
 
 ---
 
