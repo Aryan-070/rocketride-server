@@ -141,6 +141,11 @@ async def _run_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
         )
 
     token = (started or {}).get('token')
+    if not token:
+        return _bad(
+            'engine did not return a task token',
+            'the pipeline may have failed to start, or the engine response was malformed',
+        )
     tasks.add(token, pipeline_ref=filepath or '<inline>')
 
     result_payload: Dict[str, Any] = {'ok': True, 'task_token': token}
@@ -148,7 +153,10 @@ async def _run_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
     if args.get('pipelineTraceLevel') not in (None, 'none'):
         tasks.set_flow_id(token, (started or {}).get('id'))
         try:
-            await client.add_monitor({'token': token}, ['flow'])
+            await asyncio.wait_for(
+                client.add_monitor({'token': token}, ['flow']),
+                timeout=DEFAULT_TIMEOUT_SECONDS,
+            )
             tasks.mark_flow_subscribed(token)
             result_payload['flow_subscribed'] = True
         except Exception as exc:  # noqa: BLE001 - pipeline started; subscription is best-effort
@@ -223,7 +231,10 @@ async def _run_dropper_pipe(client, tasks, args: Dict[str, Any]) -> dict:
     if args.get('pipelineTraceLevel') not in (None, 'none'):
         tasks.set_flow_id(token, started.get('id'))
         try:
-            await client.add_monitor({'token': token}, ['flow'])
+            await asyncio.wait_for(
+                client.add_monitor({'token': token}, ['flow']),
+                timeout=DEFAULT_TIMEOUT_SECONDS,
+            )
             tasks.mark_flow_subscribed(token)
             result_payload['flow_subscribed'] = True
         except Exception as exc:  # noqa: BLE001 - pipeline started; subscription is best-effort

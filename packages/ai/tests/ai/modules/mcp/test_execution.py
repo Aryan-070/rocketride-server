@@ -531,3 +531,40 @@ async def test_run_pipeline_inline_send_removes_token_but_flow_still_drainable(f
     assert tasks.record_flow('abcd1234.websrc', {'kind': 'node'}) is True
     drained = tasks.flow_since(fake_engine._token)
     assert [e['kind'] for e in drained['events']] == ['node']
+
+
+@pytest.mark.asyncio
+async def test_run_pipeline_missing_token_is_bad_request(fake_engine, monkeypatch):
+    registry = ToolRegistry()
+    execution.register(registry)
+    tasks = TaskRegistry()
+
+    async def _no_token(**kwargs):
+        return {}
+
+    monkeypatch.setattr(fake_engine, 'use', _no_token)
+
+    result = await registry.handler('run_pipeline')(fake_engine, tasks, {'filepath': 'p.pipe'})
+
+    assert result['ok'] is False
+    assert result['error_type'] == 'BadRequest'
+
+
+@pytest.mark.asyncio
+async def test_run_pipeline_subscribe_timeout_is_best_effort(fake_engine, monkeypatch):
+    registry = ToolRegistry()
+    execution.register(registry)
+    tasks = TaskRegistry()
+
+    async def _hang(*args, **kwargs):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(fake_engine, 'add_monitor', _hang)
+    monkeypatch.setattr(execution, 'DEFAULT_TIMEOUT_SECONDS', 0.01)
+
+    result = await registry.handler('run_pipeline')(
+        fake_engine, tasks, {'filepath': 'p.pipe', 'pipelineTraceLevel': 'full'}
+    )
+
+    assert result['ok'] is True
+    assert result['flow_subscribed'] is False

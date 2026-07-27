@@ -177,7 +177,18 @@ async def _get_pipeline_trace(client, tasks, args: Dict[str, Any]) -> dict:
     just_subscribed = False
     if not tasks.is_flow_subscribed(token):
         tasks.ensure_flow(token)
-        await client.add_monitor({'token': token}, ['flow'])
+        try:
+            await asyncio.wait_for(
+                client.add_monitor({'token': token}, ['flow']),
+                timeout=DEFAULT_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            return {
+                'ok': False,
+                'error_type': 'Timeout',
+                'message': 'timed out subscribing to flow events for this task',
+                'hint': 'the engine connection may be busy or wedged; retry get_pipeline_trace',
+            }
         tasks.mark_flow_subscribed(token)
         just_subscribed = True
 

@@ -351,3 +351,22 @@ async def test_get_pipeline_trace_add_monitor_failure_propagates(fake_engine, mo
 
     with pytest.raises(RuntimeError, match='subscribe failed'):
         await registry.handler('get_pipeline_trace')(fake_engine, tasks, {'task_token': 'tok-1'})
+
+
+@pytest.mark.asyncio
+async def test_get_pipeline_trace_subscribe_timeout_returns_timeout(fake_engine, monkeypatch):
+    registry = ToolRegistry()
+    visibility.register(registry)
+    tasks = TaskRegistry()
+
+    async def _hang(*args, **kwargs):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(fake_engine, 'add_monitor', _hang)
+    monkeypatch.setattr(visibility, 'DEFAULT_TIMEOUT_SECONDS', 0.01)
+
+    result = await registry.handler('get_pipeline_trace')(fake_engine, tasks, {'task_token': 'tok-1'})
+
+    assert result['ok'] is False
+    assert result['error_type'] == 'Timeout'
+    assert tasks.is_flow_subscribed('tok-1') is False
