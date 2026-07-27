@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]: since 2026-06-08
 
+### Added
+
+- **`tool_gohighlevel` node**: exposes the GoHighLevel (LeadConnector) v2 REST API to agents as 101 tools across 17 groups (contacts, notes, tasks, opportunities, pipelines, conversations, messages, calendars, appointments, custom fields, custom values, tags, businesses, locations, users), plus a generic `request` escape hatch. Authenticates with a sub-account Private Integration Token, publishes a 74-tool default group set, and can hide every write tool in read-only mode (#1676)
+
 ## [3.3.0] - 2026-06-08
 
 ### ⚠ Breaking Changes: Client SDKs (`rocketride` / `rocketride-python`)
