@@ -22,18 +22,6 @@
 	"lanes": {
 		"questions": ["answers"]
 	},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"agent_description": "",
-				"instructions": [],
-				"advanced_mode": false,
-				"goal": "",
-				"backstory": ""
-			}
-		}
-	},
 	"fields": {
 		"agent_description": {
 			"type": "string",
@@ -59,16 +47,10 @@
 			"title": "Advanced Mode",
 			"description": "Expose CrewAI manager Agent configuration directly.",
 			"default": false,
-			"enum": [
-				[false, "Off"],
-				[true, "On"]
-			],
-			"conditional": [
-				{
-					"value": true,
-					"properties": ["goal", "backstory"]
-				}
-			]
+			"enum": {
+				"false": { "title": "Off" },
+				"true": { "title": "On", "config": ["goal", "backstory"] }
+			}
 		},
 		"goal": {
 			"type": "string",
@@ -83,11 +65,5 @@
 			"description": "Background context for the manager's persona. Maps to CrewAI Agent(backstory=...)."
 		}
 	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "CrewAI Manager",
-			"properties": ["agent_description", "instructions", "advanced_mode"]
-		}
-	]
+	"config": ["agent_description", "instructions", "advanced_mode"]
 }
