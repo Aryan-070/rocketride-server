@@ -1215,6 +1215,14 @@ class Task(DAPBase):
                         # Handle string notes - simple replacement
                         note = note.replace('{token}', self.token)
                         note = note.replace('{public_auth}', self.public_auth)
+                        # getattr: partially-initialized tasks (and test stubs)
+                        # may not carry the identity attributes at all.
+                        project_id = getattr(self, 'project_id', None)
+                        source = getattr(self, 'source', None)
+                        if project_id is not None:
+                            note = note.replace('{project_id}', str(project_id))
+                        if source is not None:
+                            note = note.replace('{source}', str(source))
                         self._status.notes.append(note)
                     elif isinstance(note, dict):
                         # Handle dict notes - walk through and replace in all string values
@@ -1224,6 +1232,12 @@ class Task(DAPBase):
                                 # Replace tokens in string values
                                 value = value.replace('{token}', self.token)
                                 value = value.replace('{public_auth}', self.public_auth)
+                                project_id = getattr(self, 'project_id', None)
+                                source = getattr(self, 'source', None)
+                                if project_id is not None:
+                                    value = value.replace('{project_id}', str(project_id))
+                                if source is not None:
+                                    value = value.replace('{source}', str(source))
                             processed_note[key] = value
                         self._status.notes.append(processed_note)
                     else:
