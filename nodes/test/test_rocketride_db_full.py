@@ -50,6 +50,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import sys
+import urllib.parse
 import types
 
 from pathlib import Path
@@ -64,6 +65,9 @@ _SQL_NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'rocketride_sql'
 _VEC_NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'rocketride_vector'
 
 TEST_DSN = os.environ.get('RR_TEST_PG_DSN', 'postgresql://rruser:rrpass@localhost:55432/rrtenant')
+# Derived, not hardcoded: the suite must also run against a provisioned tenant
+# DSN (e.g. t_<slug>_<hash> through a pooler), not just the default container.
+TEST_DB_NAME = urllib.parse.urlparse(TEST_DSN).path.lstrip('/')
 TEST_CLIENT_ID = 'tenant-integration-test'
 
 psycopg2 = pytest.importorskip('psycopg2')
@@ -291,7 +295,7 @@ class TestRocketrideSqlE2E:
     def test_begin_global_connects_and_reflects(self, rr_env, monkeypatch, sql_table):
         glb, _ = self._begin(monkeypatch, {'table': sql_table})
         try:
-            assert glb.database == 'rrtenant'
+            assert glb.database == TEST_DB_NAME
             assert glb.table == sql_table
             assert sql_table in glb.db_schema
             assert 'name' in glb.schema
@@ -335,7 +339,7 @@ class TestRocketrideSqlE2E:
         monkeypatch.setenv('ROCKETRIDE_DB_DSN', TEST_DSN)
         glb, inst = self._begin(monkeypatch, {'table': sql_table, 'allow_execute': True})
         try:
-            assert glb.database == 'rrtenant'
+            assert glb.database == TEST_DB_NAME
             rows = inst.execute({'sql': f'SELECT count(*) AS n FROM {sql_table}'})
             assert rows['rows'][0]['n'] == 2
         finally:
@@ -348,7 +352,7 @@ class TestRocketrideSqlE2E:
             {'table': sql_table, 'host': 'evil.example.com', 'user': 'evil', 'password': 'evil'},
         )
         try:
-            assert glb.database == 'rrtenant'
+            assert glb.database == TEST_DB_NAME
             assert 'evil' not in str(glb.engine.url)
         finally:
             glb.endGlobal()
