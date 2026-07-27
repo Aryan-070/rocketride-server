@@ -142,9 +142,6 @@ async def test_list_tools_reflects_real_register_all(fake_engine):
         'monitor',
         'list_running_pipelines',
         'get_pipeline_trace',
-        'sql_query',
-        'graph_query',
-        'vector_search',
     }
 
 

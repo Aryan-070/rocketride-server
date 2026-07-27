@@ -11,7 +11,7 @@ like every other module and mounted at:
 /mcp
 ```
 
-This module exposes a static, 26-tool RocketRide authoring/execution surface served
+This module exposes a static, 23-tool RocketRide authoring/execution surface served
 over HTTP from inside the running engine process — no separate process or transport
 bridge required. It supersedes the earlier 2-tool port, which exposed a dynamic
 per-pipeline `{filepath}` tool plus a `RocketRide_Document_Processor` convenience
@@ -50,7 +50,7 @@ tool; both are removed (see "History" below).
 Config key `mcp_dev_no_auth` (bool, in the module `config` dict passed to `initModule`)
 is the config-driven equivalent of `MCP_DEV_NO_AUTH=1`; either one enables the bypass.
 
-## The 26 tools
+## The 23 tools
 
 Dispatch is registry-based: `tooling.ToolRegistry` holds `{name -> (description,
 inputSchema, handler)}`; `tools/__init__.register_all(registry)` populates one shared
@@ -62,13 +62,12 @@ signature `async def handler(client: EngineClient, tasks: TaskRegistry, args: di
 
 All tools are static and typed (fixed name + JSON Schema) — there is no dynamic
 per-pipeline tool generation and no `filepath`-shaped catch-all tool of the kind the
-legacy 2-tool port used. That said, the surface *does* include a convenience-tool
-group — `sql_query`/`graph_query`/`vector_search` (see Query below) — a different
-kind of convenience tool than the removed one, reintroduced by `tools/query.py` and
-available only when signed into the RocketRide cloud.
+legacy 2-tool port used.
 
-The 26 tools are organized into 8 groups (plus 2 resources), matching
-`claude/tasks/http-mcp-tools-port/final-tool-surface.md`.
+The 23 tools are organized into 7 groups (plus 2 resources), matching
+`claude/tasks/http-mcp-tools-port/final-tool-surface.md` minus the Query group
+(see History: the 3 convenience query tools were removed pending their cloud DB
+backend).
 
 **Introspection (4)** — `tools/introspection.py`, read-only/static-analysis, no task tokens:
 
@@ -127,31 +126,6 @@ The 26 tools are organized into 8 groups (plus 2 resources), matching
 | `deploy_status` | Detailed status of one deployment by `project_id`. | `project_id` |
 | `deploy_remove` | Undeploy and remove a deployment by `project_id`. | `project_id` |
 | `deploy_update` | Update a deployment's pipeline and/or schedule by `project_id`. | `project_id`, `pipeline`/`filepath`, `schedule` |
-
-**Query (3)** — `tools/query.py`, read-only, guarded, **cloud-only availability**:
-
-| Tool | Purpose | Key args |
-| --- | --- | --- |
-| `sql_query` | Run a read-only SQL query (`SELECT`/`EXPLAIN`, enforced by `read_guards.assert_sql_read_only`) against the RocketRide SQL store, return rows. | `query`, `session_token`, `ttl` |
-| `graph_query` | Run a read-only Cypher query (`MATCH`/`RETURN`/`WITH`, enforced by `read_guards.assert_cypher_read_only`) against the RocketRide graph store, return records. | `query`, `session_token`, `ttl` |
-| `vector_search` | Search the RocketRide vector store by text or embedding, return matches. | `collection`, `query`/`embedding`, `k`, `filter`, `session_token`, `ttl` |
-
-Each query tool opens (or reuses, via `session_token`) a warm tool-lane session
-against a small `.pipe` under `tools/pipes/` — `sql_query.pipe` → node `postgres_1`,
-`graph_query.pipe` → node `neo4j_1`, `vector_search.pipe` → node `qdrant_1` — then
-calls that node's `execute`/`search` tool-function. Results are capped to a 40 KB
-in-band budget by `result_envelope.cap_rows` (truncates and adds a `notice` rather
-than risk blowing the JSON-RPC message size). Sessions default to a 300s TTL (max
-1800s, clamped) and can be reused across calls via `session_token` instead of
-re-spawning a task per query.
-
-**Availability.** These three tools query RocketRide-hosted SQL/graph/vector
-databases, so per `claude/tasks/http-mcp-tools-port/final-tool-surface.md` they are
-**only available when signed into the RocketRide cloud** — regardless of whether the
-connected engine itself is running locally or remotely. This module has no
-code-level gate for that today: a locally-run engine with no cloud DB provisioned
-will simply fail the `postgres_1`/`neo4j_1`/`qdrant_1` node lookup at call time. The
-gate is an operational/provisioning fact, not a flag this module checks.
 
 ### Per-node tracing
 
@@ -227,9 +201,9 @@ prompt templates from the earlier port were removed along with their tests.
 
 ## The `EngineClient` seam
 
-`engine.py` defines one `Protocol`, `EngineClient`, with the ~22 async methods needed
-by the 26-tool surface (task lifecycle, services/validation, store/templates/store
-metadata/signed URLs, full deployment lifecycle, query sessions — see the `Protocol`
+`engine.py` defines one `Protocol`, `EngineClient`, with the ~21 async methods needed
+by the 23-tool surface (task lifecycle, services/validation, store/templates/store
+metadata/signed URLs, full deployment lifecycle — see the `Protocol`
 definition in `engine.py` for exact signatures). All
 tool/resource code depends only on this interface — never on a concrete client — so
 the implementation is swappable.
@@ -346,6 +320,12 @@ fields) were ported from the `feature/mcp-server-overhaul` branch, which had
 already proven them live; see "Per-node tracing" above and
 `claude/tasks/http-mcp-tools-port/final-tool-surface.md` for the per-tool
 rationale.
+
+Finally, the 3 `sql_query`/`graph_query`/`vector_search` convenience query tools
+were removed again (26 → 23): they target RocketRide-hosted SQL/graph/vector
+databases whose backend is not yet available in OSS `develop`, so shipping them
+would expose tools that fail at call time. They are expected to return once the
+cloud DB backend lands.
 
 ## Running / testing locally
 
