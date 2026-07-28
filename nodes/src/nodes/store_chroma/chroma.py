@@ -133,9 +133,10 @@ class Store(DocumentStoreBase):
             self.client = None
             floor = f'{_MIN_CHROMA_VERSION[0]}.{_MIN_CHROMA_VERSION[1]}'
             raise Exception(
-                f'Failed to connect to Chroma at {self.host}:{self.port}. This often means '
-                f'the Chroma server is too old or incompatible with the client (RocketRide '
-                f'requires Chroma server >= {floor}). Original error: {e}'
+                f'Failed to connect to Chroma at {self.host}:{self.port}. This may be due to '
+                f'network/connectivity issues, invalid host/port/credentials, or an '
+                f'incompatible/too-old Chroma server (RocketRide requires Chroma server '
+                f'>= {floor}). Original error: {e}'
             ) from e
 
         # Best-effort server-version floor check. get_version() is not present on every
