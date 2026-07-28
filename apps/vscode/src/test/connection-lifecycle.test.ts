@@ -97,6 +97,31 @@ test('old SDK callbacks stay disabled while the newest attempt is still resolvin
 	assert.equal(controller.isCurrentCallback(oldGeneration), false);
 });
 
+test('SDK event publication stays with the callback-owning connection attempt', () => {
+	const controller = new ConnectionGenerationController();
+	const published: string[] = [];
+	const publishEvent = (event: string) => {
+		const generation = controller.callbackGeneration;
+		if (!controller.isCurrentCallback(generation)) return;
+		published.push(event);
+	};
+
+	const oldGeneration = controller.beginAttempt();
+	controller.activateAttemptCallbacks(oldGeneration);
+	publishEvent('old-before-replacement');
+
+	const newGeneration = controller.beginAttempt();
+	publishEvent('old-during-new-credential-resolution');
+
+	controller.activateAttemptCallbacks(newGeneration);
+	publishEvent('new-after-callback-activation');
+
+	assert.deepEqual(published, [
+		'old-before-replacement',
+		'new-after-callback-activation',
+	]);
+});
+
 test('intentional teardown suppresses stale SDK callbacks and only its current completion publishes disconnect', async () => {
 	const controller = new ConnectionGenerationController();
 	const oldGeneration = controller.beginAttempt();

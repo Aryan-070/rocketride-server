@@ -500,6 +500,9 @@ export class ConnectionManager extends EventEmitter {
 				}
 			},
 			onEvent: async (message: DAPMessage) => {
+				const generation = this.connectionGeneration.callbackGeneration;
+				if (!this.connectionGeneration.isCurrentCallback(generation) || this.isDisposing) return;
+
 				// Server output events are NOT mirrored into an output channel:
 				// the task's Log pane (fed by the same events via shell:event)
 				// is the console now — a second copy in the Output panel was
