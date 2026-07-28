@@ -112,6 +112,17 @@ class TestDsnHelpers:
         assert fields['host'] == ''
         assert fields['database'] == ''
 
+    def test_parse_malformed_port_degrades_that_field_only(self):
+        fields = rrdb.parse_dsn_fields('postgresql://u:p@h:notaport/db')
+        assert fields['port'] is None
+        assert fields['host'] == 'h'
+        assert fields['database'] == 'db'
+
+    def test_parse_malformed_authority_yields_empty_fields(self):
+        # Mismatched IPv6 bracket — urlparse itself raises ValueError.
+        fields = rrdb.parse_dsn_fields('postgresql://[::1/db')
+        assert fields == {'host': '', 'port': None, 'user': '', 'password': '', 'database': ''}
+
 
 class TestClientId:
     def test_missing_env_raises(self, monkeypatch):
@@ -481,6 +492,24 @@ class TestRocketrideVectorStore:
         index_sql = [sql for sql in store.client.executed if 'USING hnsw' in sql]
         assert 'm = 32' in index_sql[0]
         assert 'ef_construction = 128' in index_sql[0]
+
+    def test_hnsw_params_clamped_to_pgvector_bounds(self, monkeypatch):
+        cls, _ = _vector_store_cls(monkeypatch)
+        store = _make_store(
+            cls,
+            {'collection': 'rr_vec', 'similarity': 'cosine', 'hnsw_m': 1, 'hnsw_ef_construction': 1},
+        )
+        # pgvector requires m >= 2, ef_construction >= 4 and >= 2 * m.
+        assert store.hnsw_m == 2
+        assert store.hnsw_ef_construction == 4
+
+    def test_hnsw_ef_construction_raised_to_twice_m(self, monkeypatch):
+        cls, _ = _vector_store_cls(monkeypatch)
+        store = _make_store(
+            cls,
+            {'collection': 'rr_vec', 'similarity': 'cosine', 'hnsw_m': 64, 'hnsw_ef_construction': 64},
+        )
+        assert store.hnsw_ef_construction == 128
 
     def test_hnsw_skipped_above_dimension_ceiling(self, monkeypatch):
         cls, warnings = _vector_store_cls(monkeypatch)

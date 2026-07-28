@@ -115,6 +115,13 @@ def emit(
         )
     if params and not facts.param_names:
         raise AgeTranslationError('Parameters were supplied but the Cypher query references no $parameters')
+    if facts.param_names:
+        missing = sorted(facts.param_names - set(params or {}))
+        if missing:
+            raise AgeTranslationError(
+                'Cypher query references parameters with no supplied values: '
+                + ', '.join(f'${name}' for name in missing)
+            )
 
     columns = [c.display_name for c in facts.return_columns] if facts.return_columns else []
     has_return = facts.return_columns is not None
@@ -135,7 +142,9 @@ def emit(
     if limit is not None:
         outer_limit = f' LIMIT {max(0, int(limit))}'
 
-    if params:
+    # Key the branch on the query's $parameters, not on bool(params): the
+    # missing-value check above guarantees params covers param_names here.
+    if facts.param_names:
         # cypher()'s params argument must be a prepared-statement parameter.
         stmt_name = f'_rr_age_{uuid.uuid4().hex[:12]}'
         select = (

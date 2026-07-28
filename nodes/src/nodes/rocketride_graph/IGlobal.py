@@ -43,6 +43,7 @@ transaction ``READ ONLY`` — server-side write protection, with the base's
 from typing import Any, Dict, List, Optional, Tuple
 
 import psycopg2
+from psycopg2 import sql
 
 from rocketlib import warning
 from ai.common.graph import GraphGlobalBase
@@ -87,7 +88,9 @@ class IGlobal(GraphGlobalBase):
 
         # The one RocketRide difference: DSN from the account seam, no config.
         dsn = resolve_rocketride_dsn()
-        self.client = psycopg2.connect(dsn)
+        # Bounded connect so an unreachable pooler fails fast (matches the
+        # probe's 3s timeout) instead of waiting out the OS TCP timeout.
+        self.client = psycopg2.connect(dsn, connect_timeout=3)
 
         # Fail-fast round-trip: AGE present + the tenant graph exists.
         with self.client.cursor() as cur:
@@ -291,7 +294,7 @@ class IGlobal(GraphGlobalBase):
         """One-row property sample from the label's backing table."""
         try:
             with self.client.cursor() as cur:
-                cur.execute(f'SELECT properties FROM {self._qualified(label)} LIMIT 1')
+                cur.execute(sql.SQL('SELECT properties FROM {} LIMIT 1').format(sql.Identifier(self.graph_name, label)))
                 row = cur.fetchone()
             self.client.commit()
         except Exception as e:
@@ -323,12 +326,6 @@ class IGlobal(GraphGlobalBase):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-
-    def _qualified(self, label: str) -> str:
-        """Schema-qualified, quote-escaped table name for a graph label."""
-        graph = self.graph_name.replace('"', '""')
-        table = label.replace('"', '""')
-        return f'"{graph}"."{table}"'
 
     @staticmethod
     def _config_int(config: Dict[str, Any], key: str, default: int) -> int:

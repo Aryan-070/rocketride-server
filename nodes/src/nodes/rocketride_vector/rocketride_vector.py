@@ -140,15 +140,18 @@ class Store(DocumentStoreBase):
                 'The metric you provided in the config.json does not match required postgres configurations'
             )
 
-        # HNSW index build parameters (overridable via config).
+        # HNSW index build parameters (overridable via config), clamped to
+        # pgvector's supported ranges: m in [2, 100], ef_construction in
+        # [4, 1000] and >= 2 * m — out-of-range values error at CREATE INDEX.
         try:
-            self.hnsw_m = max(1, int(config.get('hnsw_m', 16)))
+            self.hnsw_m = min(100, max(2, int(config.get('hnsw_m', 16))))
         except (TypeError, ValueError):
             self.hnsw_m = 16
         try:
-            self.hnsw_ef_construction = max(1, int(config.get('hnsw_ef_construction', 64)))
+            self.hnsw_ef_construction = min(1000, max(4, int(config.get('hnsw_ef_construction', 64))))
         except (TypeError, ValueError):
             self.hnsw_ef_construction = 64
+        self.hnsw_ef_construction = max(self.hnsw_ef_construction, 2 * self.hnsw_m)
 
         # RocketRide cloud: no host/user/password fields. Resolve the per-tenant
         # DSN from the account layer, keyed by the authenticated client_id, and
@@ -161,7 +164,9 @@ class Store(DocumentStoreBase):
         self.port = fields['port'] or DEFAULT_POSTGRES_PORT
         self.database = fields['database']
 
-        self.client = psycopg2.connect(dsn)
+        # Bounded connect so an unreachable pooler fails fast (matches the
+        # 3s timeout IGlobal.validateConfig uses) instead of the OS TCP timeout.
+        self.client = psycopg2.connect(dsn, connect_timeout=3)
 
         register_vector(self.client)
 
@@ -566,20 +571,19 @@ class Store(DocumentStoreBase):
             if not results:
                 break
 
-            text = [''] * self.renderChunkSize
-            lastIndex = -1
-
-            for content, chunkId in results:
-                index = chunkId - offset
-                if index >= 0:
-                    text[index] = content
-                    if index > lastIndex:
-                        lastIndex = index
-
-            if lastIndex == -1:
+            # Size the buffer from what was actually fetched, not the chunk
+            # window — sparse batches would otherwise allocate the full window.
+            rows = [(chunkId - offset, content) for content, chunkId in results]
+            rows = [(index, content) for index, content in rows if index >= 0]
+            if not rows:
                 break
 
-            fullText = ''.join(text[: lastIndex + 1])
+            lastIndex = max(index for index, _ in rows)
+            text = [''] * (lastIndex + 1)
+            for index, content in rows:
+                text[index] = content
+
+            fullText = ''.join(text)
             callback(fullText)
 
             if len(results) < self.renderChunkSize:

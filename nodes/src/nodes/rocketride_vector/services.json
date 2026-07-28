@@ -119,7 +119,7 @@
 			"description": "HNSW graph degree (max connections per layer) used when the index is first created.",
 			"type": "integer",
 			"default": 16,
-			"minimum": 1,
+			"minimum": 2,
 			"maximum": 100
 		},
 		"rrvector.hnsw_ef_construction": {
@@ -127,7 +127,7 @@
 			"description": "HNSW build-time candidate list size used when the index is first created.",
 			"type": "integer",
 			"default": 64,
-			"minimum": 1,
+			"minimum": 4,
 			"maximum": 1000
 		},
 		"rrvector.cloud": {

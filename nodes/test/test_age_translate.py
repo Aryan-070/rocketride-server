@@ -255,6 +255,18 @@ class TestEmit:
         with pytest.raises(age.AgeTranslationError, match='references no'):
             age.translate('MATCH (n) RETURN n', params={'x': 1}, graph_name='g')
 
+    def test_referenced_params_without_values_rejected(self):
+        with pytest.raises(age.AgeTranslationError, match=r'no supplied values: \$x'):
+            age.translate('MATCH (n) WHERE n.a = $x RETURN n', graph_name='g')
+
+    def test_partially_supplied_params_rejected(self):
+        with pytest.raises(age.AgeTranslationError, match=r'no supplied values: \$y'):
+            age.translate(
+                'MATCH (n) WHERE n.a = $x AND n.b = $y RETURN n',
+                params={'x': 1},
+                graph_name='g',
+            )
+
     def test_dollar_tag_rotates_on_collision(self):
         plan = age.translate("MATCH (n) WHERE n.note = '$rr_cypher$x' RETURN n.note", graph_name='g')
         assert '$rr_cypher1$' in plan.statements[plan.result_index]
@@ -298,6 +310,15 @@ class TestDecode:
 
     def test_nested_containers(self):
         assert age.decode_agtype('[1, {"a": [2, 3]}]') == [1, {'a': [2, 3]}]
+
+    def test_string_escapes_decoded(self):
+        # agtype STRING follows the JSON string grammar; escapes must decode
+        # to the real characters, not survive as literal backslash sequences.
+        assert age.decode_agtype('"a\\nb"') == 'a\nb'
+        assert age.decode_agtype('"say \\"hi\\""') == 'say "hi"'
+        assert age.decode_agtype('"caf\\u00e9"') == 'café'
+        value = age.decode_agtype('{"properties": {"k\\"ey": "v1\\tv2"}}::vertex')
+        assert value['properties'] == {'k"ey': 'v1\tv2'}
 
     def test_decode_row_keys_by_display_names(self):
         plan = age.translate('MATCH (n) RETURN n.name AS name, n.age', graph_name='g')

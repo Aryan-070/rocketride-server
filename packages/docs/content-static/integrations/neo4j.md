@@ -51,7 +51,7 @@ The node connects over the Bolt protocol with the official neo4j Python driver.
 ```json
 {
   "id": "graph_1",
-  "provider": "neo4jdb",
+  "provider": "graph_neo4j",
   "config": {
     "uri": "neo4j+s://your-instance.databases.neo4j.io",
     "auth_method": "userpass",
@@ -101,7 +101,7 @@ prompt so Cypher is generated against the real structure.
 ## Agent tools
 
 When connected to an agent, the node exposes three functions under the node's
-prefix (e.g. `neo4j.get_data`):
+prefix (e.g. `graph_neo4j.get_data`):
 
 | Tool | What it does |
 | --- | --- |

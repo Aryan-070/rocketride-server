@@ -9,6 +9,10 @@
 #   - gen/: regenerated from drivers/Agtype.g4 with ANTLR 4.13.2 (upstream
 #     ships 4.11.1-generated code, which warns per-parse under the 4.13
 #     runtime). See ../README.md for the regeneration step.
+#   - builder.py: _stripStringDelimiters decodes JSON escapes with json.loads
+#     (upstream strips only the quote delimiters, so '"a\nb"' round-tripped as
+#     a literal backslash-n; the STRING token is grammar-guaranteed to be a
+#     valid JSON string literal).
 # =============================================================================
 
 from .builder import newResultHandler, parseAgeValue  # noqa: F401

@@ -21,6 +21,7 @@ from .exceptions import *
 from antlr4 import InputStream, CommonTokenStream, ParserRuleContext
 from antlr4.tree.Tree import TerminalNode
 from decimal import Decimal
+import json
 
 resultHandler = None
 
@@ -107,10 +108,11 @@ class ResultVisitor(AgtypeVisitor):
 
     @staticmethod
     def _stripStringDelimiters(stringToken):
-        # The STRING token always has surrounding '"' delimiters per the
-        # Agtype grammar; slice rather than strip('"') so escaped quotes
-        # at the boundaries are preserved.
-        return stringToken.getText()[1:-1]
+        # The Agtype STRING token follows the JSON string grammar exactly
+        # (surrounding '"' plus \-escapes incl. \uXXXX), so json.loads both
+        # strips the delimiters and decodes the escapes — slicing alone would
+        # return 'a\\nb' as a literal backslash-n.
+        return json.loads(stringToken.getText())
 
     # Visit a parse tree produced by AgtypeParser#StringValue.
     def visitStringValue(self, ctx:AgtypeParser.StringValueContext):

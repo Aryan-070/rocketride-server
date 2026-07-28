@@ -1566,6 +1566,12 @@ class Task(DAPBase):
             subprocess_env = os.environ.copy()
             subprocess_env['ROCKETRIDE_CLIENT_ID'] = self.client_id
 
+            # The broker credential can resolve ANY tenant's DSN — it must
+            # never reach node subprocesses, which run user pipeline code.
+            # Children only ever get the single resolved DSN below.
+            subprocess_env.pop('ROCKETRIDE_DB_BROKER_URL', None)
+            subprocess_env.pop('ROCKETRIDE_DB_BROKER_TOKEN', None)
+
             # RocketRide cloud DB nodes: resolve the per-tenant DSN server-side
             # (the SaaS account context exists only in this process) and hand it
             # to the node subprocess via env — the same delivery mechanism as

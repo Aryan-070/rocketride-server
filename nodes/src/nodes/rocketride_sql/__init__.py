@@ -27,7 +27,9 @@
 import os
 from depends import depends  # type: ignore
 
-# Install psycopg2-binary and SQLAlchemy before importing any driver code.
+# Install psycopg2-binary before importing any driver code. SQLAlchemy is
+# provided by ai.common's own depends() (SQLAlchemy>=2.0,<2.1), the same way
+# the other DatabaseGlobalBase nodes get it.
 requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 

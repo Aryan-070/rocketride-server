@@ -147,12 +147,29 @@ def parse_dsn_fields(dsn: str) -> dict:
     The DSN itself remains the source of truth for the actual connection.
     Non-URL DSNs yield empty fields.
     """
-    parsed = urllib.parse.urlparse(dsn)
+    empty = {'host': '', 'port': None, 'user': '', 'password': '', 'database': ''}
+    try:
+        parsed = urllib.parse.urlparse(dsn)
+    except ValueError:
+        # e.g. mismatched IPv6 brackets — urlparse itself rejects the URL.
+        return empty
     if not parsed.scheme:
-        return {'host': '', 'port': None, 'user': '', 'password': '', 'database': ''}
+        return empty
+    # hostname/port validate lazily and raise ValueError on malformed
+    # authorities (bad bracket host, non-numeric or out-of-range port); these
+    # fields are cosmetic, so degrade per-field rather than fail node
+    # construction.
+    try:
+        host = parsed.hostname or ''
+    except ValueError:
+        host = ''
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
     return {
-        'host': parsed.hostname or '',
-        'port': parsed.port,
+        'host': host,
+        'port': port,
         'user': urllib.parse.unquote(parsed.username) if parsed.username else '',
         'password': urllib.parse.unquote(parsed.password) if parsed.password else '',
         'database': (parsed.path or '').lstrip('/'),
