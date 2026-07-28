@@ -97,6 +97,27 @@ test('old SDK callbacks stay disabled while the newest attempt is still resolvin
 	assert.equal(controller.isCurrentCallback(oldGeneration), false);
 });
 
+test('intentional teardown suppresses stale SDK callbacks and only its current completion publishes disconnect', async () => {
+	const controller = new ConnectionGenerationController();
+	const oldGeneration = controller.beginAttempt();
+	assert.equal(controller.activateAttemptCallbacks(oldGeneration), true);
+
+	const firstDisconnect = controller.invalidateAttempts();
+	assert.equal(controller.isCurrentCallback(oldGeneration), false);
+	const firstCompletion = deferred();
+	const events: string[] = [];
+	const firstPublication = firstCompletion.promise.then(() => {
+		if (controller.isCurrentGeneration(firstDisconnect)) events.push('first');
+	});
+
+	const secondDisconnect = controller.invalidateAttempts();
+	firstCompletion.resolve();
+	await firstPublication;
+	if (controller.isCurrentGeneration(secondDisconnect)) events.push('second');
+
+	assert.deepEqual(events, ['second']);
+});
+
 test('callback-owned async publication from an old attempt cannot overwrite the newest result', async () => {
 	const controller = new ConnectionGenerationController();
 	const slot = new GenerationOwnedOperationSlot();

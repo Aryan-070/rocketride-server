@@ -186,7 +186,7 @@ export class ConnectionManager extends EventEmitter {
 				// Ignore events from other modes (e.g., docker event while connected to local).
 				if (!this.connectedMode || event.mode !== this.connectedMode) return;
 
-				this.invalidateConnectionAttempts();
+				const generation = this.invalidateConnectionAttempts();
 				this.connectedMode = undefined;
 				this.engineUri = undefined;
 				this.client?.disconnect().catch(() => { /* best effort */ });
@@ -201,6 +201,9 @@ export class ConnectionManager extends EventEmitter {
 						state: ConnectionState.DISCONNECTED,
 						progressLogLine: undefined,
 					});
+				}
+				if (this.isCurrentConnectionGeneration(generation)) {
+					this.emit('shell:disconnected');
 				}
 				break;
 
@@ -640,6 +643,7 @@ export class ConnectionManager extends EventEmitter {
 			progressMessage: undefined,
 			progressLogLine: undefined,
 		});
+		this.emit('shell:disconnected');
 		return true;
 	}
 
@@ -856,7 +860,7 @@ export class ConnectionManager extends EventEmitter {
 
 	public async dispose(): Promise<void> {
 		this.isDisposing = true;
-		this.invalidateConnectionAttempts();
+		const generation = this.invalidateConnectionAttempts();
 
 		if (this.configChangeTimeout) {
 			clearTimeout(this.configChangeTimeout);
@@ -870,6 +874,9 @@ export class ConnectionManager extends EventEmitter {
 
 		if (this.client) {
 			await this.client.disconnect();
+		}
+		if (this.connectionGeneration.isCurrentGeneration(generation)) {
+			this.emit('shell:disconnected');
 		}
 		if (this.engineRegistry) {
 			await this.engineRegistry.disposeAll();

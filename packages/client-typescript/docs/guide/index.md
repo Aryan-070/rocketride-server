@@ -111,7 +111,7 @@ const client = new RocketRideClient({
 	requestTimeout: 30000,
 	onConnected: async () => setStatus('connected'),
 	onDisconnected: async () => setStatus('disconnected'),
-	onConnectError: (msg) => setStatus('error', msg),
+	onConnectError: (error) => setStatus('error', error.message),
 	onEvent: async (e) => handleServerEvent(e),
 });
 ```

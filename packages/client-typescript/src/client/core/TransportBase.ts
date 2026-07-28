@@ -104,7 +104,16 @@ export abstract class TransportBase {
 	 * Forward received message to callback if available.
 	 */
 	protected async _transportReceive(message: DAPMessage): Promise<void> {
-		this._debugProtocol(`RECV: ${JSON.stringify(this._redactProtocolMessage(message))}`);
+		if (this._onCallerDebugProtocol) {
+			let debugMessage = message;
+			if (message.arguments?.data instanceof Uint8Array) {
+				debugMessage = {
+					...message,
+					arguments: { ...message.arguments, data: `<${message.arguments.data.length} bytes>` },
+				};
+			}
+			this._debugProtocol(`RECV: ${JSON.stringify(this._redactProtocolMessage(debugMessage))}`);
+		}
 		if (this._onCallerReceive) {
 			await this._onCallerReceive(message);
 		}
