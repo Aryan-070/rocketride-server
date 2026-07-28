@@ -8,7 +8,7 @@ Mirrors the `graph_neo4j` node: as a pipeline node it takes natural-language que
 
 Two differences from the generic graph nodes:
 
-1. **No connection fields.** The per-tenant DSN is resolved from the account layer (`Account.resolve_db_dsn(client_id)`), keyed by the authenticated connection identity — the same seam as `rocketride_sql` and `rocketride_vector` (one database per tenant backs all three). In RocketRide cloud this is automatic; on the open-source build, paste a personal RocketRide API key into the **RocketRide API key** field (`cloud_api_key`). The ambient platform identity always outranks the pasted key. Without either, the node fails at start with a sign-in error naming the field.
+1. **No connection fields.** The per-tenant DSN is resolved from the account layer (`Account.resolve_db_dsn(client_id)`), keyed by the authenticated connection identity — the same seam as `rocketride_sql` and `rocketride_vector` (one database per tenant backs all three). Requires signing into RocketRide cloud; the open-source build without a cloud identity fails with `RocketRide cloud DB nodes require signing into RocketRide cloud`.
 2. **Cypher → AGE translation.** Apache AGE cannot run bare Cypher, so every query path routes through the translation layer at `ai.common.graph.age` (openCypher ANTLR parse → firewall → dialect capability gate → `cypher()` envelope with synthesized column list → prepared-statement parameter binding → agtype decode). Even the raw EXECUTE path translates — only the *semantic* firewall is skipped there, never the resource caps.
 
 ## Safety model
@@ -34,7 +34,6 @@ Ownership of per-tenant `create_graph` is **pending** (cloud provisioner vs node
 | `max_rows` | integer | Default 1000. Row ceiling for the read path |
 | `query_timeout_ms` | integer | Default 30000. Per-transaction statement timeout |
 | `allow_execute` | boolean | Default false. Enables the raw EXECUTE path |
-| `cloud_api_key` | string (password) | Default empty. Only required on the open-source build: a personal RocketRide API key used to connect to your RocketRide cloud database. Ignored in RocketRide cloud. |
 
 There are intentionally no `host` / `user` / `password` / `database` fields.
 

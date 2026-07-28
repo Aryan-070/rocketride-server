@@ -141,18 +141,9 @@
 			"default": false,
 			"description": "Permit QuestionType.EXECUTE callers to run raw Cypher without LLM translation or read-only safety checks. Resource limits still apply. Leave OFF unless a trusted application explicitly needs to issue Cypher directly."
 		},
-		"rocketridegraph.cloud_api_key": {
-			"type": "string",
-			"title": "RocketRide API key",
-			"default": "",
-			"description": "Only required when running the open-source build. Generate a personal API key in the RocketRide online editor and paste it here to connect this node to your RocketRide cloud database. Leave empty when running in RocketRide cloud — your signed-in identity is used automatically.",
-			"ui": {
-				"ui:widget": "password"
-			}
-		},
 		"rocketridegraph.default": {
 			"object": "default",
-			"properties": ["rocketridegraph.db_description", "rocketridegraph.graph", "rocketridegraph.max_attempts", "rocketridegraph.max_rows", "rocketridegraph.query_timeout_ms", "rocketridegraph.allow_execute", "rocketridegraph.cloud_api_key"]
+			"properties": ["rocketridegraph.db_description", "rocketridegraph.graph", "rocketridegraph.max_attempts", "rocketridegraph.max_rows", "rocketridegraph.query_timeout_ms", "rocketridegraph.allow_execute"]
 		},
 		"rocketridegraph.profile": {
 			"hidden": true,

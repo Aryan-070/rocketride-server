@@ -56,7 +56,7 @@ class IGlobal(DatabaseGlobalBase):
         schema-reflection messaging names the real tenant database. ``table``
         remains the one structured, user-facing target field.
         """
-        self._dsn = resolve_rocketride_dsn(config)
+        self._dsn = resolve_rocketride_dsn()
         fields = parse_dsn_fields(self._dsn)
         return {
             'host': fields['host'],

@@ -8,7 +8,7 @@ Mirrors the generic `vectordb_postgres` store node: accepts documents (with embe
 
 Two differences from the generic node:
 
-1. **No connection fields.** Instead of host/user/password, the node resolves a ready per-tenant DSN from the account layer (`Account.resolve_db_dsn(client_id)`), keyed by the authenticated connection identity. In RocketRide cloud this is automatic; on the open-source build, paste a personal RocketRide API key into the **RocketRide API key** field (`cloud_api_key`). The ambient platform identity always outranks the pasted key. Without either, the node fails at start with a sign-in error naming the field.
+1. **No connection fields.** Instead of host/user/password, the node resolves a ready per-tenant DSN from the account layer (`Account.resolve_db_dsn(client_id)`), keyed by the authenticated connection identity. Requires signing into RocketRide cloud; on the open-source build without a cloud identity the node fails at start with `RocketRide cloud DB nodes require signing into RocketRide cloud`.
 2. **Default HNSW index.** The generic node creates no index, so every semantic search is a sequential scan. This node creates an HNSW index over the embedding column when the table is first created. The operator class is derived from the `similarity` config so Postgres actually uses the index (`cosine → vector_cosine_ops`, `l2 → vector_l2_ops`, `inner_product → vector_ip_ops`), with build parameters `m = 16`, `ef_construction = 64` (overridable). pgvector's HNSW supports at most 2000 dimensions; for wider vectors the index is skipped with a warning and search falls back to a sequential scan.
 
 There is **no direct-execute path** — vector stores are structured (search/upsert), and raw SQL over the vector tables is covered by `rocketride_sql` (same tenant database).
@@ -35,7 +35,6 @@ Embeddings come from the separate `vectorizer` binding — not in-node.
 | `similarity` | string | Default "cosine". One of `cosine`, `l2`, `inner_product`. Also selects the HNSW index operator class |
 | `hnsw_m` | integer | Default 16. HNSW graph degree used when the index is first created |
 | `hnsw_ef_construction` | integer | Default 64. HNSW build-time candidate list size used when the index is first created |
-| `cloud_api_key` | string (password) | Default empty. Only required on the open-source build: a personal RocketRide API key used to connect to your RocketRide cloud database. Ignored in RocketRide cloud. |
 
 There are intentionally no `host` / `port` / `user` / `password` / `database` fields — the connection is resolved from your signed-in RocketRide identity. The vector dimension is not configured; it is derived from the first document's embedding at write time.
 

@@ -124,18 +124,9 @@
 			"default": false,
 			"description": "Permit QuestionType.EXECUTE callers to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly."
 		},
-		"rocketridesql.cloud_api_key": {
-			"type": "string",
-			"title": "RocketRide API key",
-			"default": "",
-			"description": "Only required when running the open-source build. Generate a personal API key in the RocketRide online editor and paste it here to connect this node to your RocketRide cloud database. Leave empty when running in RocketRide cloud — your signed-in identity is used automatically.",
-			"ui": {
-				"ui:widget": "password"
-			}
-		},
 		"rocketridesql.default": {
 			"object": "default",
-			"properties": ["rocketridesql.db_description", "rocketridesql.table", "rocketridesql.max_attempts", "rocketridesql.allow_execute", "rocketridesql.cloud_api_key"]
+			"properties": ["rocketridesql.db_description", "rocketridesql.table", "rocketridesql.max_attempts", "rocketridesql.allow_execute"]
 		},
 		"rocketridesql.profile": {
 			"hidden": true,
