@@ -381,6 +381,10 @@ export class RocketRideClient extends DAPClient {
 	private _lifecycleGeneration = 0;
 	private _lifecycleOperation?: LoginLifecycleOperation;
 
+	private _isDetached(): boolean {
+		return this._desiredState === 'detached';
+	}
+
 	/** Reference-counted monitor subscriptions: keyString → Map<eventType, refCount> */
 	private _monitorKeys = new Map<string, Map<string, number>>();
 
@@ -952,7 +956,7 @@ export class RocketRideClient extends DAPClient {
 		if (existing) {
 			this._invalidateBoundTransport(existing, new Error('Anonymous attachment replaced'));
 			await existing.disconnect();
-			if (this._lifecycleGeneration !== generation || (this._desiredState as string) === 'detached') return;
+			if (this._lifecycleGeneration !== generation || this._isDetached()) return;
 		}
 
 		const transport = new TransportWebSocket(endpoint);
@@ -1011,12 +1015,12 @@ export class RocketRideClient extends DAPClient {
 				async (error: unknown) => {
 					if (
 						this._lifecycleGeneration !== generation
-						|| (this._desiredState as string) === 'detached'
+						|| this._isDetached()
 					) return;
 					await this.onConnectError(error instanceof Error ? error : new Error(String(error)));
 					if (
 						this._lifecycleGeneration !== generation
-						|| (this._desiredState as string) === 'detached'
+						|| this._isDetached()
 					) return;
 					this._currentReconnectDelay = Math.min(this._currentReconnectDelay + 250, 15_000);
 					this._scheduleReconnect(generation);
@@ -1176,14 +1180,14 @@ export class RocketRideClient extends DAPClient {
 
 		if (inFlight && operation) {
 			await this._discardTransport(operation.transport, 'Logout cancelled login');
-			if (this._lifecycleGeneration !== generation || (this._desiredState as string) === 'detached') return;
+			if (this._lifecycleGeneration !== generation || this._isDetached()) return;
 			await this._attachAnonymous(endpoint, generation);
 			return;
 		}
 
 		if (wasAuthenticated && this._transport?.isConnected()) {
 			await this._bestEffortDeauth();
-			if (this._lifecycleGeneration !== generation || (this._desiredState as string) === 'detached') return;
+			if (this._lifecycleGeneration !== generation || this._isDetached()) return;
 		}
 		if (operation) operation.accepted = false;
 	}
@@ -2509,7 +2513,10 @@ export class RocketRideClient extends DAPClient {
 			this._onTrace?.(TraceType.Error, redactProtocolMessage(response));
 			throw new Error(response.message ?? 'fs_read failed');
 		}
-		this._onTrace?.(TraceType.Success, redactProtocolMessage(response));
+		const traceResponse = response.arguments?.data instanceof Uint8Array
+			? { ...response, arguments: { ...response.arguments, data: `<${response.arguments.data.length} bytes>` } }
+			: response;
+		this._onTrace?.(TraceType.Success, redactProtocolMessage(traceResponse));
 		return ((response as any).arguments?.data as Uint8Array) || new Uint8Array(0);
 	}
 

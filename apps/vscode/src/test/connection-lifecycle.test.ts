@@ -237,6 +237,44 @@ test('a synchronous callback-owned work failure publishes to the active generati
 	assert.deepEqual(published, [{ status: 'rejected', reason: failure }]);
 });
 
+test('an ownerless operation never coalesces with another ownerless operation', async () => {
+	const slot = new GenerationOwnedOperationSlot();
+	const firstCompletion = deferred();
+	const published: string[] = [];
+	let fetches = 0;
+
+	const first = slot.run(
+		undefined,
+		() => true,
+		async () => {
+			fetches += 1;
+			await firstCompletion.promise;
+			return 'first';
+		},
+		(outcome) => {
+			if (outcome.status === 'fulfilled') published.push(outcome.value);
+		},
+	);
+	const second = slot.run(
+		undefined,
+		() => true,
+		async () => {
+			fetches += 1;
+			return 'second';
+		},
+		(outcome) => {
+			if (outcome.status === 'fulfilled') published.push(outcome.value);
+		},
+	);
+
+	await second;
+	firstCompletion.resolve();
+	await first;
+
+	assert.equal(fetches, 2);
+	assert.deepEqual(published, ['second']);
+});
+
 test('serialized attempt publication cannot let an old filesystem write land after the newest attempt', async () => {
 	const controller = new ConnectionGenerationController();
 	const oldRead = deferred();

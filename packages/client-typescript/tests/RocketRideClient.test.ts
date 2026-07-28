@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-import { RocketRideClient, Question, TASK_STATE, UPLOAD_RESULT, PIPELINE_RESULT, DAPMessage } from '../src/client';
+import { RocketRideClient, Question, TASK_STATE, UPLOAD_RESULT, PIPELINE_RESULT, DAPMessage, TraceType } from '../src/client';
 import * as ClientExceptions from '../src/client/exceptions';
 import type { LoginAttemptCancellationReason } from '../src/client/exceptions';
 import { describe, it, expect, beforeEach, afterEach, beforeAll, jest } from '@jest/globals';
@@ -3046,6 +3046,30 @@ describe('RocketRideClient lifecycle operations', () => {
 				env: expect.objectContaining({ ROCKETRIDE_APIKEY: '<redacted>' }),
 			}),
 		}));
+	});
+
+	it('traces fsRead binary data by byte count while returning the original response data', async () => {
+		const traces: Array<[TraceType, DAPMessage]> = [];
+		const client = makeClient({
+			onTrace: (traceType, message) => traces.push([traceType, message]),
+		});
+		const data = new Uint8Array([1, 2, 3]);
+		const response: DAPMessage = {
+			type: 'response',
+			seq: 1,
+			request_seq: 1,
+			command: 'rrext_store',
+			success: true,
+			arguments: { data },
+		};
+		jest.spyOn(client, 'request').mockResolvedValue(response);
+
+		await expect(client.fsRead('handle')).resolves.toBe(data);
+		expect(response.arguments?.data).toBe(data);
+		expect(traces).toContainEqual([
+			TraceType.Success,
+			expect.objectContaining({ arguments: { data: '<3 bytes>' } }),
+		]);
 	});
 
 	it('completes best-effort monitor restoration before publishing connected', async () => {

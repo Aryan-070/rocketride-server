@@ -103,9 +103,10 @@ export type GenerationOwnedOutcome<T> =
 	| { status: 'rejected'; reason: unknown };
 
 /**
- * Coalesces work only within one generation and publishes only while that
- * generation still owns the result. A newer generation can start immediately
- * without joining or being cleared by an older task's finally block.
+ * Coalesces work only within a defined generation and publishes only while
+ * that generation still owns the result. Ownerless work is never coalesced.
+ * A newer generation can start immediately without joining or being cleared
+ * by an older task's finally block.
  */
 export class GenerationOwnedOperationSlot {
 	private active?: {
@@ -120,7 +121,7 @@ export class GenerationOwnedOperationSlot {
 		publish: (outcome: GenerationOwnedOutcome<T>) => void | Promise<void>,
 	): Promise<void> {
 		const active = this.active;
-		if (active && active.generation === generation) return active.promise;
+		if (generation !== undefined && active && active.generation === generation) return active.promise;
 
 		const operation: {
 			generation: number | undefined;

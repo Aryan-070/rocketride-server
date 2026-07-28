@@ -205,7 +205,7 @@ describe('DAPClient transport epochs', () => {
 		expect(messages.join('\n')).toContain('12345');
 	});
 
-	test('received protocol traces are lazy, redact credentials, and preserve binary payload delivery', async () => {
+	test('received protocol traces are lazy, redact circular credentials, and preserve binary payload delivery', async () => {
 		const noTraceTransport = new ControlledTransport();
 		const circular = {} as Record<string, unknown>;
 		circular.self = circular;
@@ -230,15 +230,17 @@ describe('DAPClient transport epochs', () => {
 			onReceive: async (message) => { deliveredWithTrace = message; },
 		});
 		const binary = new Uint8Array([1, 2, 3]);
+		const tracedCircular = {} as Record<string, unknown>;
+		tracedCircular.self = tracedCircular;
 		const traceMessage: DAPMessage = {
 			type: 'event',
 			seq: 2,
 			event: 'binary',
-			arguments: { data: binary, userToken: 'rr_do-not-log' },
+			arguments: { data: binary, userToken: 'rr_do-not-log', tracedCircular },
 		};
 		await traceTransport.receive(traceMessage);
 
-		expect(traces).toEqual(['RECV: {"type":"event","seq":2,"event":"binary","arguments":{"data":"<3 bytes>","userToken":"<redacted>"}}']);
+		expect(traces).toEqual(['RECV: {"type":"event","seq":2,"event":"binary","arguments":{"data":"<3 bytes>","userToken":"<redacted>","tracedCircular":{"self":"<circular>"}}}']);
 		expect(deliveredWithTrace).toBe(traceMessage);
 		expect(deliveredWithTrace?.arguments?.data).toBe(binary);
 	});

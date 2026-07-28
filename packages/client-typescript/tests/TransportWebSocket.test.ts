@@ -600,9 +600,11 @@ describe.each(['node ws', 'browser WebSocket'] as const)('TransportWebSocket lif
 		expect(harness.listenerCount(socket)).toBe(0);
 	});
 
-	test('a rejecting disconnected callback still closes and cleans the socket', async () => {
+	test('a rejecting disconnected callback is logged while event-driven cleanup remains idempotent', async () => {
+		const debugMessages: string[] = [];
 		const transport = new TransportWebSocket(harness.uri('rejecting-disconnected'));
 		transport.bind({
+			onDebugMessage: (message) => debugMessages.push(message),
 			onDisconnected: async () => {
 				throw new Error('disconnected callback failed');
 			},
@@ -614,7 +616,10 @@ describe.each(['node ws', 'browser WebSocket'] as const)('TransportWebSocket lif
 		await harness.open('rejecting-disconnected', socket);
 		await connected;
 
-		await expect(transport.disconnect()).rejects.toThrow('disconnected callback failed');
+		harness.close(socket, 1006, 'event-driven close');
+		await new Promise<void>((resolve) => setTimeout(resolve, 20));
+		await expect(transport.disconnect()).resolves.toBeUndefined();
+		expect(debugMessages.join('\n')).toContain('disconnected callback failed');
 		const internals = transport as unknown as {
 			_connectionTimeout?: ReturnType<typeof setTimeout>;
 			_pingInterval?: ReturnType<typeof setInterval>;

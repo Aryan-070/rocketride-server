@@ -422,8 +422,12 @@ export class TransportWebSocket extends TransportBase {
 			this._notifyDisconnected(epoch, reason, hasError),
 			this._cleanupEpoch(epoch, excludedMessageTasks),
 		]);
-		if (notification.status === 'rejected') throw notification.reason;
-		if (cleanup.status === 'rejected') throw cleanup.reason;
+		if (notification.status === 'rejected') {
+			this._debugMessage(`Error notifying disconnected callback: ${notification.reason}`);
+		}
+		if (cleanup.status === 'rejected') {
+			this._debugMessage(`Error cleaning up disconnected socket: ${cleanup.reason}`);
+		}
 	}
 
 	private _removeSocketListeners(epoch: ConnectionEpoch): void {
@@ -536,7 +540,7 @@ export class TransportWebSocket extends TransportBase {
 
 	private _waitForCleanups(): Promise<void> {
 		if (this._cleanupOperations.size === 0) return Promise.resolve();
-		return Promise.all(Array.from(this._cleanupOperations)).then(() => undefined);
+		return Promise.allSettled(Array.from(this._cleanupOperations)).then(() => undefined);
 	}
 
 	private _owns(epoch: ConnectionEpoch): boolean {

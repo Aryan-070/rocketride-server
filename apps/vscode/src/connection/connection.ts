@@ -774,9 +774,8 @@ export class ConnectionManager extends EventEmitter {
 	public async refreshServices(
 		generation = this.connectionGeneration.callbackGeneration,
 	): Promise<void> {
-		const ownsGeneration = () => generation === undefined
-			? !this.isDisposing
-			: this.connectionGeneration.isCurrentCallback(generation) && !this.isDisposing;
+		const ownsGeneration = () => this.connectionGeneration.isCurrentCallback(generation)
+			&& !this.isDisposing;
 		const isCurrent = () => ownsGeneration() && this.isConnected();
 		if (!ownsGeneration()) return;
 		if (!this.isConnected() || !this.client) {

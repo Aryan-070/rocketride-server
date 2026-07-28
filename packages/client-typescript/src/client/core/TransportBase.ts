@@ -44,10 +44,12 @@ const SENSITIVE_PROTOCOL_KEYS = new Set([
  * Produce a logging-only copy with credential-bearing fields removed.
  */
 export function redactProtocolMessage<T>(value: T): T {
+	const ancestors = new Set<object>();
 	const redact = (item: unknown): unknown => {
-		if (Array.isArray(item)) return item.map(redact);
 		if (!item || typeof item !== 'object' || item instanceof Uint8Array) return item;
-		return Object.fromEntries(
+		if (ancestors.has(item)) return '<circular>';
+		ancestors.add(item);
+		const redacted = Array.isArray(item) ? item.map(redact) : Object.fromEntries(
 			Object.entries(item as Record<string, unknown>).map(([key, child]) => {
 				const normalizedKey = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
 				const isSensitive = SENSITIVE_PROTOCOL_KEYS.has(normalizedKey)
@@ -56,6 +58,8 @@ export function redactProtocolMessage<T>(value: T): T {
 				return [key, isSensitive ? '<redacted>' : redact(child)];
 			}),
 		);
+		ancestors.delete(item);
+		return redacted;
 	};
 	return redact(value) as T;
 }

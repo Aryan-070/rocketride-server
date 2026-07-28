@@ -215,7 +215,10 @@ export interface RocketRideClientConfig {
 	/** Default timeout in ms for individual requests. Default: no timeout. */
 	requestTimeout?: number;
 
-	/** Accepted for backward compatibility but currently ignored; persistent retry continues until stopped. */
+	/**
+	 * @deprecated Accepted for backward compatibility but currently ignored;
+	 * persistent retry continues until stopped.
+	 */
 	maxRetryTime?: number;
 
 	/** Custom WebSocket path override (default: '/task/service'). Use '/models' for the model server. */
