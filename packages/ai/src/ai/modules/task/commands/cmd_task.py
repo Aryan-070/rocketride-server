@@ -434,6 +434,9 @@ class TaskCommands(DAPConn):
                             'source': control.source,
                             'token': control.token,
                             'status': status.status,
+                            # Owning team — lets clients attribute a task to a
+                            # TEAM deployment vs a dev run of the same project.
+                            'teamId': control.teamId,
                             'pipeline': control.pipeline,
                         }
                     )
