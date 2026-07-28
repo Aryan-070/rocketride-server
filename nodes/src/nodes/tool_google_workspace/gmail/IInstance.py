@@ -146,7 +146,7 @@ class IInstance(GoogleToolInstanceBase):
     )
     def check_connection(self, args: dict) -> dict:
         """Check Gmail connection status and whether granted OAuth scopes cover the configured access tier. Read-only."""
-        return self._check_connection_impl()
+        return self._check_connection_impl(probe=lambda s: execute(s.users().getProfile(userId='me')))
 
     # =======================================================================
     # MESSAGES — read

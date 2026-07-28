@@ -162,7 +162,7 @@ class IInstance(GoogleToolInstanceBase):
     )
     def check_connection(self, args: dict) -> dict:
         """Check Drive connection status and whether granted OAuth scopes cover the access tier. Read-only."""
-        return self._check_connection_impl()
+        return self._check_connection_impl(probe=lambda s: execute(s.about().get(fields='user')))
 
     # =======================================================================
     # FILES — read

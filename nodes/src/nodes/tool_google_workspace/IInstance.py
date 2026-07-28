@@ -91,14 +91,27 @@ class GoogleToolInstanceBase(IInstanceBase):
             'connection_ok': self._svc() is not None,
             'access': getattr(access, 'tier', None),
             'requiredScopes': list(getattr(access, 'scopes', []) or []),
+            # What was actually exercised, so a caller can tell a verified
+            # answer from an assumed one. Without this, `connection_ok: true`
+            # meant "we hold a plausible credential" while everyone read it as
+            # "this node works" — see #1694, where it sat next to a 403 saying
+            # the API was disabled and sent the reporter off re-authenticating.
+            'checked': ['client', 'scopes'],
         }
         service = self._svc()
         if probe is not None and service is not None:
             try:
                 probe(service)
+                out['checked'].append('api')
             except Exception as exc:
                 out['connection_ok'] = False
                 out['error'] = str(exc)[:200]
+                # Google distinguishes accessNotConfigured (API disabled) from
+                # forbidden (permission) from rateLimitExceeded, and that word
+                # alone names the fix. Losing it costs the reader the diagnosis.
+                reason = getattr(exc, 'reason', None) or getattr(exc, '_get_reason', lambda: None)()
+                if reason:
+                    out['errorReason'] = str(reason).strip()[:120]
         try:
             cfg = Config.getNodeConfig(self.IGlobal.glb.logicalType, self.IGlobal.glb.connConfig)
             auth_type = (cfg.get('authType') or 'service').strip()
@@ -116,4 +129,15 @@ class GoogleToolInstanceBase(IInstanceBase):
                         out['error'] = f'invalid user token data: {str(exc)[:160]}'
         except Exception:
             pass  # config lookup diagnostics must never raise
+
+        # No live call was made, so `connection_ok` here only means the
+        # credential looks usable. Say so rather than letting it read as proof:
+        # a disabled API, an exhausted quota, disabled billing and an org-policy
+        # block are all invisible to a client-and-scopes check.
+        if 'api' not in out['checked'] and out['connection_ok']:
+            out['connection_ok'] = 'unknown'
+            out['note'] = (
+                'Credential and scopes look correct; no API call was made, so this '
+                'does not confirm the service is reachable or enabled.'
+            )
         return out
