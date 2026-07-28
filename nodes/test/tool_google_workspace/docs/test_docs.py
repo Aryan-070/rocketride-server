@@ -260,11 +260,16 @@ def test_default_tier_is_write():
     assert access.can_write is True
 
 
-def test_check_connection_reports_ok():
+def test_check_connection_reports_unknown_without_api_probe():
     inst = _make()
     out = inst.check_connection({})
     assert isinstance(out, dict)
-    assert out['connection_ok'] is True
+    # 'unknown', not True: docs/sheets make no API probe, and a client-and-scopes
+    # check cannot see a disabled API, an exhausted quota, disabled billing or an
+    # org-policy block. Reporting True there is the false green this change removes.
+    assert out['connection_ok'] == 'unknown'
+    assert 'api' not in out['checked']
+    assert 'note' in out
     assert out['access'] == 'write'
     assert any('documents' in s for s in out['requiredScopes'])
 

@@ -310,10 +310,14 @@ def test_default_tier_is_write():
 # ---------------------------------------------------------------------------
 
 
-def test_check_connection_reports_ok():
+def test_check_connection_reports_unknown_without_api_probe():
     inst = _make()
     out = inst.check_connection({})
-    assert out['connection_ok'] is True
+    # 'unknown', not True: sheets makes no API probe, so the credential looking
+    # correct is not evidence the service is reachable. See IInstance.check_connection.
+    assert out['connection_ok'] == 'unknown'
+    assert 'api' not in out['checked']
+    assert 'note' in out
     assert out['access'] == 'write'
     assert any('spreadsheets' in s for s in out['requiredScopes'])
 

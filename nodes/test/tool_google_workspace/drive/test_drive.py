@@ -186,6 +186,13 @@ class FakeDrive:
     def changes(self):
         return _Node(self, 'changes')
 
+    def about(self):
+        # check_connection's liveness probe calls about().get(fields='user').
+        # Without this the probe raises AttributeError and the node reports
+        # connection_ok=False — which is correct behaviour for an unreachable
+        # API, and exactly why the diagnostic must be exercised, not assumed.
+        return _Node(self, 'about')
+
     def call_for(self, op):
         """Return the kwargs of the FIRST recorded call to terminal method ``op``."""
         return next((kw for n, kw in self.calls if n == op), None)
@@ -727,6 +734,10 @@ def test_check_connection_reports_ok():
     inst = _make()
     out = inst.check_connection({})
     assert out['connection_ok'] is True
+    # True is only honest when an API call actually happened; assert the probe
+    # ran rather than trusting the boolean on its own.
+    assert 'api' in out['checked']
+    assert inst.IGlobal.service.call_for('get') is not None
     assert out['access'] == 'write'
     assert any('drive' in s for s in out['requiredScopes'])
 
