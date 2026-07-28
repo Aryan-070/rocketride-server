@@ -339,7 +339,8 @@ class AccountBase(ABC):
             ROCKETRIDE_DB_BROKER_TOKEN  its Bearer token (from ASM/k8s; never
                                         hardcoded)
 
-        ``POST {url} {"tenant_id": client_id}`` -> ``{"db_name", "dsn"}``.
+        ``POST {url} {"tenant_id": client_id}`` -> ``{"database", "role",
+        "dsn", "created"}`` (only ``dsn`` is read here).
         The endpoint is idempotent (same tenant -> same DSN; the per-tenant
         password is derived, not stored), so this method is safe to call on
         every task start with no caching or persistence on this side.

@@ -187,7 +187,8 @@ def _resolve_via_door(api_key: str) -> str:
     """Exchange a personal API key for the tenant DSN at the cloud door.
 
     ``POST {door_url}`` with ``Authorization: Bearer <rr_ key>`` and an empty
-    JSON body → ``{"db_name": ..., "dsn": ...}``. The body is deliberately
+    JSON body → ``{"database", "role", "dsn", "created"}`` (only ``dsn`` is
+    read here). The body is deliberately
     empty: the door derives the tenant from the authenticated account
     server-side and must never accept one from the caller.
     """

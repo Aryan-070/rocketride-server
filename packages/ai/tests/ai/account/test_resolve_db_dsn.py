@@ -23,10 +23,11 @@
 
 """Tests for ``AccountBase.resolve_db_dsn`` — the env-gated DB broker call.
 
-The broker contract (locked with cloud/ops 2026-07-23):
+The broker contract (locked 2026-07-23, shipped as saas #381):
 ``POST {ROCKETRIDE_DB_BROKER_URL} {"tenant_id": ...}`` with a Bearer token ->
-``{"db_name": ..., "dsn": ...}``, idempotent. A real localhost HTTP server
-plays the broker so the actual urllib code path is exercised.
+``{"database", "role", "dsn", "created"}`` (only ``dsn`` is read), idempotent.
+A real localhost HTTP server plays the broker so the actual urllib code path
+is exercised.
 """
 
 from __future__ import annotations
@@ -69,9 +70,9 @@ class _FakeBroker(BaseHTTPRequestHandler):
             self.end_headers()
             return
         if tenant == 'no-dsn-tenant':
-            payload = {'db_name': 't_broken'}
+            payload = {'database': 't_broken', 'role': 't_broken_rw', 'created': False}
         else:
-            payload = {'db_name': 't_t1_ab', 'dsn': TEST_DSN}
+            payload = {'database': 't_t1_ab', 'role': 't_t1_ab_rw', 'dsn': TEST_DSN, 'created': False}
         raw = json.dumps(payload).encode('utf-8')
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')

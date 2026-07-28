@@ -244,7 +244,11 @@ class TestCloudApiKeyDoor:
                     self.send_response(500)
                     self.end_headers()
                     return
-                payload = {'db_name': 't_t9'} if key == 'rr_nodsn' else {'db_name': 't_t9', 'dsn': dsn}
+                payload = (
+                    {'database': 't_t9', 'role': 't_t9_rw', 'created': False}
+                    if key == 'rr_nodsn'
+                    else {'database': 't_t9', 'role': 't_t9_rw', 'dsn': dsn, 'created': False}
+                )
                 raw = _json.dumps(payload).encode('utf-8')
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
