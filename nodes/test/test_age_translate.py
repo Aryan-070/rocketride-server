@@ -187,17 +187,32 @@ class TestCapabilities:
         plan2 = age.translate('MATCH (n) RETURN n.name AS name ORDER BY n', graph_name='g')
         assert plan2.columns == ['name']
 
-    def test_tbd_cells_pass_through(self):
-        # TBD constructs are not blocked — AGE's own error surfaces at run time.
-        plan = age.translate('MERGE (n:P {k: 1}) ON CREATE SET n.v = 1 RETURN n', mode=RAW, graph_name='g')
-        assert plan.columns == ['n']
+    def test_promoted_cells_reject_with_guidance(self):
+        # Verified 2026-07-28 against the exact pin (PG 16.14 + AGE 1.5.0):
+        # all four former-TBD constructs are syntax-level failures, so the
+        # layer now rejects them pre-flight with an actionable alternative.
+        cases = [
+            ('MERGE (n:P {k: 1}) ON CREATE SET n.v = 1 RETURN n', 'separate SET'),
+            ('MATCH (n) WHERE (n:P) RETURN n', 'pattern instead'),
+            ('MATCH (n:A:B) RETURN n', 'category node'),
+            # NB: 'MATCH p = shortestPath(...)' is not openCypher grammar and is
+            # stopped even earlier, by the parser; the function-position form is
+            # what reaches the capability gate.
+            ('MATCH (a:P), (b:P) RETURN shortestPath((a)-[*..3]-(b))', 'variable-length'),
+        ]
+        for query, hint in cases:
+            with pytest.raises(age.AgeUnsupportedFeature, match=hint):
+                age.translate(query, mode=RAW, graph_name='g')
 
     def test_table_structure(self):
         assert age.DEFAULT_AGE_VERSION == '1.5.0'
         table = age.CAPABILITY_TABLES['1.5.0']
         assert table['datetime_function'].status is age.CellStatus.REJECT
+        # No cell remains unverified: every 1.5.0 cell has an empirical status.
         tbd = {k for k, cap in table.items() if cap.status is age.CellStatus.TBD}
-        assert tbd == {'merge_on_set', 'where_label_check', 'multi_label', 'shortest_path'}
+        assert tbd == set()
+        for feature in ('merge_on_set', 'where_label_check', 'multi_label', 'shortest_path'):
+            assert table[feature].status is age.CellStatus.REJECT
 
     def test_unknown_version_falls_back(self):
         with pytest.raises(age.AgeUnsupportedFeature):

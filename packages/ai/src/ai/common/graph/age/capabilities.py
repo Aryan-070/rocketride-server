@@ -110,30 +110,47 @@ AGE_1_5_0: Dict[str, Capability] = {
                 'order by the expression itself (e.g. ORDER BY r.since, not ORDER BY since)'
             ),
         ),
-        # --- TBD: verify against the live 1.5.0 instance, then promote ---
+        # --- verified 2026-07-28 against the exact pin container (PG 16.14 +
+        # AGE 1.5.0): all four are syntax-level rejections ('syntax error at or
+        # near ...'), while plain MERGE on the same graph succeeds — so these
+        # are real 1.5.0 grammar gaps, not harness artifacts. ---
         Capability(
             feature='merge_on_set',
-            status=CellStatus.TBD,
+            status=CellStatus.REJECT,
             detect=lambda facts: facts.has_merge_action,
-            detail='MERGE ... ON CREATE/ON MATCH SET on 1.5.0 (pre-#1691 MERGE fixes) — unverified',
+            detail=(
+                "AGE 1.5.0 does not parse MERGE ... ON CREATE/ON MATCH SET (syntax error at 'ON'); "
+                'use plain MERGE, then a separate SET clause (MERGE (n) ... SET n.prop = ...)'
+            ),
         ),
         Capability(
             feature='where_label_check',
-            status=CellStatus.TBD,
+            status=CellStatus.REJECT,
             detect=lambda facts: facts.has_where_label_check,
-            detail='label predicate in WHERE, e.g. WHERE (n:Label) — unverified',
+            detail=(
+                "AGE 1.5.0 does not parse label predicates in WHERE — 'WHERE n:Label' and "
+                "'WHERE (n:Label)' both fail (syntax error at ':'); put the label in the "
+                'pattern instead (MATCH (n:Label))'
+            ),
         ),
         Capability(
             feature='multi_label',
-            status=CellStatus.TBD,
+            status=CellStatus.REJECT,
             detect=lambda facts: facts.has_multi_label,
-            detail='multiple labels on one pattern node, e.g. (n:A:B) — unverified',
+            detail=(
+                'AGE 1.5.0 does not parse multiple labels on one node — (n:A:B) fails in both '
+                "CREATE and MATCH (syntax error at ':'); model the second label as a property "
+                'or an edge to a category node'
+            ),
         ),
         Capability(
             feature='shortest_path',
-            status=CellStatus.TBD,
+            status=CellStatus.REJECT,
             detect=_uses_function('shortestpath'),
-            detail='shortestPath() — unverified',
+            detail=(
+                'AGE 1.5.0 has no shortestPath() (syntax error); use a bounded variable-length '
+                'match (e.g. (a)-[*..3]-(b)) and rank by path length in the query'
+            ),
         ),
     )
 }

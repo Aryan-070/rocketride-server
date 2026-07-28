@@ -40,7 +40,7 @@ There are intentionally no `host` / `user` / `password` / `database` fields.
 
 ### Dialect notes (AGE 1.5.0)
 
-The capability table (see `ai.common.graph.age.capabilities`) rejects constructs the cloud's AGE 1.5.0 cannot run with actionable messages — currently `datetime()` (store ISO-8601 strings or epoch numbers) and `RETURN *` (list columns explicitly). Constructs whose 1.5.0 behaviour is unverified (`MERGE ... ON CREATE/MATCH SET`, `WHERE (n:Label)`, multi-labels, `shortestPath`) pass through and surface AGE's own error until their capability cells are verified.
+The capability table (see `ai.common.graph.age.capabilities`) rejects constructs the cloud's AGE 1.5.0 cannot run with actionable messages: `datetime()` (store ISO-8601 strings or epoch numbers), `RETURN *` (list columns explicitly), `ORDER BY` on a projection alias (order by the expression), `MERGE ... ON CREATE/MATCH SET` (plain `MERGE` then a separate `SET`), label predicates in `WHERE` (put the label in the `MATCH` pattern), multi-labels like `(n:A:B)` (model the second label as a property or category-node edge), and `shortestPath()` (use a bounded variable-length match). All cells are empirically verified against the exact cloud pin — none pass through unverified.
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

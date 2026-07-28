@@ -89,9 +89,12 @@ antlr4 -v 4.13.2 -Dlanguage=Python3 -visitor -o _agtype/gen _agtype/Agtype.g4
 
 ## Deliberately out of scope (v1)
 
-- Capability **cell values** for `merge_on_set`, `where_label_check`,
-  `multi_label`, `shortest_path` are `TBD` pending verification against the
-  live cloud instance — do not guess them.
+- ~~Capability cell values for `merge_on_set`, `where_label_check`,
+  `multi_label`, `shortest_path`~~ — **verified 2026-07-28** against the exact
+  pin container (PG 16.14 + AGE 1.5.0): all four fail at AGE's parser
+  (`syntax error at or near ...`) while plain `MERGE` on the same graph
+  succeeds, so all four are promoted to `REJECT` with actionable messages.
+  No `TBD` cells remain in the 1.5.0 table.
 - `EMULATE` rewrites (framework hook exists, no emulations implemented).
 - Capability routing to FalkorDB/Neo4j for AGE-can't-do workloads (own
   effort, per the design).
