@@ -481,16 +481,20 @@ class TaskConn(
         # import; task_conn is imported during bootstrap before it is ready.
         from ai.account import account
 
+        # Membership fast path — but do NOT return from inside the loop: a
+        # membership record whose org carries no id must still fall through
+        # to the backend lookup and the single empty-org guard below, or an
+        # empty orgId would ride the task file as trusted identity again.
         org = self._account_info.organization if self._account_info else None
-        if isinstance(org, dict):
-            for team in org.get('teams', []):
-                if team.get('id') == team_id:
-                    return org.get('id', '')
-        try:
-            team = await account.get_team(team_id)
-            org_id = (team or {}).get('orgId') or ''
-        except Exception:
-            org_id = ''
+        org_id = ''
+        if isinstance(org, dict) and any(t.get('id') == team_id for t in org.get('teams', [])):
+            org_id = org.get('id') or ''
+        if not org_id:
+            try:
+                team = await account.get_team(team_id)
+                org_id = (team or {}).get('orgId') or ''
+            except Exception:
+                org_id = ''
         if not org_id:
             # Unknown team / OSS backend without team records: deny with the
             # SAME message as the permission check (no existence leak).
