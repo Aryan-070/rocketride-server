@@ -1170,8 +1170,12 @@ export class RocketRideClient extends DAPClient {
 		const operation = this._lifecycleOperation;
 		const endpoint = operation?.endpoint ?? this._uri;
 		const wasAuthenticated = this._authenticated;
+		const hadSession = Boolean(operation) || wasAuthenticated || this._transport !== undefined;
 		const inFlight = Boolean(operation && !operation.settled);
 		if (operation && !operation.settled) this._recordCancellation(operation, 'logout');
+		// Claim while the operation is still current: an accepted generation that
+		// published onConnected must publish its balancing onDisconnected.
+		const shouldNotify = Boolean(operation && this._claimDisconnectedPublication(operation));
 		const generation = ++this._lifecycleGeneration;
 		this._lifecycleOperation = undefined;
 		this._desiredState = 'attached';
@@ -1180,16 +1184,27 @@ export class RocketRideClient extends DAPClient {
 
 		if (inFlight && operation) {
 			await this._discardTransport(operation.transport, 'Logout cancelled login');
-			if (this._lifecycleGeneration !== generation || this._isDetached()) return;
-			await this._attachAnonymous(endpoint, generation);
-			return;
-		}
-
-		if (wasAuthenticated && this._transport?.isConnected()) {
+		} else if (wasAuthenticated && this._transport?.isConnected()) {
 			await this._bestEffortDeauth();
-			if (this._lifecycleGeneration !== generation || this._isDetached()) return;
 		}
 		if (operation) operation.accepted = false;
+		if (shouldNotify) await this._invokeDisconnected('Logged out', false);
+		if (this._lifecycleGeneration !== generation || this._isDetached()) return;
+
+		// The public contract keeps the transport attached after logout. When the
+		// connection is already gone (logout cancelled an in-flight login, or ran
+		// during a reconnect gap), leaving here would strand the client: the
+		// reconnect timer was cleared above and nothing else reschedules it.
+		if (hadSession && !this._transport?.isConnected()) {
+			try {
+				await this._attachAnonymous(endpoint, generation);
+			} catch (error) {
+				this.debugMessage(`Re-attach after logout failed: ${error}`);
+				if (this._lifecycleGeneration === generation && !this._isDetached() && this._persist) {
+					this._scheduleReconnect(generation);
+				}
+			}
+		}
 	}
 
 	private async _bestEffortDeauth(): Promise<void> {

@@ -3505,4 +3505,64 @@ describe('RocketRideClient lifecycle operations', () => {
 		expect(client.isAttached()).toBe(false);
 		expect(client.isAuthenticated()).toBe(false);
 	});
+
+	it('logout during a reconnect gap re-attaches anonymously instead of stranding a persist client', async () => {
+		const onDisconnected = jest.fn(async () => undefined);
+		const client = makeClient({ persist: true, onDisconnected });
+		const login = loginOutcome(client.login('reconnect-gap-key'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'gap login socket');
+		const socket = LifecycleBrowserWebSocket.instances[0];
+		socket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', socket).length === 1, 'gap auth');
+		socket.respond(lifecycleRequests('auth', socket)[0].message, connectResult('gap'));
+		await expect(login).resolves.toMatchObject({ status: 'resolved' });
+
+		// Drop the connection: persist mode arms the reconnect timer.
+		socket.serverClose(1006, 'connection lost');
+		await flushLifecycleMicrotasks();
+		expect(onDisconnected).toHaveBeenCalledTimes(1);
+
+		// logout() clears that timer; it must leave the client attached anyway.
+		const logoutDone = client.logout();
+		await waitForLifecycle(
+			() => LifecycleBrowserWebSocket.instances.length === 2,
+			'post-logout anonymous socket',
+		);
+		const anonymousSocket = LifecycleBrowserWebSocket.instances[1];
+		anonymousSocket.open();
+		await logoutDone;
+		await flushLifecycleMicrotasks();
+
+		expect(client.isAttached()).toBe(true);
+		expect(client.isAuthenticated()).toBe(false);
+		// The transport drop already published the balancing disconnect.
+		expect(onDisconnected).toHaveBeenCalledTimes(1);
+		expect(lifecycleRequests('auth', anonymousSocket)).toHaveLength(0);
+	});
+
+	it('logout publishes exactly one balancing onDisconnected for an accepted login', async () => {
+		const onDisconnected = jest.fn(async (_reason?: string, _hasError?: boolean) => undefined);
+		const client = makeClient({ onDisconnected });
+		const login = loginOutcome(client.login('balance-key'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'balance socket');
+		const socket = LifecycleBrowserWebSocket.instances[0];
+		socket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', socket).length === 1, 'balance auth');
+		socket.respond(lifecycleRequests('auth', socket)[0].message, connectResult('balance'));
+		await expect(login).resolves.toMatchObject({ status: 'resolved' });
+
+		const logoutDone = client.logout();
+		await waitForLifecycle(() => lifecycleRequests('deauth', socket).length === 1, 'balance deauth');
+		socket.respond(lifecycleRequests('deauth', socket)[0].message, {});
+		await logoutDone;
+
+		expect(onDisconnected).toHaveBeenCalledTimes(1);
+		expect(onDisconnected).toHaveBeenCalledWith('Logged out', false);
+		expect(client.isAttached()).toBe(true);
+
+		// A later transport drop must not publish the retired generation again.
+		socket.serverClose(1006, 'late close');
+		await flushLifecycleMicrotasks();
+		expect(onDisconnected).toHaveBeenCalledTimes(1);
+	});
 });
