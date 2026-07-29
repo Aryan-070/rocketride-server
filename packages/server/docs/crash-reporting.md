@@ -123,11 +123,22 @@ or the symbols don't match it (debug-ID mismatch).
 ### LLDB -- reads the minidump directly (recommended when you have the binary)
 
 ```
-lldb --batch -o "target create <binary> --core crash.dmp" -o "bt" -o quit
+DEBUGINFOD_URLS= lldb --batch \
+  -o "settings set symbols.enable-external-lookup false" \
+  -o "target create <binary> --core crash.dmp" \
+  -o "bt" -o quit
 ```
 
 LLDB relocates the PIE automatically from the minidump's module base -- clean
 symbolized backtrace, no core conversion.
+
+Clear `DEBUGINFOD_URLS` and disable external lookup, or LLDB appears to hang.
+Ubuntu ships with `DEBUGINFOD_URLS=https://debuginfod.ubuntu.com`, so LLDB blocks
+on a network symbol fetch for every module in the dump. Both switches only drop
+symbols for system libraries you already don't have locally -- the target
+binary's own DWARF is inline, so its frames still symbolize. On a large,
+statically-linked binary the first `target create` may still take a few seconds
+to index that DWARF; that is work, not a hang.
 
 ### GDB -- via a converted core
 
