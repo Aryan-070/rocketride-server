@@ -77,6 +77,9 @@ target_include_directories(apLib PUBLIC "${CMAKE_CURRENT_LIST_DIR}/../")
 if(NOT TARGET apLib.lib)
     # Process its precompiled headers (only if engLib is not prebuilt)
     rocketride_pch(apLib
-        UNITY_EXCLUDES "${CMAKE_CURRENT_LIST_DIR}/compress/FastPFor.cpp"
+        # Amalgamated sources that leak preprocessor macros (jsonCpp: snprintf).
+        UNITY_EXCLUDES
+            "${CMAKE_CURRENT_LIST_DIR}/compress/FastPFor.cpp"
+            "${CMAKE_CURRENT_LIST_DIR}/json/jsonCpp.cpp"
         PCH "${CMAKE_CURRENT_LIST_DIR}/headers.h")
 endif()
