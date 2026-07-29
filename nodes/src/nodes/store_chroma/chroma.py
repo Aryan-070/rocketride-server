@@ -139,12 +139,7 @@ class Store(DocumentStoreBase):
                 f'>= {floor}). Original error: {e}'
             ) from e
 
-        # Best-effort server-version floor check. get_version() is not present on every
-        # chromadb client build, so treat its absence/failure as "unknown" rather than a
-        # connection error — the wrapper above and the index-path guards cover hard incompat.
-        server_version = self._getServerVersion()
-        if server_version:
-            _check_server_version(server_version)
+        self._enforceServerVersion()
         return
 
     def __del__(self):
@@ -200,9 +195,9 @@ class Store(DocumentStoreBase):
         """
         Return the Chroma server version string, or None if it can't be determined.
 
-        Defensive: get_version() is not present on every chromadb client build (the thin
-        `chromadb-client` has shipped client shapes without it), so its absence, failure,
-        or non-string result must not be mistaken for a connection error.
+        Defensive: the pinned `chromadb-client` (1.5.9) does expose get_version(), but a
+        probe that is absent, fails, or returns a non-string must not be mistaken for a
+        connection error — the connect wrapper and index-path guards cover hard incompat.
         """
         getter = getattr(self.client, 'get_version', None)
         if not callable(getter):
@@ -212,6 +207,24 @@ class Store(DocumentStoreBase):
             return version if isinstance(version, str) else None
         except Exception:
             return None
+
+    def _enforceServerVersion(self) -> None:
+        """
+        Reject a server below the supported floor, dropping the client handle with it.
+
+        An unknown version is not a rejection (see _getServerVersion). When the floor does
+        reject, the handle is cleared first so a caller that survives the raise cannot keep
+        issuing calls against a server we just declared incompatible — matching the
+        connect-failure path above.
+        """
+        server_version = self._getServerVersion()
+        if not server_version:
+            return
+        try:
+            _check_server_version(server_version)
+        except Exception:
+            self.client = None
+            raise
 
     def _doesCollectionExist(self) -> bool:
         """

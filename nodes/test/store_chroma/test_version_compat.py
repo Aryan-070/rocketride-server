@@ -150,6 +150,46 @@ def test_get_server_version_treats_non_string_probe_results_as_unknown(result: o
     module._check_server_version(server_version)
 
 
+# --- _enforceServerVersion drops the handle it rejects -----------------------
+
+
+def test_enforce_server_version_clears_client_when_server_too_old() -> None:
+    """A rejected server must not leave a usable client handle behind."""
+    module = _load_module()
+    store = module.Store.__new__(module.Store)
+    store.client = SimpleNamespace(get_version=lambda: '0.5.18')
+
+    with pytest.raises(Exception) as exc:
+        store._enforceServerVersion()
+
+    assert 'too old' in str(exc.value)
+    assert store.client is None
+
+
+def test_enforce_server_version_keeps_client_on_supported_server() -> None:
+    """A supported server passes the floor and keeps its handle."""
+    module = _load_module()
+    store = module.Store.__new__(module.Store)
+    client = SimpleNamespace(get_version=lambda: '0.6.3')
+    store.client = client
+
+    store._enforceServerVersion()
+
+    assert store.client is client
+
+
+def test_enforce_server_version_keeps_client_when_version_unknown() -> None:
+    """An undeterminable version is not a rejection, so the handle survives."""
+    module = _load_module()
+    store = module.Store.__new__(module.Store)
+    client = SimpleNamespace()  # no get_version
+    store.client = client
+
+    store._enforceServerVersion()
+
+    assert store.client is client
+
+
 # --- _doesCollectionExist normalization --------------------------------------
 
 
