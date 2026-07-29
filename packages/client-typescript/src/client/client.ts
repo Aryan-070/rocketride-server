@@ -1209,7 +1209,10 @@ export class RocketRideClient extends DAPClient {
 
 	private async _bestEffortDeauth(): Promise<void> {
 		try {
-			await this.request({ type: 'request', command: 'deauth', seq: 0, arguments: {} });
+			// Bounded even when no requestTimeout is configured: a server that
+			// never answers deauth must not block logout()/disconnect() — logout
+			// still has to reach its reattach-after-logout step.
+			await this.request({ type: 'request', command: 'deauth', seq: 0, arguments: {} }, 5_000);
 		} catch {
 			// Best-effort: a lost transport is already handled by onDisconnected.
 		}
