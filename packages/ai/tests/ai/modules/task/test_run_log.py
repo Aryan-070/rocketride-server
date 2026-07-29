@@ -133,12 +133,23 @@ def status_event(**fields):
     return {'type': 'event', 'event': 'apaevt_status_update', 'body': dict(fields)}
 
 
+def make_file_store(istore) -> FileStore:
+    """An internal-identity FileStore over the shared test istore.
+
+    Each call deliberately wraps the istore in its OWN Store: separate
+    handle/lock registries per consumer, modeling independent subsystems
+    (writer vs reader vs a fresh process) coordinating only through the
+    backend — the shape production has across processes.
+    """
+    return FileStore(Store(istore), CLIENT, RequestContext.internal('test'))
+
+
 async def open_writer(istore, spool_root, stamp=None, raise_floor=None, kind=KIND):
     """Create + open a writer with fake stamping callbacks."""
     if stamp is None:
         stamp, raise_floor, _ = make_stamp()
     writer = RunLogWriter(
-        FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+        make_file_store(istore),
         CLIENT,
         PROJECT,
         SOURCE,
@@ -417,7 +428,7 @@ class TestSegmentCodec:
         # A FRESH process (new writer) resumes the stream: its first keyframe
         # must be marked incomplete (pre-existing open state is unknown).
         writer2 = RunLogWriter(
-            FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+            make_file_store(istore),
             CLIENT,
             PROJECT,
             SOURCE,
@@ -564,7 +575,7 @@ class TestContinuum:
         # so the catalog floor lift is what carries the continuum forward.
         stamp2, raise_floor2, state2 = make_stamp()
         writer2 = RunLogWriter(
-            FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+            make_file_store(istore),
             CLIENT,
             PROJECT,
             SOURCE,
@@ -671,7 +682,7 @@ class TestRetention:
         writer = None
         for i in range(5):
             writer = RunLogWriter(
-                FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+                make_file_store(istore),
                 CLIENT,
                 PROJECT,
                 SOURCE,
@@ -719,7 +730,7 @@ class TestRecovery:
         try:
             stamp2, raise_floor2, state2 = make_stamp()
             writer2 = RunLogWriter(
-                FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+                make_file_store(istore),
                 CLIENT,
                 PROJECT,
                 SOURCE,

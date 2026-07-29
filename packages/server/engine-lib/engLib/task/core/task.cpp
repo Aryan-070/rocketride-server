@@ -30,7 +30,9 @@ namespace {
 ///		The task-file JSON of the task currently executing in this
 ///		process (null when none). Set/cleared and read on the main task
 ///		thread only (the getTask() binding is consumed at endpoint
-///		construction, inside the publish window).
+///		construction, inside the publish window) — publish, reads, and
+///		clear are strictly sequential on that one thread, so no
+///		synchronization is needed.
 //-------------------------------------------------------------------------
 json::Value g_currentTask;
 }  // namespace
@@ -113,7 +115,9 @@ json::Value &ITask::jobConfig() noexcept { return m_args.cmd; }
 //-------------------------------------------------------------------------
 /// @details
 ///		Return a copy of the currently-executing task's file JSON —
-///		null when no task is running
+///		null when no task is running. Main-task-thread only (see
+///		g_currentTask above): publish, read, and clear are sequential
+///		on that one thread.
 //-------------------------------------------------------------------------
 json::Value ITask::currentTask() noexcept { return g_currentTask; }
 

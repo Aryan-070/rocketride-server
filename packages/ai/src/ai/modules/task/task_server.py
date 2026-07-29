@@ -659,17 +659,16 @@ class TaskServer(DAPBase):
         if not control:
             raise RuntimeError('Your pipeline is not running')
 
-        # Resolve against the TASK'S team with the same resolver and
-        # sys.admin bypass as get_task/get_task_control_by_project (the old
-        # resolve_team_permissions call raised on foreign teams instead of
-        # denying uniformly, and had no admin bypass).
+        # Resolve against the TASK'S team (the old resolve_team_permissions
+        # call raised on foreign teams instead of denying uniformly).
+        # sys.admin and internal identities bypass INSIDE the resolver — it
+        # returns the full permission set for them — so no outer short-circuit.
         if account_info is not None and require:
-            if 'sys.admin' not in (account_info.sysPermissions or []):
-                perms = resolve_task_permissions(account_info, control.teamId)
-                if not perms:
-                    raise PermissionError('Access denied: no permissions for this task')
-                if require not in perms:
-                    raise PermissionError(f'Permission {require!r} denied for this task')
+            perms = resolve_task_permissions(account_info, control.teamId)
+            if not perms:
+                raise PermissionError('Access denied: no permissions for this task')
+            if require not in perms:
+                raise PermissionError(f'Permission {require!r} denied for this task')
 
         return control
 

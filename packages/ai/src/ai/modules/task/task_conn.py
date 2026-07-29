@@ -457,6 +457,46 @@ class TaskConn(
         if perm not in perms:
             raise PermissionError(f'Permission {perm!r} denied for team {team_id!r}')
 
+    async def resolve_org_for_team(self, team_id: str) -> str:
+        """Resolve the org id that owns ``team_id`` for task registration.
+
+        Fast path: the caller's own membership (their single org). Callers
+        that pass verify_team_permission WITHOUT membership — sys.admin, and
+        internal via resolve_task_permissions — fall through to the account
+        backend so the task is registered with the team's REAL org: an empty
+        orgId would otherwise travel in the task file as trusted identity and
+        anchor org-scoped storage/secrets to nothing.
+
+        Args:
+            team_id: The team the task is being registered under.
+
+        Returns:
+            The owning organization id (never empty).
+
+        Raises:
+            PermissionError: The team's org cannot be resolved (unknown team,
+                or a backend without team records) — uniform denial message.
+        """
+        # Deferred import: ai.account instantiates the Account singleton on
+        # import; task_conn is imported during bootstrap before it is ready.
+        from ai.account import account
+
+        org = self._account_info.organization if self._account_info else None
+        if isinstance(org, dict):
+            for team in org.get('teams', []):
+                if team.get('id') == team_id:
+                    return org.get('id', '')
+        try:
+            team = await account.get_team(team_id)
+            org_id = (team or {}).get('orgId') or ''
+        except Exception:
+            org_id = ''
+        if not org_id:
+            # Unknown team / OSS backend without team records: deny with the
+            # SAME message as the permission check (no existence leak).
+            raise PermissionError(f'Access denied: no permissions for team {team_id!r}')
+        return org_id
+
     def require_zitadel_auth(self) -> None:
         """Verify the connection is authenticated and not waitlisted."""
         if not self._authenticated or not self._account_info:

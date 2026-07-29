@@ -24,9 +24,13 @@
 """
 File system tool node — global (shared) state.
 
-Resolves the account identity from the TASK FILE the engine wrote at spawn
-(``IEndpoint.endpoint.jobConfig['identity']``, see task_engine._build_task)
-and builds a single ``FileStore`` scoped to ``users/<userId>/files/``. The instance exposes
+Resolves the account identity and the storage anchor from the TASK FILE the
+engine published (``rocketlib.getTask()``: the ``identity`` and ``storage``
+blocks, see task_engine._build_task) and builds a single ``FileStore``
+rooted at that anchor — the owning user's tree
+(``users/<userId>/files/``) for development runs, a task-specific team
+subtree (``teams/<teamId>/files/tasks/<projectId>/``) for deployed runs —
+so node-level paths are identical in both modes. The instance exposes
 per-operation allow-flags and a path whitelist that IInstance enforces before
 every tool call.
 

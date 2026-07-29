@@ -250,19 +250,16 @@ def test_get_task_control_with_require_passes_when_granted(monkeypatch):
     assert ts.get_task_control('tk_1', account_info=account, require='task.debug') is control
 
 
-def test_get_task_control_with_require_sys_admin_bypasses(monkeypatch):
-    """sys.admin skips the team resolution entirely (parity with get_task)."""
-    from ai.modules.task import task_server as ts_mod
-
-    def _boom(info, team):
-        raise AssertionError('resolver must not run for sys.admin')
-
-    monkeypatch.setattr(ts_mod, 'resolve_task_permissions', _boom)
-
+def test_get_task_control_with_require_sys_admin_bypasses():
+    """sys.admin is granted INSIDE resolve_task_permissions (it returns the
+    full permission set) — deliberately no outer short-circuit to keep in
+    sync (parity with get_task).
+    """
     ts = _make_server()
     control = _make_control()
     ts._task_control['tk_1'] = control
-    account = SimpleNamespace(userId='u', defaultTeam='t', sysPermissions=['sys.admin'])
+    # No organization at all: only the resolver's sys.admin expansion grants.
+    account = SimpleNamespace(userId='u', defaultTeam='t', sysPermissions=['sys.admin'], organization=None)
 
     assert ts.get_task_control('tk_1', account_info=account, require='task.debug') is control
 

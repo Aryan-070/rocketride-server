@@ -5,8 +5,9 @@ Provides directory-like semantics (read, write, delete, list_dir, mkdir, stat)
 over the flat key-value IStore backends (Filesystem, S3, Azure). Each FileStore
 instance is scoped to a single account via client_id.
 
-Supports handle-based I/O for streaming reads and writes:
-    handle = await fs.open_write(path, connection_id)
+Supports handle-based I/O for streaming reads and writes (handles are owned
+by the bound context's conn_id):
+    handle = await fs.open_write(path)
     await fs.write_chunk(handle, chunk1)
     await fs.write_chunk(handle, chunk2)
     await fs.close_write(handle)
@@ -14,11 +15,10 @@ Supports handle-based I/O for streaming reads and writes:
 Usage:
     from ai.account.store import Store
 
-    store = Store.create()
-    fs = store.file_store('user-123', ctx)  # the handler's RequestContext
+    fs = Store.file_store(ctx)  # the handler's RequestContext
 
-    await fs.write('data/input.csv', b'col1,col2\\n1,2\\n', connection_id=1)
-    data = await fs.read('data/input.csv', connection_id=1)
+    await fs.write('data/input.csv', b'col1,col2\\n1,2\\n')
+    data = await fs.read('data/input.csv')
     entries = await fs.list_dir('data/')
     shared = await fs.list_dir('@/Team/Development/reports')
 """
@@ -28,8 +28,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import PurePosixPath
 from typing import Any, Optional
-
-from rocketlib import debug
 
 from .models import RequestContext, resolve_task_permissions
 from .store import IStore, StorageError
@@ -44,8 +42,8 @@ MAX_CHUNK_SIZE = 4_194_304  # 4 MB
 # Larger files must use the streaming handle API (open_read + read_chunk).
 MAX_READ_SIZE = 100 * 1024 * 1024  # 100 MB
 
-# Maximum open handles per connection (DoS bound). Only enforced when
-# connection_id is non-zero — zero means "unowned", used by tests.
+# Maximum open handles per connection (DoS bound). Only enforced when the
+# ctx conn_id is non-empty — '' means "unowned", used by tests.
 MAX_HANDLES_PER_CONNECTION = 64
 
 # Characters forbidden inside any single path segment. ':' blocks Windows
@@ -412,7 +410,7 @@ class FileStore:
     access rule per subtree (system trees are internal/sys.admin only).
 
     Instances are cheap per-consumer wrappers constructed via
-    ``Store.file_store(client_id, ctx)`` — identity is NEVER cached across
+    ``Store.file_store(ctx)`` — identity is NEVER cached across
     sessions (concurrent sessions of one user can carry different permission
     envelopes, e.g. PAT-scoped). The write-lock set and open-handle registry
     are SHARED on the owning Store so two instances addressing the same
@@ -631,7 +629,6 @@ class FileStore:
 
         Args:
             path: Relative path within the account store.
-            connection_id: Owning connection ID.
             max_size: Maximum file size in bytes (default 100 MB). Files
                 exceeding this are rejected to prevent OOM.
 
@@ -669,7 +666,6 @@ class FileStore:
         Args:
             path: Relative path within the account store.
             data: Raw bytes to write.
-            connection_id: Owning connection ID.
 
         Raises:
             StorageError: If write fails.
@@ -693,9 +689,9 @@ class FileStore:
             StorageError: If file does not exist, delete fails, or file is open for writing.
         """
         full_path, kind, rest = self._resolve(path)
-        # Scope-root guard: deleting '@/Team/<ref>' / '@/Org' itself is a
-        # whole-scope wipe, mirror of the user-root protection in rmdir.
-        if kind != 'own' and not rest:
+        # Root guard: deleting a root — the caller's own account root
+        # included — is never meaningful; reject uniformly like rmdir/rename.
+        if not rest:
             raise StorageError('Cannot delete a scope root')
         if full_path in self._write_locks:
             raise StorageError(f'Cannot delete file while it is open for writing: {path}')
@@ -839,8 +835,11 @@ class FileStore:
         """
         old_full, old_kind, old_rest = self._resolve(old_path)
         new_full, new_kind, new_rest = self._resolve(new_path)
-        # Scope-root guard: a scope root can be neither source nor destination.
-        if (old_kind != 'own' and not old_rest) or (new_kind != 'own' and not new_rest):
+        # Root guard: NO root — the caller's own account root included — may
+        # be source or destination. An empty old_rest would make dir_prefix
+        # the whole account/scope tree and the copy loop below a whole-store
+        # move (mirror of the rmdir root protection).
+        if not old_rest or not new_rest:
             raise StorageError('rename cannot target a scope root')
 
         # Check for directory (has children under old_path/)
@@ -935,8 +934,12 @@ class FileStore:
             raise StorageError(f'Handle already closed: {handle_id}')
         if handle.mode != expected_mode:
             raise StorageError(f'Wrong handle mode: expected {expected_mode.value}, got {handle.mode.value}')
-        conn_id = self._ctx.conn_id
-        if conn_id and handle.connection_id and handle.connection_id != conn_id:
+        # STRICT ownership: the registry is Store-wide (every identity in the
+        # process), so a lenient empty-conn_id bypass would let any default
+        # RequestContext reach another connection's live handle. Fail closed —
+        # only the exact owning conn_id (including '' == '' for unowned
+        # test contexts) may touch a handle.
+        if handle.connection_id != self._ctx.conn_id:
             raise StorageError('Handle belongs to another connection')
         return handle
 
@@ -968,23 +971,12 @@ class FileStore:
                 raise StorageError(f'Cannot modify: handle open under {prefix}')
 
     async def _force_close_handle(self, handle_id: str) -> None:
-        """Force-close a handle, committing any written data. Best-effort."""
-        handle = self._handles.get(handle_id)
-        if handle is None or handle.closed:
-            return
-        try:
-            if handle.mode == FileHandleMode.WRITE:
-                await self._store.close_write(handle.path, handle.context)
-            else:
-                await self._store.close_read(handle.path, handle.context)
-        except Exception as e:
-            # Best-effort cleanup — log at debug level so disconnect-time
-            # commit failures are traceable rather than silently lost.
-            debug(
-                f'FileStore._force_close_handle failed handle={handle_id} mode={handle.mode.value} path={handle.path}: {e}'
-            )
-        finally:
-            self._release_handle(handle)
+        """Force-close a handle, committing any written data. Best-effort.
+
+        Delegates to the owning Store's single per-handle teardown sequence
+        (shared with disconnect-time Store.close_all_handles).
+        """
+        await self._owner._teardown_handle(self._handles.get(handle_id))
 
     @staticmethod
     def _validate_path(path: str) -> str:

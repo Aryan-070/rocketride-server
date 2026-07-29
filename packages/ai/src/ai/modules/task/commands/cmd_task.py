@@ -141,14 +141,12 @@ class TaskCommands(DAPConn):
                 # Check that the pipeline's required plan is available for this account.
                 self.verify_plans(self._account_info, pipeline)
 
-            # Resolve org_id from the user's single organization.
-            org_id = ''
-            org = self._account_info.organization
-            if org:
-                for team in org.get('teams', []):
-                    if team.get('id') == team_id:
-                        org_id = org.get('id', '')
-                        break
+            # Resolve the org that owns the TARGET team (same resolution as
+            # on_launch): members via their own org, sys.admin/internal via
+            # the account backend — the task file must never carry an empty
+            # orgId as trusted identity, and the secret merge below must pull
+            # the TARGET team's real org layer.
+            org_id = await self.resolve_org_for_team(team_id)
 
             # Build merged environment for pipeline variable resolution.
             # Combines .env → org → team → user secrets (SaaS) or just .env (OSS).

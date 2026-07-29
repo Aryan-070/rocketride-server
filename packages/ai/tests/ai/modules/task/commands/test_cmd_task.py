@@ -50,6 +50,12 @@ def _make_conn(*, account_info=None, server=None, connection_id=1):
     conn.verify_team_permission = MagicMock()  # granted by default
     conn.verify_plans = MagicMock(return_value=True)
     conn.get_task = MagicMock()
+    # Bind the REAL org resolver (defined on TaskConn, next to
+    # verify_team_permission) so on_execute exercises real membership-based
+    # resolution against the stub AccountInfo's organization.
+    from ai.modules.task.task_conn import TaskConn
+
+    conn.resolve_org_for_team = MethodType(TaskConn.resolve_org_for_team, conn)
     # Identity context builder (TaskConn.request_context) — the file store is
     # mocked in these tests, so a stub ctx suffices.
     conn.request_context = MagicMock(return_value=SimpleNamespace(account_info=account_info))
@@ -78,13 +84,18 @@ def _make_conn(*, account_info=None, server=None, connection_id=1):
 
 
 def _account_info(*, user_id='user-1', auth='ak_x', default_team='team-1', organization=None):
-    """Build an AccountInfo-shaped stub."""
+    """Build an AccountInfo-shaped stub.
+
+    The default organization contains the default team so the real org
+    resolver (resolve_org_for_team) succeeds via membership; pass an explicit
+    organization to model other shapes.
+    """
     return SimpleNamespace(
         userId=user_id,
         auth=auth,
         userToken='token-' + user_id,
         defaultTeam=default_team,
-        organization=organization,
+        organization=organization if organization is not None else {'id': 'org-1', 'teams': [{'id': default_team}]},
         sysPermissions=[],
     )
 
@@ -126,13 +137,20 @@ async def test_on_execute_requires_task_control_permission():
 
 
 @pytest.mark.asyncio
-async def test_on_execute_checks_permission_on_the_target_team():
+async def test_on_execute_checks_permission_on_the_target_team(monkeypatch):
     """The task.control check runs against the CLIENT-SUPPLIED teamId (not
     defaultTeam) so a foreign team cannot be targeted.
     """
+    from ai.account import account as account_mod
+
+    # The stubbed permission check grants, so execution continues into the
+    # secret merge — patch it out so this test asserts only the check target.
+    monkeypatch.setattr(account_mod, 'get_merged_env', AsyncMock(return_value={}))
+
+    organization = {'id': 'org-1', 'teams': [{'id': 'team-1'}, {'id': 'team-target'}]}
     server = MagicMock()
     server.start_task = AsyncMock(return_value={'token': 'tk_new'})
-    conn = _make_conn(account_info=_account_info(default_team='team-1'), server=server)
+    conn = _make_conn(account_info=_account_info(default_team='team-1', organization=organization), server=server)
 
     await TaskCommands.on_execute(conn, {'arguments': {'teamId': 'team-target'}})
 

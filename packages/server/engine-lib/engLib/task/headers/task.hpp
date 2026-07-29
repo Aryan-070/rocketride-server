@@ -125,6 +125,12 @@ public:
     ///		for the python binding rocketlib.getTask() so subprocess
     ///		python (e.g. the storage layer reading identity and the
     ///		storage anchor) needs no per-endpoint plumbing.
+    ///
+    ///		MAIN-TASK-THREAD ONLY: publish (before beginTask), every
+    ///		read (endpoint/node-global construction inside the publish
+    ///		window), and clear (task exit) all run sequentially on the
+    ///		single main task thread — the value is unsynchronized by
+    ///		design. Do not call from worker threads.
     //-----------------------------------------------------------------
     static json::Value currentTask() noexcept;
 

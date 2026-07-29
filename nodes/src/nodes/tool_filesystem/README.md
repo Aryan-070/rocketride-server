@@ -43,7 +43,7 @@ may touch.
 | `emitUrl` | boolean | Default false. Also attach a time-limited signed download URL to the emitted document metadata. |
 | `urlExpiresIn` | integer | Default 3600 (max 3600). TTL in seconds for the signed URL when `emitUrl` is on. |
 | `whitelistPattern` | string | Default empty.  |
-| `pathWhitelist` | array | Regex patterns applied to the relative path of every operation using re.search semantics, a partial match anywhere in the path is enough, so a pattern like 'secret' will also match 'notsecret/file.txt'. Anchor with ^ and $ if you need a full-path match (e.g. '^docs/.*$'). If non-empty, a path must match at least one pattern. If empty, all paths under users/<client_id>/files/ are allowed. |
+| `pathWhitelist` | array | Regex patterns applied to the relative path of every operation using re.search semantics, a partial match anywhere in the path is enough, so a pattern like 'secret' will also match 'notsecret/file.txt'. Anchor with ^ and $ if you need a full-path match (e.g. '^docs/.*$'). If non-empty, a path must match at least one pattern. If empty, all paths under the task's storage anchor are allowed. |
 
 
 ### Path whitelist
@@ -147,15 +147,17 @@ subprocess long before the LLM ever sees the result.
 
 ## Storage location
 
-Files land under the configured storage backend (defaults to `~/.rocketlib/store/`). For
-the default filesystem backend the absolute path is:
+Files land under the configured storage backend (defaults to `~/.rocketlib/store/`).
+For the default filesystem backend the absolute path is the task's storage anchor
+plus the relative path:
 
 ```text
-<store>/users/<client_id>/files/<path>
+<store>/users/<client_id>/files/<path>                    # development runs
+<store>/teams/<teamId>/files/tasks/<projectId>/<path>     # deployed runs
 ```
 
-Each account gets its own isolated `files/` directory, the node picks up the current
-account automatically, no configuration needed.
+The anchor comes from the task file the engine wrote at spawn; the node picks up
+the current task automatically, no configuration needed.
 
 ---
 

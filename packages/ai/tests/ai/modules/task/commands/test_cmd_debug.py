@@ -14,7 +14,7 @@ Tests use ``__new__`` to skip the multi-mixin __init__ and seed
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -39,6 +39,12 @@ def _make_conn(*, account_info=None, server=None, debug_token=None, debug_id=Non
     conn.verify_permission = MagicMock()
     conn.verify_team_permission = MagicMock()  # granted by default
     conn.get_task = MagicMock()
+    # Bind the REAL org resolver (defined on TaskConn, next to
+    # verify_team_permission) so on_launch exercises real membership-based
+    # resolution against the stub AccountInfo's organization.
+    from ai.modules.task.task_conn import TaskConn
+
+    conn.resolve_org_for_team = MethodType(TaskConn.resolve_org_for_team, conn)
     conn.get_task_token = MagicMock(return_value='tk_x')
     # request() is defined on TaskConn (not DebugCommands); on_pause /
     # on_continue / on_configurationDone / on_threads call self.request().
@@ -125,7 +131,10 @@ async def test_on_launch_checks_task_debug_on_target_team():
     """on_launch verifies task.debug against the client-supplied teamId."""
     server = MagicMock()
     server.start_task = AsyncMock(return_value={'id': 'task-1', 'token': 'tk_1'})
-    conn = _make_conn(account_info=_account_info(), server=server)
+    # The target team must exist in the caller's org for org resolution (the
+    # permission stub grants, but resolve_org_for_team runs for real).
+    organization = {'id': 'org-1', 'teams': [{'id': 'team-1'}, {'id': 'team-target'}]}
+    conn = _make_conn(account_info=_account_info(organization=organization), server=server)
     await DebugCommands.on_launch(conn, {'arguments': {'teamId': 'team-target'}})
     conn.verify_team_permission.assert_called_once_with('team-target', 'task.debug')
 

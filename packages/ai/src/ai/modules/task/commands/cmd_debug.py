@@ -50,7 +50,7 @@ command processing layer in a task execution and debugging infrastructure.
 The actual task execution and management is delegated to the TaskServer.
 """
 
-from typing import TYPE_CHECKING, Dict, Any, Optional
+from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
 
 # Only import for type checking to avoid circular import errors
@@ -217,18 +217,12 @@ class DebugCommands(DAPConn):
             # foreign teamId entirely.
             self.verify_team_permission(team_id, 'task.debug')
 
-            # Resolve org_id from the user's single organization.
-            org_id: Optional[str] = None
-            org = self._account_info.organization
-            if org:
-                for team in org.get('teams', []):
-                    if team.get('id') == team_id:
-                        org_id = org.get('id', '')
-                        break
-            if org_id is None:
-                # Reachable only via the sys.admin bypass (a foreign team
-                # cannot pass verify_team_permission otherwise).
-                org_id = ''
+            # Resolve the org that owns the TARGET team. Members resolve via
+            # their own org; callers passing the permission check without
+            # membership (sys.admin, internal) resolve via the account backend
+            # so the task file never carries an empty orgId as trusted
+            # identity (rejected if the team's org cannot be determined).
+            org_id = await self.resolve_org_for_team(team_id)
 
             # Create and start the new task, obtaining a unique token
             response = await self._server.start_task(

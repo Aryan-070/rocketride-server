@@ -640,7 +640,6 @@ class TestHandleCap:
         """A ctx without a conn_id ('' = unowned) bypasses the cap."""
         from ai.account.file_store import MAX_HANDLES_PER_CONNECTION
 
-        unowned = FileStore(store, 'test-user-1', RequestContext(account_info=None, conn_id='', source='local'))
         # RequestContext with no account is unauthenticated for user auth —
         # use an internal identity with an empty conn_id instead.
         ctx = RequestContext.internal('cap')

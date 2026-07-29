@@ -51,13 +51,11 @@ from .test_run_log import (
     SOURCE,
     STORE_PREFIX,
     STREAM,
+    make_file_store,
     make_stamp,
     open_writer,
     output_event,
 )
-from ai.account.file_store import FileStore
-from ai.account.store import Store
-from ai.account.models import RequestContext
 
 
 # =============================================================================
@@ -90,7 +88,7 @@ async def seed_stream(istore, spool_root, monkeypatch, events=30):
     await writer.end_run('ok')
 
     writer2 = run_log.RunLogWriter(
-        FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+        make_file_store(istore),
         CLIENT,
         PROJECT,
         SOURCE,
@@ -106,7 +104,7 @@ async def seed_stream(istore, spool_root, monkeypatch, events=30):
     await writer2.end_run('error', 'boom')
 
     return run_log.RunLogReader(
-        FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+        make_file_store(istore),
         CLIENT,
         PROJECT,
         SOURCE,
@@ -136,7 +134,7 @@ class TestChapters:
     @pytest.mark.asyncio
     async def test_missing_stream_raises(self, istore, spool_root):
         reader = run_log.RunLogReader(
-            FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+            make_file_store(istore),
             CLIENT,
             'nope',
             SOURCE,
@@ -199,7 +197,7 @@ class TestSegmentRaw:
         await writer._drain_uploads()
         await writer.end_run('ok')
         reader = run_log.RunLogReader(
-            FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+            make_file_store(istore),
             CLIENT,
             PROJECT,
             SOURCE,
@@ -285,7 +283,7 @@ class TestRead:
         monkeypatch.setattr(run_log, 'CONST_LOG_SEGMENTS', 1)
         stamp, raise_floor, _ = make_stamp(start=SEED + 10**9)
         writer = run_log.RunLogWriter(
-            FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+            make_file_store(istore),
             CLIENT,
             PROJECT,
             SOURCE,
@@ -367,7 +365,7 @@ class TestLiveCoordination:
         # No drain, no end_run: sealed segments exist only as spool copies and
         # the freshest control lives on the writer, not in the store.
         reader = run_log.RunLogReader(
-            FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+            make_file_store(istore),
             CLIENT,
             PROJECT,
             SOURCE,

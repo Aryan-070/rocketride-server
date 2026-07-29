@@ -41,9 +41,6 @@ import time
 import pytest
 
 import ai.modules.task.run_log as run_log
-from ai.account.file_store import FileStore
-from ai.account.store import Store
-from ai.account.models import RequestContext
 from ai.account.store_providers.filesystem import FilesystemStore
 from rocketride import log_stream as rr_log_stream
 from rocketride._log_codec import normalize_stamps
@@ -56,6 +53,7 @@ from .test_run_log import (
     PROJECT,
     SOURCE,
     flow_op,
+    make_file_store,
     make_stamp,
     open_writer,
     output_event,
@@ -152,7 +150,7 @@ async def seed_rich(istore, spool_root, monkeypatch):
     await writer._drain_uploads()
     await writer.end_run('ok')
     return run_log.RunLogReader(
-        FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+        make_file_store(istore),
         CLIENT,
         PROJECT,
         SOURCE,
@@ -370,7 +368,7 @@ class TestSeededReads:
         await writer._drain_uploads()
         await writer.end_run('ok')
         reader = run_log.RunLogReader(
-            FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+            make_file_store(istore),
             CLIENT,
             PROJECT,
             SOURCE,
@@ -454,7 +452,7 @@ class TestSeededReads:
         writer.append(stamp(flow_op('begin', pid=3, component='x')))
         writer.append(stamp(flow_op('end', pid=3, component='x')))
         reader = run_log.RunLogReader(
-            FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+            make_file_store(istore),
             CLIENT,
             PROJECT,
             SOURCE,
@@ -497,7 +495,7 @@ class TestLiveIngest:
         writer = await open_writer(istore, spool_root, stamp, raise_floor)
         writer.append(stamp(output_event('boot')))
         reader = run_log.RunLogReader(
-            FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+            make_file_store(istore),
             CLIENT,
             PROJECT,
             SOURCE,
@@ -542,7 +540,7 @@ class TestLiveIngest:
         writer = await open_writer(istore, spool_root, stamp, raise_floor)
         writer.append(stamp(output_event('boot')))
         reader = run_log.RunLogReader(
-            FileStore(Store(istore), CLIENT, RequestContext.internal('test')),
+            make_file_store(istore),
             CLIENT,
             PROJECT,
             SOURCE,

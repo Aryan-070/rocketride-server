@@ -475,12 +475,20 @@ class Task(DAPBase):
         }
 
     def _storage_root(self) -> str:
-        """The task's storage anchor (see the 'storage' task-file block)."""
+        """The task's storage anchor (see the 'storage' task-file block).
+
+        Validated HERE so a malformed component — project_id is
+        client-supplied and only uuid-defaulted when absent — fails the
+        launch with a clear error instead of surfacing later inside the
+        subprocess as tool_filesystem disabling itself mid-run.
+        """
+        from ai.account.file_store import validate_storage_root
+
         if self._run_kind == 'deploy':
             if not self.team_id:
                 raise ValueError('deploy runs require a team_id for their storage anchor')
-            return f'teams/{self.team_id}/files/tasks/{self.project_id}'
-        return f'users/{self.client_id}/files'
+            return validate_storage_root(f'teams/{self.team_id}/files/tasks/{self.project_id}')
+        return validate_storage_root(f'users/{self.client_id}/files')
 
     async def _write_task_file(self, pipeline: Dict[str, Any]) -> str:
         """

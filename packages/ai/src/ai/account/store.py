@@ -673,13 +673,24 @@ class Store:
         if not isinstance(ctx, RequestContext):
             raise TypeError('ctx must be a RequestContext')
 
-        session_user = getattr(ctx.account_info, 'userId', '') if ctx.account_info else ''
-        is_session = bool(session_user) and 'internal' not in (
-            (ctx.account_info.sysPermissions or []) if ctx.account_info else []
-        )
+        sys_perms = (ctx.account_info.sysPermissions or []) if ctx.account_info else []
+        # Trusted (engine/internal) contexts name the namespace they operate
+        # in. Account-LESS contexts also take the explicit-client_id branch:
+        # they stay constructible (pre-auth paths, backend tests) because
+        # resolve_scope already denies their every operation with
+        # 'Not authenticated' — nothing is reachable through them.
+        is_session = ctx.account_info is not None and ctx.source != 'engine' and 'internal' not in sys_perms
 
         if is_session:
-            # Sessions anchor to their own namespace, always.
+            # Sessions anchor to their own namespace, always — derived from
+            # the authenticated identity, never from an explicit client_id.
+            # A session-shaped ctx with no userId (e.g. a task-scoped
+            # AccountInfo built from an empty control.userId) is rejected
+            # outright: accepting a client_id for it would unlock an
+            # arbitrary user's store.
+            session_user = getattr(ctx.account_info, 'userId', '') or ''
+            if not session_user:
+                raise PermissionError('Session identity carries no userId — cannot anchor a file store')
             if client_id and client_id != session_user:
                 raise PermissionError('A session cannot anchor to a foreign user namespace')
             client_id = session_user
@@ -701,27 +712,48 @@ class Store:
         Args:
             connection_id: The ctx.conn_id string (or legacy int, coerced).
         """
+        conn_id = str(connection_id)
+        doomed = [h for h in self._shared_handles.values() if h.connection_id == conn_id]
+        for handle in doomed:
+            await self._teardown_handle(handle)
+
+    async def _teardown_handle(self, handle) -> None:
+        """
+        Force-close ONE handle: commit/close at the backend, then drop its
+        registry entry and release any write lock. Best-effort — backend
+        failures are logged and swallowed.
+
+        THE single per-handle teardown sequence: both disconnect-time cleanup
+        (close_all_handles above) and FileStore._force_close_handle delegate
+        here so the close/commit/mark-closed/release-lock steps cannot drift.
+
+        Args:
+            handle: A FileHandle from the shared registry (None/closed = no-op).
+        """
         from rocketlib import debug
 
         from .file_store import FileHandleMode
 
-        conn_id = str(connection_id)
-        doomed = [h for h in self._shared_handles.values() if h.connection_id == conn_id]
-        for handle in doomed:
-            try:
-                # Commit/close at the backend according to the handle mode.
-                if handle.mode == FileHandleMode.WRITE:
-                    await self._store.close_write(handle.path, handle.context)
-                else:
-                    await self._store.close_read(handle.path, handle.context)
-            except Exception as exc:
-                debug(f'Store.close_all_handles: failed to close {handle.handle_id}: {exc}')
-            finally:
-                # Drop the registry entry and release any write lock.
-                handle.closed = True
-                self._shared_handles.pop(handle.handle_id, None)
-                if handle.mode == FileHandleMode.WRITE:
-                    self._shared_write_locks.discard(handle.path)
+        if handle is None or handle.closed:
+            return
+        try:
+            # Commit/close at the backend according to the handle mode.
+            if handle.mode == FileHandleMode.WRITE:
+                await self._store.close_write(handle.path, handle.context)
+            else:
+                await self._store.close_read(handle.path, handle.context)
+        except Exception as exc:
+            # Best-effort cleanup — log at debug level so commit failures are
+            # traceable rather than silently lost.
+            debug(
+                f'Store._teardown_handle: failed to close {handle.handle_id} mode={handle.mode.value} path={handle.path}: {exc}'
+            )
+        finally:
+            # Drop the registry entry and release any write lock.
+            handle.closed = True
+            self._shared_handles.pop(handle.handle_id, None)
+            if handle.mode == FileHandleMode.WRITE:
+                self._shared_write_locks.discard(handle.path)
 
     # =========================================================================
     # Private Static Methods
