@@ -35,6 +35,7 @@ import { OAUTH_ROOT_URL } from '../../config/oauth';
 import { extractPipelineEnvVars } from '../../components/canvas/util/extractEnvVars';
 import { SourceSection } from './components/SourceSection';
 import type { TaskEventMessage, TaskEventSession, TaskTimeline } from './hooks/useTaskEvents';
+import { createLiveEventStore, type LiveEventStore } from './hooks/liveEventSession';
 import type { ProjectViewMode, ViewState, TaskStatus, TraceEvent } from './types';
 
 // =============================================================================
@@ -471,6 +472,28 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 		return bySource;
 	}, [liveLogEvents, sources]);
 
+	// Live-edge fallback: hosts that have not bridged `openEventStream` across
+	// their transport (the VS Code webview is one) would otherwise pass a null
+	// session, and `useTaskEvents.ingestLive` drops every event — Trace, Errors,
+	// Status, Tokens, Flow and Log all render their empty states mid-run with no
+	// error anywhere. An in-memory store over the live events the host already
+	// delivers keeps those panes working at the live edge. Replay of recorded
+	// runs still needs the real stream.
+	//
+	// One store per stream identity, kept across renders: `SourceSection` opens
+	// the factory more than once (the export walker takes its own view), and all
+	// of them must see the same buffer.
+	const liveStoresRef = useRef(new Map<string, LiveEventStore>());
+	const liveStore = useCallback((key: string): LiveEventStore => {
+		const stores = liveStoresRef.current;
+		let store = stores.get(key);
+		if (!store) {
+			store = createLiveEventStore();
+			stores.set(key, store);
+		}
+		return store;
+	}, []);
+
 	/** Render the stacked SourceSections for one continuum. */
 	const renderSections = (runKind: 'dev' | 'deploy'): ReactNode =>
 		sources.length > 0 ? (
@@ -481,7 +504,11 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 					runKind={runKind}
 					projectId={projectId}
 					liveEvents={runKind === 'dev' ? (liveBySource.get(src.id) ?? []) : []}
-					openSession={openEventStream ? () => openEventStream({ source: src.id, runKind }) : null}
+					openSession={
+						openEventStream
+							? () => openEventStream({ source: src.id, runKind })
+							: () => liveStore(`${src.id}.${runKind}.${projectId}`).open()
+					}
 					fetchTimeline={fetchTimeline ? () => fetchTimeline({ source: src.id, runKind }) : null}
 					liveTaskStatus={runKind === 'dev' ? statusMap[src.id] : undefined}
 					componentNames={componentNames}
