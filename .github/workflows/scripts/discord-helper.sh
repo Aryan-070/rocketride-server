@@ -174,9 +174,17 @@ discord_sync_thread() {
   else
     body="{\"archived\": ${archived}, \"applied_tags\": ${tags}}"
   fi
-  curl -sS -o /dev/null --connect-timeout 10 --max-time 30 -X PATCH \
+  local status
+  status=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 30 -X PATCH \
     -H "Authorization: Bot ${DISCORD_GITHUB_BOT_TOKEN}" \
     -H "Content-Type: application/json" \
     -d "$body" \
-    "https://discord.com/api/v10/channels/${thread_id}" || true
+    "https://discord.com/api/v10/channels/${thread_id}") || status=""
+  # Best-effort: never fail the job, but surface non-2xx (e.g. missing Manage
+  # Threads → 403, bad payload → 400) so it's diagnosable in the run log.
+  case "$status" in
+    2??) : ;;
+    *) echo "::warning::Discord thread sync returned '${status:-no response}' for thread ${thread_id} (archive/tags not applied)" >&2 ;;
+  esac
+  return 0
 }
