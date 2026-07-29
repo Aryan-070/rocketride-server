@@ -21,6 +21,8 @@
 # SOFTWARE.
 # =============================================================================
 
+import re
+
 from rocketlib import IGlobalBase, warning
 from ai.common.config import Config
 
@@ -45,10 +47,18 @@ class IGlobal(IGlobalBase):
             warning(f"normalize_facts: unknown decimal_format {decimal_format!r}; using 'auto'.")
             decimal_format = 'auto'
 
+        # default_currency is written verbatim into normalized.currency, which
+        # downstream currency conversion matches on — accept only an ISO-4217
+        # shape (3 letters) so a value like "dollars" cannot poison the tag.
+        default_currency = str(raw.get('default_currency') or '').strip()
+        if default_currency and not re.fullmatch(r'[A-Za-z]{3}', default_currency):
+            warning(f'normalize_facts: default_currency {default_currency!r} is not a 3-letter ISO code; ignoring it.')
+            default_currency = ''
+
         self.config = {
             'label_field': str(raw.get('label_field') or 'label').strip() or 'label',
             'value_field': str(raw.get('value_field') or 'value').strip() or 'value',
-            'default_currency': str(raw.get('default_currency') or '').strip(),
+            'default_currency': default_currency.upper(),
             'decimal_format': decimal_format,
             # Pre-merge the built-in mapping with the user overrides once per run.
             'mapping': build_mapping(overrides),

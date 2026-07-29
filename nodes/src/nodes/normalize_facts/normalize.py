@@ -94,7 +94,10 @@ _SCALE_WORDS: Tuple[Tuple[int, str, str], ...] = (
     (1_000, 'thousands', r'thousands?'),
 )
 #: A number immediately followed by a bare/short scale suffix: ``500m``, ``1.2bn``.
-_SCALE_SUFFIX_RE = re.compile(r'(?<![a-z])\d[\d.,\s]*\s*(bn|mn|mm|[kmb])\b', re.IGNORECASE)
+#: The suffix must be adjacent to the digits — a spaced suffix is far more
+#: likely ordinary text (``Note 12 k``, ``FY 2023 M&A``) than a scale, and a
+#: wrong tag would sit in the audit record and the dedupe identity key.
+_SCALE_SUFFIX_RE = re.compile(r'(?<![a-z])\d[\d.,]*(bn|mn|mm|[kmb])\b', re.IGNORECASE)
 _SUFFIX_MAP = {
     'k': (1_000, 'thousands'),
     'm': (1_000_000, 'millions'),
@@ -365,16 +368,16 @@ def map_metric(label: Any, mapping: Dict[str, str]) -> Tuple[str, str]:
 
     Returns ``(metric, source)``. ``source`` is ``mapped`` on a hit, ``empty``
     for a blank label, or ``passthrough`` (the cleaned label, never dropped)
-    when nothing matches. Longest synonym wins on overlapping matches.
+    when nothing matches. Matching is exact on the cleaned label only: a label
+    that merely *contains* a synonym (``Deferred revenue``, ``Non-operating
+    income``) is a different line item and must not inherit its metric, so it
+    falls through to ``passthrough``.
     """
     cleaned = clean_label(label)
     if not cleaned:
         return ('', 'empty')
     if cleaned in mapping:
         return (mapping[cleaned], 'mapped')
-    for syn in sorted(mapping, key=len, reverse=True):
-        if re.search(r'\b' + re.escape(syn) + r'\b', cleaned):
-            return (mapping[syn], 'mapped')
     return (cleaned, 'passthrough')
 
 
@@ -396,6 +399,12 @@ def normalize_fact(fact: Any, cfg: Dict[str, Any]) -> Any:
 
     label_field = cfg.get('label_field') or 'label'
     value_field = cfg.get('value_field') or 'value'
+
+    # A dict carrying neither the label nor the value field is not a fact
+    # (page markers, section headers, ...) — pass it through untouched.
+    if label_field not in fact and value_field not in fact:
+        return fact
+
     decimal_format = cfg.get('decimal_format') or 'auto'
     mapping = cfg.get('mapping') or {}
     default_currency = cfg.get('default_currency') or ''
@@ -444,8 +453,11 @@ def normalize_fact(fact: Any, cfg: Dict[str, Any]) -> Any:
 
     # Mirror amount/currency to the top level so the downstream
     # currency_convert_explicit node works with its default field names — but
-    # only when those keys are absent, never overwriting upstream values.
-    if value_num is not None and 'amount' not in result:
+    # only when those keys are absent, never overwriting upstream values, and
+    # only when the fact is unscaled: the converter multiplies ``amount``
+    # as-is and never reads ``scale_factor``, so mirroring an as-stated
+    # "1,234.5 (in millions)" would convert a number off by the scale factor.
+    if value_num is not None and 'amount' not in result and scale_factor == 1:
         result['amount'] = value_num
     if currency and 'currency' not in result:
         result['currency'] = currency
@@ -465,13 +477,17 @@ def normalize_payload(payload: Any, cfg: Dict[str, Any]) -> Any:
     return payload
 
 
-def dedupe_facts(facts: List[Any]) -> List[Any]:
+def dedupe_facts(facts: List[Any], label_field: str = 'label') -> List[Any]:
     """Drop exact-duplicate normalized facts, preserving first-seen order.
 
-    Two facts are duplicates only when their identity key — metric, normalized
-    value, currency, scale factor and sign — is identical. Facts that share a
-    metric but differ in value/currency/scale are conflicts, not duplicates, and
-    are all kept. Facts with an unparseable (``None``) value are never merged.
+    Two facts are duplicates only when their identity key — cleaned raw label,
+    metric, normalized value, currency, scale factor and sign — is identical.
+    The raw label is part of the key because different line items can map to
+    the same metric (or collide in passthrough): ``Revenue`` and ``Deferred
+    revenue`` carrying the same number are distinct facts, and a genuine fact
+    must never be dropped. Facts that share a label and metric but differ in
+    value/currency/scale are conflicts, not duplicates, and are all kept.
+    Facts with an unparseable (``None``) value are never merged.
     """
     seen = set()
     out: List[Any] = []
@@ -483,6 +499,7 @@ def dedupe_facts(facts: List[Any]) -> List[Any]:
                 key: Any = ('__null__', index)
             else:
                 key = (
+                    clean_label(fact.get(label_field)),
                     n.get('metric'),
                     value,
                     n.get('currency'),

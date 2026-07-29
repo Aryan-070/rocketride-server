@@ -89,7 +89,7 @@ class IInstance(IInstanceBase):
             else:
                 extras.append(data)
 
-        deduped = dedupe_facts(facts)
+        deduped = dedupe_facts(facts, self.IGlobal.config.get('label_field') or 'label')
 
         if deduped:
             # Preserve a lone bare-dict payload's shape; otherwise emit one list.

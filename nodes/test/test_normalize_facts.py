@@ -1,20 +1,21 @@
-"""Unit tests for the normalize_facts node (normalize.py).
+"""Unit tests for the normalize_facts node.
 
-Pure-logic tests — no engine / rocketlib required. Cover number/sign parsing,
-currency and scale detection (tag-only), label->metric mapping, non-destructive
-normalization, idempotency, and cross-batch dedupe (conflicts kept, not dropped).
+Pure-logic tests for normalize.py (no engine / rocketlib required): number/sign
+parsing, currency and scale detection (tag-only), label->metric mapping,
+non-destructive normalization, idempotency, and cross-batch dedupe (conflicts
+kept, not dropped). A final section drives ``IInstance`` itself under stubbed
+engine modules to pin the lane behaviour: dict-vs-list emission shape, extras
+ordering, and the ``_emit`` type branches.
 """
 
+import importlib
 import os
 import sys
 import types
 
-# normalize.py has no rocketlib import, but stub it defensively so importing the
-# node package stays isolated from the native engine.
-rocketlib = types.ModuleType('rocketlib')
-rocketlib.debug = lambda *a, **kw: None
-sys.modules.setdefault('rocketlib', rocketlib)
-
+# normalize.py is engine-free (no rocketlib import), so it is imported directly
+# with no stubs; the IInstance section below installs (and restores) the full
+# stub set it needs.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'nodes', 'normalize_facts'))
 from normalize import (  # noqa: E402
     NODE_OP,
@@ -164,6 +165,14 @@ def test_detect_scale_bare_letter_in_prose_ignored():
     assert detect_scale('summary of the memo', '100') == (1, '', 'none')
 
 
+def test_detect_scale_spaced_suffix_in_prose_ignored():
+    # A short suffix must be ADJACENT to the digits: a spaced 'k'/'m'/'b' after
+    # a number in ordinary text is not a scale and must not tag the record.
+    assert detect_scale('FY 2023 M&A costs', '100') == (1, '', 'none')
+    assert detect_scale('Note 12 k', '100') == (1, '', 'none')
+    assert detect_scale('Section 3 b', '100') == (1, '', 'none')
+
+
 # --- label -> metric mapping ------------------------------------------------
 
 
@@ -171,8 +180,22 @@ def test_map_metric_mapped():
     assert map_metric('Revenue (in millions USD)', CFG['mapping']) == ('revenue', 'mapped')
 
 
-def test_map_metric_longest_wins():
+def test_map_metric_multiword_exact():
     assert map_metric('Diluted Earnings Per Share', CFG['mapping']) == ('diluted_eps', 'mapped')
+
+
+def test_map_metric_containing_synonym_not_mapped():
+    # A label that merely CONTAINS a synonym is a different line item and must
+    # fall through to passthrough, not inherit the synonym's metric.
+    cases = {
+        'Deferred revenue': 'deferred revenue',
+        'Non-operating income': 'non-operating income',
+        'Revenue growth %': 'revenue growth %',
+        'Total assets under management': 'total assets under management',
+        'Allowance for doubtful accounts receivable': ('allowance for doubtful accounts receivable'),
+    }
+    for label, cleaned in cases.items():
+        assert map_metric(label, CFG['mapping']) == (cleaned, 'passthrough'), label
 
 
 def test_map_metric_config_override():
@@ -200,11 +223,20 @@ def test_normalize_fact_full():
         'scale_unit': 'millions',
         'is_negative': False,
     }
-    # Top-level handoff mirror for currency_convert_explicit.
-    assert out['amount'] == 1234.5
+    # Scaled fact: the amount mirror is withheld — currency_convert_explicit
+    # multiplies `amount` as-is and never reads scale_factor, so mirroring an
+    # as-stated in-millions figure would convert a number off by 10^6.
+    assert 'amount' not in out
     assert out['currency'] == 'USD'
     # Raw fields preserved.
     assert out['value'] == '1,234.5'
+
+
+def test_normalize_fact_amount_mirrored_only_unscaled():
+    out = normalize_fact({'label': 'Weird Item', 'value': '$1,234.50'}, CFG)
+    assert out['amount'] == 1234.5  # unscaled -> safe to hand to the converter
+    scaled = normalize_fact({'label': 'Weird Item', 'value': '1,234m'}, CFG)
+    assert 'amount' not in scaled
 
 
 def test_normalize_fact_negative_gbp_scale():
@@ -277,6 +309,16 @@ def test_normalize_fact_non_dict_passthrough():
     assert normalize_fact(42, CFG) == 42
 
 
+def test_normalize_fact_non_fact_dict_passthrough():
+    # A dict with neither label_field nor value_field is not a fact and must
+    # pass through untouched — no normalized block, no provenance, same object.
+    marker = {'page': 3, 'section': 'Notes to accounts'}
+    out = normalize_fact(marker, CFG)
+    assert out is marker
+    assert 'normalized' not in out
+    assert 'provenance' not in out
+
+
 def test_normalize_fact_top_level_not_clobbered():
     out = normalize_fact({'label': 'Revenue', 'value': '100', 'amount': 999, 'currency': 'JPY'}, CFG)
     assert out['amount'] == 999
@@ -340,3 +382,196 @@ def test_dedupe_scale_differs_kept():
 def test_dedupe_non_normalized_passthrough():
     out = dedupe_facts(['a', 'a', 'b'])
     assert out == ['a', 'b']
+
+
+def test_dedupe_same_metric_different_label_kept():
+    # Regression: two line items mapping to the same metric with the same
+    # number are DIFFERENT facts — the raw label is part of the identity key.
+    a = dict(_fact('revenue', 100), label='Revenue')
+    b = dict(_fact('revenue', 100), label='Deferred revenue')
+    out = dedupe_facts([a, b])
+    assert len(out) == 2
+
+
+def test_dedupe_same_label_and_key_dropped():
+    a = dict(_fact('revenue', 100), label='Revenue')
+    b = dict(_fact('revenue', 100), label='Revenue ($ in millions)')  # cleans to 'revenue'
+    c = dict(_fact('revenue', 100), label='revenue')
+    out = dedupe_facts([a, b, c])
+    assert len(out) == 1
+
+
+def test_dedupe_end_to_end_distinct_line_items_survive():
+    # The reviewer's failure scenario, run through the full pipeline: a filing
+    # listing 'Revenue 1,234' and 'Deferred revenue 1,234' must emit two facts.
+    facts = [
+        normalize_fact({'label': 'Revenue', 'value': '1,234'}, CFG),
+        normalize_fact({'label': 'Deferred revenue', 'value': '1,234'}, CFG),
+    ]
+    out = dedupe_facts(facts)
+    assert len(out) == 2
+    assert {f['normalized']['metric'] for f in out} == {'revenue', 'deferred revenue'}
+
+
+# --- IInstance lane behaviour ------------------------------------------------
+#
+# Import nodes.normalize_facts.IInstance under controlled stubs (pattern from
+# test_tool_deepl.py): snapshot every sys.modules name we touch, force-install
+# our stubs, evict cached package modules so the import binds the stubs, keep a
+# direct module reference, then restore sys.modules exactly.
+
+
+class _FakeAnswer:
+    """Minimal stand-in for ai.common.schema.Answer as IInstance uses it."""
+
+    def __init__(self, expectJson=False):
+        self.expectJson = expectJson
+        self._data = None
+
+    def setAnswer(self, data):
+        self._data = data
+
+    def getJson(self):
+        if isinstance(self._data, (dict, list)):
+            return self._data
+        raise ValueError('answer payload is not JSON')
+
+    def getText(self):
+        return self._data if isinstance(self._data, str) else str(self._data)
+
+
+def _build_instance_stubs():
+    rocketlib_stub = types.ModuleType('rocketlib')
+    rocketlib_stub.Entry = object
+    rocketlib_stub.IInstanceBase = object
+    rocketlib_stub.IGlobalBase = object
+    rocketlib_stub.warning = lambda *a, **kw: None
+    rocketlib_stub.debug = lambda *a, **kw: None
+    ai_stub = types.ModuleType('ai')
+    ai_common = types.ModuleType('ai.common')
+    ai_schema = types.ModuleType('ai.common.schema')
+    ai_schema.Answer = _FakeAnswer
+    ai_config = types.ModuleType('ai.common.config')
+    ai_config.Config = types.SimpleNamespace(getNodeConfig=lambda *a, **kw: {})
+    depends_stub = types.ModuleType('depends')
+    depends_stub.depends = lambda *a, **kw: None
+    return {
+        'rocketlib': rocketlib_stub,
+        'ai': ai_stub,
+        'ai.common': ai_common,
+        'ai.common.schema': ai_schema,
+        'ai.common.config': ai_config,
+        'depends': depends_stub,
+    }
+
+
+_PKG_MODULES = (
+    'nodes.normalize_facts.IInstance',
+    'nodes.normalize_facts.IGlobal',
+    'nodes.normalize_facts.normalize',
+    'nodes.normalize_facts',
+)
+_instance_stubs = _build_instance_stubs()
+_touched_names = list(_instance_stubs) + list(_PKG_MODULES)
+_MODULE_ABSENT = object()
+_saved_modules = {name: sys.modules.get(name, _MODULE_ABSENT) for name in _touched_names}
+_src_dir = os.path.join(os.path.dirname(__file__), '..', 'src')
+if _src_dir not in sys.path:
+    sys.path.insert(0, _src_dir)
+
+try:
+    for _name, _stub in _instance_stubs.items():
+        sys.modules[_name] = _stub
+    for _name in _PKG_MODULES:
+        sys.modules.pop(_name, None)
+    _II = importlib.import_module('nodes.normalize_facts.IInstance')
+finally:
+    for _name in _touched_names:
+        _prev = _saved_modules[_name]
+        if _prev is _MODULE_ABSENT:
+            sys.modules.pop(_name, None)
+        else:
+            sys.modules[_name] = _prev
+
+
+def _make_instance():
+    """Build an IInstance wired to capture stubs; returns (inst, emitted, prevented)."""
+    inst = _II.IInstance()
+    inst.IGlobal = types.SimpleNamespace(config=dict(CFG))
+    emitted = []
+    prevented = []
+    inst.instance = types.SimpleNamespace(writeAnswers=emitted.append)
+    inst.preventDefault = lambda: prevented.append(True)
+    inst.open(object())
+    return inst, emitted, prevented
+
+
+def _answer(payload):
+    a = _FakeAnswer(expectJson=isinstance(payload, (dict, list)))
+    a.setAnswer(payload)
+    return a
+
+
+def test_instance_single_fact_keeps_dict_shape():
+    inst, emitted, prevented = _make_instance()
+    inst.writeAnswers(_answer({'label': 'Revenue', 'value': '100'}))
+    assert prevented  # the default forward must be suppressed
+    inst.closing()
+    assert len(emitted) == 1
+    out = emitted[0]
+    assert out.expectJson is True
+    payload = out.getJson()
+    assert isinstance(payload, dict)  # lone bare dict keeps its shape
+    assert payload['normalized']['value_normalized'] == 100
+
+
+def test_instance_multiple_answers_collapse_to_one_list():
+    inst, emitted, _ = _make_instance()
+    inst.writeAnswers(_answer({'label': 'Revenue', 'value': '100'}))
+    inst.writeAnswers(_answer({'label': 'Inventory', 'value': '7'}))
+    inst.closing()
+    assert len(emitted) == 1
+    payload = emitted[0].getJson()
+    assert isinstance(payload, list) and len(payload) == 2
+
+
+def test_instance_distinct_line_items_not_merged():
+    # The review scenario end-to-end through the lane: same number, different
+    # line items -> both facts must survive.
+    inst, emitted, _ = _make_instance()
+    inst.writeAnswers(_answer({'label': 'Revenue', 'value': '1,234'}))
+    inst.writeAnswers(_answer({'label': 'Deferred revenue', 'value': '1,234'}))
+    inst.closing()
+    payload = emitted[0].getJson()
+    assert len(payload) == 2
+
+
+def test_instance_exact_duplicates_merge_to_bare_dict():
+    inst, emitted, _ = _make_instance()
+    inst.writeAnswers(_answer({'label': 'Revenue', 'value': '100'}))
+    inst.writeAnswers(_answer({'label': 'Revenue', 'value': '100'}))
+    inst.closing()
+    assert len(emitted) == 1
+    assert isinstance(emitted[0].getJson(), dict)  # deduped to one -> dict shape
+
+
+def test_instance_extras_emitted_after_facts_as_text():
+    inst, emitted, _ = _make_instance()
+    inst.writeAnswers(_answer('a plain note'))
+    inst.writeAnswers(_answer({'label': 'Revenue', 'value': '100'}))
+    inst.closing()
+    assert len(emitted) == 2
+    # Facts first (as a list, because extras exist), then the text verbatim.
+    assert isinstance(emitted[0].getJson(), list)
+    assert emitted[1].expectJson is False
+    assert emitted[1].getText() == 'a plain note'
+
+
+def test_instance_scalar_in_list_emitted_as_text():
+    inst, emitted, _ = _make_instance()
+    inst.writeAnswers(_answer([{'label': 'Revenue', 'value': '100'}, 42]))
+    inst.closing()
+    assert len(emitted) == 2
+    assert isinstance(emitted[0].getJson(), list)  # saw_list -> list shape kept
+    assert emitted[1].expectJson is False
+    assert emitted[1].getText() == '42'  # bare scalar rendered as text
