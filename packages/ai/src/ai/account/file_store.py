@@ -105,6 +105,42 @@ def _system_tree(rest: str) -> 'Optional[str]':
     return first if first in SYSTEM_TREES else None
 
 
+def normalize_path(path: str) -> str:
+    """Validate and normalize a user-provided wire path — THE normalization.
+
+    Every consumer that makes a decision about a wire path (the resolver
+    below via ``FileStore._validate_path``, cmd_store's scope-root filter)
+    must run this SAME routine first, so no two components can ever disagree
+    about which location a spelling addresses ('@//User', '@/./User' and
+    '\\@\\User' all normalize to '@/User' — deciding on the raw spelling
+    while resolving the normalized one is a filter bypass).
+
+    Rules: backslashes become '/', leading slashes drop, '..' and control /
+    reserved characters raise, empty and '.' segments collapse away.
+
+    Raises:
+        ValueError: On path traversal or invalid characters.
+    """
+    path = path.replace('\\', '/')
+
+    if path.startswith('/'):
+        path = path.lstrip('/')
+
+    parts = path.split('/')
+    if '..' in parts:
+        raise ValueError(f'Path traversal not allowed: {path}')
+
+    for part in parts:
+        if part and any(c in _INVALID_SEGMENT_CHARS or ord(c) < 0x20 for c in part):
+            raise ValueError(f'Path contains invalid characters: {path}')
+
+    normalized = str(PurePosixPath(path)) if path else ''
+    if normalized == '.':
+        normalized = ''
+
+    return normalized
+
+
 def parse_scope(normalized: str) -> 'tuple[str, Optional[str], str]':
     """Split a NORMALIZED path into (scope_kind, scope_ref, rest).
 
@@ -163,12 +199,16 @@ def parse_scope(normalized: str) -> 'tuple[str, Optional[str], str]':
             # @/User/@/Org implicit self — everything after is already path.
             kind, ref, rest = child.lower(), None, '/'.join(parts[2:])
 
-    # Reserve the '=' sigil at the top of every scope: a real entry named
-    # '=x' would shadow (or be shadowed by) an id reference and become
-    # unaddressable/ambiguous. Denied on creation => never listed either.
+    # Reserve the '=' and '@' sigils at the top of every scope: a real entry
+    # named '=x' would shadow (or be shadowed by) an id reference and become
+    # unaddressable/ambiguous, and '@*' is grammar room (a plain path can
+    # never start with '@' — it parses as scope grammar above — but a scoped
+    # rest could smuggle one in). Denied on creation => never listed either.
     first = rest.split('/', 1)[0] if rest else ''
     if first.startswith('='):
         raise ValueError("Names starting with '=' are reserved for id references")
+    if first.startswith('@'):
+        raise ValueError("Names starting with '@' are reserved (scope grammar)")
     return (kind, ref, rest)
 
 
@@ -308,8 +348,16 @@ def resolve_scope(
     if kind == 'own' or (kind == 'user' and ref is None):
         if is_sys_admin:
             return (f'users/{client_id}/files', rest)
-        perms = resolve_task_permissions(account_info, account_info.defaultTeam)
-        if _DEFAULT_PERMISSION not in perms:
+        # The caller's OWN tree must not hinge on the defaultTeam pointer —
+        # an unset or stale defaultTeam would deny a user their own storage.
+        # The file-storage permission is granted when ANY membership carries
+        # it (org.admin implies it via full team permissions).
+        org = account_info.organization if isinstance(account_info.organization, dict) else {}
+        if not any(
+            _DEFAULT_PERMISSION in resolve_task_permissions(account_info, team['id'])
+            for team in org.get('teams', [])
+            if team.get('id')
+        ):
             raise PermissionError(f'Permission {_DEFAULT_PERMISSION!r} denied')
         return (f'users/{client_id}/files', rest)
 
@@ -782,10 +830,13 @@ class FileStore:
         if not validated:
             raise StorageError('rmdir requires a non-empty path')
 
-        # Scope-root guard: '@/Team/<ref>' / '@/Org' as the rmdir target
-        # would wipe the whole team/org file area — reject like the user root.
+        # Scope-root guard: NO root — '@/Team/<ref>', '@/Org', or the
+        # caller's own account root — may be the rmdir target; each would
+        # wipe a whole file area. Universal (not kind-conditional) like the
+        # delete/rename guards, so it holds even if a future normalization
+        # change lets an own-root spelling slip past the empty-path check.
         _full, kind, rest = self._resolve(validated)
-        if kind != 'own' and not rest:
+        if not rest:
             raise StorageError('rmdir cannot target a scope root')
 
         full_prefix = self._full_path(validated.rstrip('/') + '/')
@@ -980,25 +1031,8 @@ class FileStore:
 
     @staticmethod
     def _validate_path(path: str) -> str:
-        """Validate and normalize a user-provided path."""
-        path = path.replace('\\', '/')
-
-        if path.startswith('/'):
-            path = path.lstrip('/')
-
-        parts = path.split('/')
-        if '..' in parts:
-            raise ValueError(f'Path traversal not allowed: {path}')
-
-        for part in parts:
-            if part and any(c in _INVALID_SEGMENT_CHARS or ord(c) < 0x20 for c in part):
-                raise ValueError(f'Path contains invalid characters: {path}')
-
-        normalized = str(PurePosixPath(path)) if path else ''
-        if normalized == '.':
-            normalized = ''
-
-        return normalized
+        """Validate and normalize a user-provided path (module normalize_path)."""
+        return normalize_path(path)
 
     async def get_url(self, path: str, expires_in: int = 3600, download_name: Optional[str] = None) -> str:
         """

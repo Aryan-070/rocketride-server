@@ -33,6 +33,7 @@ task lifecycle.
 """
 
 from typing import TYPE_CHECKING, Dict, Any
+from ai.account.file_store import SYSTEM_TREES, normalize_path
 from ai.common.dap import DAPConn, TransportBase
 
 if TYPE_CHECKING:
@@ -326,13 +327,17 @@ class StoreCommands(DAPConn):
         Returns:
             DAP response with directory listing.
         """
-        path = (args.get('path', '') or '').strip('/')
+        # ONE normalization (the store's own) drives BOTH the scope-root
+        # filter decision and the store resolution below — deciding on a raw
+        # spelling while resolving the normalized one would let '@//User'-
+        # style paths reach the user root with the system trees unfiltered.
+        path = normalize_path(args.get('path', '') or '')
 
         # The virtual mounts list from the session, not storage.
         if path in ('@', '@/Team'):
             return self.build_response(request, body=self._list_scope_mount(path))
 
-        result = await self._get_file_store().list_dir(args.get('path', ''))
+        result = await self._get_file_store().list_dir(path)
 
         if self._is_scope_root(path):
             entries = result['entries']
@@ -342,8 +347,6 @@ class StoreCommands(DAPConn):
             # must not see raw.
             sys_perms = getattr(self._account_info, 'sysPermissions', None) or []
             if 'sys.admin' not in sys_perms:
-                from ai.account.file_store import SYSTEM_TREES
-
                 entries = [e for e in entries if e['name'] not in SYSTEM_TREES]
             # Reserved sigils: physical '@*' / '=*' names at a scope root
             # predate the grammar, cannot be created or addressed anymore —

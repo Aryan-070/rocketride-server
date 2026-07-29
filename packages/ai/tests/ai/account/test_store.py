@@ -560,10 +560,14 @@ class TestStoreFactory:
         assert isinstance(store._store, FilesystemStore)
         assert store._store._root_path == tmp_path
 
-    def test_create_with_default_url(self):
+    def test_create_with_default_url(self, monkeypatch):
         """Test creating store with default URL."""
-        # Clear environment
-        os.environ.pop('RR_STORE_URL', None)
+        # Clear BOTH names: with a lingering legacy STORE_URL and no
+        # RR_STORE_URL, create() hard-fails by design (stale-deployment
+        # guard) — this test asserts the default, not that migration error.
+        # monkeypatch restores the caller's environment afterwards.
+        monkeypatch.delenv('RR_STORE_URL', raising=False)
+        monkeypatch.delenv('STORE_URL', raising=False)
 
         store = Store.create()
 

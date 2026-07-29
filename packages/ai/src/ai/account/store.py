@@ -15,6 +15,7 @@ import io
 import os
 import re
 import tempfile
+import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
@@ -453,6 +454,12 @@ class Store:
     # constructor stays reachable for backend-specific tests only.
     _instance: 'Optional[Store]' = None
 
+    # Guards lazy creation: two threads racing instance() (e.g. node init in
+    # the engine subprocess via engine_file_store) must never each build a
+    # Store — the loser's copy would carry its own _shared_handles /
+    # _shared_write_locks and silently defeat cross-instance write exclusion.
+    _instance_lock = threading.Lock()
+
     def __init__(self, store: IStore):
         """
         Initialize Store wrapper with an IStore backend.
@@ -489,8 +496,13 @@ class Store:
         the engine subprocess use this — the subprocess inherits the env, so
         the SAME mechanism works on both sides of the process boundary.
         """
+        # Double-checked locking: the fast path stays lock-free once built;
+        # the lock only serializes first-use creation so exactly one Store
+        # (and one shared handle/lock registry) ever exists per process.
         if cls._instance is None:
-            cls._instance = cls.create()
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = cls.create()
         return cls._instance
 
     @classmethod

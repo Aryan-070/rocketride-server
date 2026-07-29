@@ -226,6 +226,23 @@ def test_build_task_deploy_without_team_refuses(monkeypatch, tmp_path):
         Task._build_task(t, {'components': []})
 
 
+def test_build_task_dev_without_client_gets_no_anchor(monkeypatch, tmp_path):
+    """An anonymous dev run (client_id='' — OSS/standalone launch) carries NO
+    anchor rather than failing the launch: identity.userId rides empty too,
+    so the subprocess's engine_file_store() yields None and the storage
+    tools disable themselves. The pin: the shared 'users//files' prefix must
+    never be composed as an anchor.
+    """
+    monkeypatch.setattr(sys, 'executable', str(tmp_path / 'engine.exe'))
+    monkeypatch.setattr(os, 'makedirs', lambda p, exist_ok=False: None)
+
+    pipeline = {'source': 'src', 'components': []}
+    t = _task(pipeline=pipeline)
+    t.client_id = ''
+    config = Task._build_task(t, pipeline)
+    assert config['storage'] == {'root': ''}
+
+
 def test_build_task_supplies_pipeline_version_default(monkeypatch, tmp_path):
     """An absent ``version`` field defaults to 1."""
     monkeypatch.setattr(sys, 'executable', str(tmp_path / 'engine.exe'))

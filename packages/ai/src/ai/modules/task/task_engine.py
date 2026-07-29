@@ -488,6 +488,13 @@ class Task(DAPBase):
             if not self.team_id:
                 raise ValueError('deploy runs require a team_id for their storage anchor')
             return validate_storage_root(f'teams/{self.team_id}/files/tasks/{self.project_id}')
+        # Anonymous dev runs (client_id='' — OSS/standalone launches) carry
+        # NO anchor instead of failing the launch: identity.userId rides
+        # empty too, so engine_file_store() yields None and the storage
+        # tools disable themselves — the same degradable posture as the
+        # run-log writer ('users//files' must never be composed).
+        if not self.client_id:
+            return ''
         return validate_storage_root(f'users/{self.client_id}/files')
 
     async def _write_task_file(self, pipeline: Dict[str, Any]) -> str:

@@ -30,7 +30,10 @@ def _patch_store_file_store(monkeypatch, fs):
     """
     from ai.account.store import Store
 
-    monkeypatch.setattr(Store, 'file_store', classmethod(lambda cls, ctx, client_id=None: fs))
+    # Mirrors the real classmethod signature (ctx, client_id=None, root=None)
+    # so a call site passing the engine storage anchor exercises the handler
+    # instead of dying in the patch with an opaque TypeError.
+    monkeypatch.setattr(Store, 'file_store', classmethod(lambda cls, ctx, client_id=None, root=None: fs))
 
 
 # ---------------------------------------------------------------------------
@@ -603,7 +606,22 @@ async def test_listing_hides_system_trees_from_ordinary_sessions(monkeypatch):
     _patch_store_file_store(monkeypatch, fs)
 
     conn = _make_conn(account_info=_org_account(), server=MagicMock())
-    for path in ('', '@/User', '@/Org', '@/Team/=team-1', '@/User/=other-user'):
+    # The tail of the matrix is the normalization-bypass family: spellings
+    # that reach a scope root only AFTER normalize_path collapses them
+    # ('@//User', '@/./User', '\\@\\User', '/'). The filter and the store
+    # must judge the SAME normalized path — filtering on the raw spelling
+    # would let these list the user root with the system trees visible.
+    for path in (
+        '',
+        '@/User',
+        '@/Org',
+        '@/Team/=team-1',
+        '@/User/=other-user',
+        '@//User',
+        '@/./User',
+        '\\@\\User',
+        '/',
+    ):
         response = await StoreCommands._store_fs_list_dir(conn, {}, {'path': path})
         names = [e['name'] for e in response['body']['entries']]
         assert '.logs' not in names and '.deployments' not in names

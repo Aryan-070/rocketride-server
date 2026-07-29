@@ -530,6 +530,20 @@ class TestScopeRootGuards:
         with pytest.raises(StorageError, match='scope root'):
             await fs.delete('@/Org')
 
+    @pytest.mark.asyncio
+    async def test_own_root_rejected(self, store):
+        # The caller's OWN account root is a root too — this is the case the
+        # UNIVERSAL (`not rest`, not kind-conditional) guard exists for:
+        # delete('')/rename('') would otherwise be whole-account operations.
+        # Reverting the guard to `kind != 'own'` must turn this red.
+        fs = _fs(store, _account())
+        with pytest.raises(StorageError, match='scope root'):
+            await fs.delete('')
+        with pytest.raises(StorageError, match='scope root'):
+            await fs.rename('', 'backup')
+        with pytest.raises(StorageError, match='scope root'):
+            await fs.rename('somedir', '')
+
 
 class TestSharedWriteLocks:
     """Two users' instances exclude each other on one physical team file."""

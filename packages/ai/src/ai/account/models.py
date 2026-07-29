@@ -168,7 +168,9 @@ class RequestContext:
 
     Attributes:
         account_info: The authenticated user's AccountInfo.  None only for
-                      pre-auth commands (``on_auth``).
+                      pre-auth commands (``on_auth``) and for engine-subprocess
+                      contexts (``RequestContext.engine()`` — no account exists
+                      in that process; the storage layer sandboxes it instead).
         conn_id:      Stable identifier for the originating client connection,
                       e.g. ``"orch-1:4527"`` (pod mode) or ``"conn-5"`` (OSS).
                       Used to scope and clean up per-connection resources.
