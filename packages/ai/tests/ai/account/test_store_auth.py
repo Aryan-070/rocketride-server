@@ -37,6 +37,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from ai.account import file_store
 from ai.account.file_store import parse_scope
 from ai.account.models import RequestContext
 from ai.account.store import Store, StorageError
@@ -362,9 +363,48 @@ class TestSystemTrees:
     @pytest.mark.asyncio
     async def test_internal_identity_writes_logs(self, store):
         # The internal identity (run-log writer, domain APIs) passes through.
+        # This is ALSO the ordering pin: internal resolves BEFORE the
+        # system-tree gate by design — reordering resolve_scope turns this red.
         fs = store._file_store(RequestContext.internal('run-log'), client_id='user-1')
         await fs.write('.logs/p1/seg.jsonl', b'{}')
         await fs.write('@/Team/=team-1/.logs/p1/seg.jsonl', b'{}')
+
+
+class TestSysAdminCrossingAudit:
+    """sys.admin ``=id`` resolutions are the ONE place resolve_scope crosses
+    the boundary instead of enforcing it — every crossing must leave an audit
+    record, while member resolutions and the wire response stay
+    indistinguishable from ordinary resolves.
+    """
+
+    @pytest.fixture
+    def audited(self, monkeypatch):
+        # Record every _audit_crossing call — the trace itself goes through
+        # rocketlib.debug (native), so we pin the hook, not the sink.
+        calls = []
+        monkeypatch.setattr(
+            file_store, '_audit_crossing', lambda ctx, client_id, target: calls.append((client_id, target))
+        )
+        return calls
+
+    def test_foreign_team_id_crossing_is_audited(self, store, audited):
+        fs = _fs(store, _account(sys_perms=['sys.admin']))
+        assert fs._full_path('@/Team/=team-9/x') == 'teams/team-9/files/x'
+        assert ('user-1', 'teams/team-9') in audited
+
+    def test_foreign_org_and_user_crossings_are_audited(self, store, audited):
+        fs = _fs(store, _account(sys_perms=['sys.admin']))
+        fs._full_path('@/Org/=org-9/x')
+        fs._full_path('@/User/=user-9/x')
+        targets = [t for _, t in audited]
+        assert 'orgs/org-9' in targets and 'users/user-9' in targets
+
+    def test_member_id_resolution_is_not_audited(self, store, audited):
+        # A sys.admin resolving a team they are a MEMBER of crosses nothing —
+        # the audit channel records crossings, not routine member access.
+        fs = _fs(store, _account(sys_perms=['sys.admin']))
+        assert fs._full_path('@/Team/=team-1/x') == 'teams/team-1/files/x'
+        assert audited == []
 
 
 # ============================================================================

@@ -99,6 +99,20 @@ _DEFAULT_PERMISSION = 'task.store'
 _DENIED = 'Access denied for scoped path'
 
 
+def _audit_crossing(ctx: 'RequestContext', client_id: str, target: str) -> None:
+    """Record a sys.admin ``=id`` cross-boundary storage resolution.
+
+    These are the ONLY resolutions where the storage boundary is crossed
+    rather than enforced (the platform support capability), so each one is
+    traced server-side with actor, connection, and target scope. Trace-only —
+    the wire response never distinguishes a crossing from an ordinary resolve,
+    preserving the uniform-denial / no-oracle posture.
+    """
+    from rocketlib import debug
+
+    debug(f'AUDIT storage crossing (sys.admin): client={client_id} conn={getattr(ctx, "conn_id", None)} -> {target}')
+
+
 def _system_tree(rest: str) -> 'Optional[str]':
     """Return the system-tree name when ``rest`` enters one, else None."""
     first = rest.split('/', 1)[0] if rest else ''
@@ -328,6 +342,10 @@ def resolve_scope(
     is_sys_admin = 'sys.admin' in sys_perms
 
     # -- Internal subsystems: mechanical, ids only, no checks ----------------
+    # Deliberately BEFORE the system-tree gate below (intent, not
+    # fall-through): the run-log writer and the domain APIs (rrext_log,
+    # rrext_deploy) write .logs/.deployments through exactly this identity —
+    # pinned by test_internal_identity_writes_logs.
     if is_internal:
         if kind == 'own' or (kind == 'user' and ref is None):
             return (f'users/{client_id}/files', rest)
@@ -368,6 +386,7 @@ def resolve_scope(
             value = _split_ref(ref)[1]  # parse guarantees the '=' form here
             if value != org.get('id'):
                 if is_sys_admin:
+                    _audit_crossing(ctx, client_id, f'orgs/{value}')
                     return (f'orgs/{value}/files', rest)
                 raise PermissionError(_DENIED)
         if not org.get('id'):
@@ -382,11 +401,17 @@ def resolve_scope(
     if kind == 'user':
         if not is_sys_admin:
             raise PermissionError(_DENIED)
+        _audit_crossing(ctx, client_id, f'users/{value}')
         return (f'users/{value}/files', rest)
 
     # -- @/Team -----------------------------------------------------------------
     if is_id:
-        if value in _team_ids(account_info) or is_sys_admin:
+        if value in _team_ids(account_info):
+            team_id = value
+        elif is_sys_admin:
+            # A team the caller is NOT a member of — a boundary crossing,
+            # unlike the member resolution above (which crosses nothing).
+            _audit_crossing(ctx, client_id, f'teams/{value}')
             team_id = value
         else:
             raise PermissionError(_DENIED)

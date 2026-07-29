@@ -272,6 +272,12 @@ def resolve_task_permissions(account_info: AccountInfo, task_team_id: str) -> li
     """
     Return the caller's effective permissions for a task owned by the given team.
 
+    CONTRACT — RETURNS ``[]`` on no membership (never raises). Its sibling
+    ``resolve_team_permissions`` RAISES for the same condition; the two sit one
+    line apart with opposite failure modes, so read the name at each call site.
+    A rename to carry the difference (e.g. ``get_*`` vs ``require_*``) is
+    deferred to the feat/alb dedupe, where both branches touch these functions.
+
     Unlike ``resolve_team_permissions`` this does **not** raise when the caller
     has no relationship to the team — it returns an empty list instead,
     signalling "no access".
@@ -312,6 +318,12 @@ def resolve_team_permissions(account_info: AccountInfo, team_id: str) -> list[st
     """
     Return caller's permissions for a specific team.
     Expands org.admin to the full permission set.
+
+    CONTRACT — RAISES ``PermissionError`` on no membership. Its sibling
+    ``resolve_task_permissions`` RETURNS ``[]`` for the same condition; the two
+    sit one line apart with opposite failure modes, so read the name at each
+    call site. A rename to carry the difference (e.g. ``get_*`` vs
+    ``require_*``) is deferred to the feat/alb dedupe.
 
     Raises PermissionError if the user has no membership in the given team.
 
