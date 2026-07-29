@@ -40,7 +40,9 @@ auto &minidumpLifetime() noexcept {
 void minidumpRegister() noexcept {
     // Idempotent: restarting the handler per task would leak handler processes.
     if (!internal::minidumpLifetime()) internal::minidumpLifetime().emplace();
+}
 
+void minidumpSweep() noexcept {
     internal::sweepPreviousDumps(internal::crashDbDir());
 }
 

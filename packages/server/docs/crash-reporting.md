@@ -18,9 +18,12 @@ platform, so one symbolication workflow covers all of them.
 
 Because Crashpad writes the dump *after* the crashing process is gone, the dump
 first lands in a private Crashpad database under the system temp dir, named
-`rocketride-crashdb-<uid>-<exe-hash>`. On the **next engine startup** it is moved
-into the configured crash-dump location and the monitor is notified. So crash
-notification for Linux/macOS is delivered one run later, not at crash time.
+`rocketride-crashdb-<uid>-<exe-hash>`. It is moved into the configured crash-dump
+location, and the monitor notified, on the **next task run** -- not at process
+start. Recovery has to wait for the monitor to install its callback and for the
+crash-dump location to be pointed at the task's log directory; both happen well
+after the crash handler itself starts. So crash notification for Linux/macOS is
+delivered one run later, not at crash time.
 
 The database directory is created `0700` and re-checked on every start. If it
 already exists but is a symlink, is owned by another user, or grants group or

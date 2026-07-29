@@ -99,7 +99,7 @@ TEST_CASE("crashpad") {
         REQUIRE(WIFSIGNALED(status));
 
         // The parent's sweep relocates the child's dump into crashDumpLocation().
-        plat::minidumpRegister();
+        plat::minidumpSweep();
 
         REQUIRE(dumpsIn(crashDir).size() > before.size());
     }
@@ -110,7 +110,7 @@ TEST_CASE("crashpad") {
         int status = runCrashChild("clean");
         REQUIRE(WIFEXITED(status));
 
-        plat::minidumpRegister();
+        plat::minidumpSweep();
 
         REQUIRE(dumpsIn(crashDir) == before);
     }

@@ -28,8 +28,9 @@
 
 namespace ap::plat {
 
-// Start the handler once and sweep any previous run's dumps into
-// crashDumpLocation(). Idempotent.
+// Start the handler once. Idempotent. Recovering a previous run's dumps is a
+// separate step that has to happen later -- see plat::minidumpSweep() in
+// plat/init.h.
 void minidumpRegister() noexcept;
 
 // Releases client-side state only; the handler process lives until exit.
