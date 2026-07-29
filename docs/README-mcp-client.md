@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/main/images/banner-mcp.png" alt="RocketRide MCP Server" width="900">
+  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/banner-mcp.png" alt="RocketRide MCP Server" width="900">
 </p>
 
 <p align="center">
@@ -21,6 +21,12 @@
 
 ```bash
 pip install rocketride-mcp
+```
+
+Or run it without installing:
+
+```bash
+uvx rocketride-mcp
 ```
 
 Configure your MCP client to use the server (see examples below), then ask your AI assistant to process files through your running RocketRide pipelines.
@@ -47,14 +53,14 @@ Running pipelines are discovered automatically - start a pipeline in VS Code or 
 
 ## What is RocketRide?
 
-[RocketRide](https://rocketride.org) is an open-source, developer-native AI pipeline platform.
-It lets you build, debug, and deploy production AI workflows without leaving your IDE --
+[RocketRide](https://rocketride.org) is an open source, developer-native AI pipeline platform.
+It lets you build, debug, and deploy production AI workflows without leaving your IDE,
 using a visual drag-and-drop canvas or code-first with TypeScript and Python SDKs.
 
-- **50+ ready-to-use nodes** - 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, and more
-- **High-performance C++ engine** - production-grade speed and reliability
-- **Deploy anywhere** - locally, on-premises, or self-hosted with Docker
-- **MIT licensed** - fully open-source, OSI-compliant
+- **85+ pipeline nodes**: 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, and more
+- **High-performance C++ engine**: multithreaded, production-grade speed and reliability
+- **Two ways to run**: [RocketRide Cloud](https://cloud.rocketride.ai/) (managed hosting, now live), or self-hosted with Docker, on-prem, or local, free
+- **MIT licensed**: fully open source, OSI-compliant, no lock-in
 
 ## Installation
 
@@ -65,6 +71,10 @@ pip install rocketride-mcp
 Requires Python 3.10+ and `rocketride` >= 1.0.4.
 
 ## Client Configuration
+
+The examples below point at a local engine (`ws://localhost:5565`). To use [RocketRide Cloud](https://cloud.rocketride.ai/) instead, set `ROCKETRIDE_URI` to `https://api.rocketride.ai` and use your Cloud API token as `ROCKETRIDE_AUTH`.
+
+If you prefer not to install the package, replace `"command": "rocketride-mcp"` with `"command": "uvx"` and `"args": ["rocketride-mcp"]` in the snippets below.
 
 ### Claude Desktop
 
@@ -259,7 +269,7 @@ Set these environment variables (required; no config file is used):
 
 | Variable            | Required | Description                                                         |
 | ------------------- | -------- | ------------------------------------------------------------------- |
-| `ROCKETRIDE_URI`    | Yes      | WebSocket URI of the RocketRide engine (e.g. `ws://localhost:5565`) |
+| `ROCKETRIDE_URI`    | Yes      | Engine URI: `ws://localhost:5565` for a local engine, `https://api.rocketride.ai` for RocketRide Cloud |
 | `ROCKETRIDE_AUTH`   | Yes\*    | API authentication token                                            |
 | `ROCKETRIDE_APIKEY` | Yes\*    | Alternative to `ROCKETRIDE_AUTH`                                    |
 | `MCP_API_KEY`       | No       | Bearer token for SSE server authentication                          |
@@ -269,6 +279,7 @@ Set these environment variables (required; no config file is used):
 ## Links
 
 - [Documentation](https://docs.rocketride.org/)
+- [RocketRide Cloud](https://cloud.rocketride.ai/)
 - [GitHub](https://github.com/rocketride-org/rocketride-server)
 - [Discord](https://discord.gg/PMXrtenMsY)
 - [Contributing](https://github.com/rocketride-org/rocketride-server/blob/develop/CONTRIBUTING.md)
