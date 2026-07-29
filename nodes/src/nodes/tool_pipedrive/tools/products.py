@@ -27,7 +27,7 @@
 
 from __future__ import annotations
 
-from ..pipedrive_client import clean_deal, clean_file, clean_product, clean_search_item, paginated
+from ..pipedrive_client import clean_deal, clean_file, clean_product, clean_search_item, paginated_v2
 from ..tool_groups import pipedrive_tool
 from ._base import (
     ARR,
@@ -37,11 +37,12 @@ from ._base import (
     INT,
     NUM,
     PAGING,
+    PAGING_V2,
     STR,
     PipedriveToolsBase,
     args_of,
     body_from,
-    paging_params,
+    paging_params_v2,
     params_from,
     passthrough,
     require_id,
@@ -129,18 +130,19 @@ class ProductsMixin(PipedriveToolsBase):
             fields=STR('Comma-separated fields to search in: code, custom_fields, name.'),
             exact_match=BOOL('Require an exact, case-sensitive match.'),
             include_fields=STR('Extra fields to include, e.g. "product.price".'),
-            **PAGING(),
+            **PAGING_V2(),
         ),
         description='Search products by name, code or custom field values.',
     )
     def product_search(self, args):
+        # v2: Pipedrive retired /api/v1/products/search (404 "Unknown method .").
         args = args_of(args)
-        params = paging_params(args)
+        params = paging_params_v2(args)
         params['term'] = require_text(args, 'term', 'product_search')
         params.update(params_from(args, ('fields', 'exact_match', 'include_fields')))
-        envelope = self._call_envelope('GET', '/products/search', params=params)
+        envelope = self._call_envelope_v2('GET', '/products/search', params=params)
         items = ((envelope.get('data') or {}).get('items')) or []
-        return paginated(envelope, [clean_search_item(i) for i in items])
+        return paginated_v2(envelope, [clean_search_item(i) for i in items])
 
     @pipedrive_tool(
         group='products',

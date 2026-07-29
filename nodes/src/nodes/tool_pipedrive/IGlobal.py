@@ -35,7 +35,7 @@ from __future__ import annotations
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 
-from .pipedrive_client import BASE_URL, base_url_for
+from .pipedrive_client import BASE_URL, BASE_URL_V2, base_url_for, base_url_v2_for
 from .tool_groups import (
     ALL_GROUPS,
     DEFAULT_GROUPS,
@@ -52,6 +52,8 @@ class IGlobal(IGlobalBase):
     token: str = ''
     company_domain: str = ''
     base_url: str = BASE_URL
+    #: Search tools only — Pipedrive retired the v1 search routes.
+    base_url_v2: str = BASE_URL_V2
     read_only: bool = False
     tool_groups: frozenset = DEFAULT_GROUPS
     allow_raw_request: bool = True
@@ -64,6 +66,7 @@ class IGlobal(IGlobalBase):
         self.token = str((cfg.get('apiToken') or '')).strip()
         self.company_domain = str((cfg.get('companyDomain') or '')).strip()
         self.base_url = base_url_for(self.company_domain)
+        self.base_url_v2 = base_url_v2_for(self.company_domain)
         self.read_only = bool(cfg.get('readOnly', False))
         self.tool_groups = normalize_groups(cfg.get('toolGroups'))
         self.allow_raw_request = bool(cfg.get('allowRawRequest', True))
@@ -93,6 +96,7 @@ class IGlobal(IGlobalBase):
         self.token = ''
         self.company_domain = ''
         self.base_url = BASE_URL
+        self.base_url_v2 = BASE_URL_V2
         self.read_only = False
         self.tool_groups = DEFAULT_GROUPS
         self.allow_raw_request = True

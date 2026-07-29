@@ -9,6 +9,7 @@ env-gated live suite.
 
 from __future__ import annotations
 
+import json
 import sys
 import types
 from collections.abc import Iterator
@@ -112,16 +113,19 @@ with _scoped_stubs():
     from tool_pipedrive.IInstance import IInstance
     from tool_pipedrive.pipedrive_client import (
         BASE_URL,
+        BASE_URL_V2,
         MAX_LIMIT,
         PipedriveAPIError,
         _auth,
         _use_bearer,
         base_url_for,
+        base_url_v2_for,
         call,
         call_envelope,
         clean_deal,
         clean_person,
         paginated,
+        paginated_v2,
         split_custom_fields,
     )
     from tool_pipedrive.IGlobal import _oversized_warning
@@ -135,7 +139,7 @@ with _scoped_stubs():
         tool_counts_by_group,
         wants_all_groups,
     )
-    from tool_pipedrive.tools._base import body_from, paging_params
+    from tool_pipedrive.tools._base import PAGING, PAGING_V2, body_from, paging_params, paging_params_v2
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +175,7 @@ def _instance(**overrides):
     glob = Mock()
     glob.token = TEST_TOKEN
     glob.base_url = BASE_URL
+    glob.base_url_v2 = BASE_URL_V2
     glob.read_only = False
     glob.tool_groups = DEFAULT_GROUPS
     glob.allow_raw_request = True
@@ -797,3 +802,188 @@ class TestToolCountGuardRail:
         """The guard rail is advisory: an oversized selection still publishes everything."""
         published = _instance(tool_groups=ALL_GROUPS)._collect_tool_methods()
         assert len(published) > RECOMMENDED_TOOL_LIMIT
+
+
+_MANIFEST = json.loads(
+    (Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'tool_pipedrive' / 'services.json').read_text(
+        encoding='utf-8'
+    )
+)
+
+
+class TestToolGroupsField:
+    """The manifest drives the config panel; it must not drift from the code.
+
+    The field renders as a multi-select dropdown only when it is an array with
+    `uniqueItems: true` and an `items.enum` — RJSF falls back to free-text
+    add/remove inputs without them. It must also carry no `ui:widget` override,
+    since `checkboxes` would switch the same schema to a checkbox list.
+    """
+
+    field = _MANIFEST['fields']['pipedrive.toolGroups']
+
+    def test_renders_as_a_multi_select_dropdown(self):
+        assert self.field['type'] == 'array'
+        assert self.field['uniqueItems'] is True
+        assert self.field['items']['type'] == 'string'
+
+    def test_no_widget_override(self):
+        """RJSF defaults an enum array to SelectWidget; any override changes the control."""
+        assert 'ui' not in self.field
+
+    def test_every_implemented_group_is_selectable(self):
+        values = {option[0] for option in self.field['items']['enum']}
+        assert ALL_GROUPS <= values
+
+    def test_no_option_is_an_unknown_group(self):
+        values = {option[0] for option in self.field['items']['enum']}
+        assert values - ALL_GROUPS == {'all'}, 'only the "all" sentinel may sit outside ALL_GROUPS'
+
+    def test_options_are_unique(self):
+        values = [option[0] for option in self.field['items']['enum']]
+        assert len(values) == len(set(values))
+
+    def test_labels_carry_the_real_tool_counts(self):
+        labels = {option[0]: option[1] for option in self.field['items']['enum']}
+        for group, count in tool_counts_by_group().items():
+            assert f'({count})' in labels[group], f'{group} label is stale: {labels[group]}'
+
+    def test_default_selection_matches_the_code_default(self):
+        assert set(self.field['default']) == DEFAULT_GROUPS
+
+    def test_all_option_advertises_the_full_surface(self):
+        labels = {option[0]: option[1] for option in self.field['items']['enum']}
+        total = sum(tool_counts_by_group().values()) + 1  # + the request escape hatch
+        assert str(total) in labels['all']
+
+
+class TestSearchUsesApiV2:
+    """Pipedrive retired the v1 search routes, and only those routes.
+
+    v1 answered ``/persons/search`` and its siblings with 404 ``Unknown method .``
+    (the resource still exists, the action does not) and ``/itemSearch`` with a
+    plain 404 ``Not Found``. Every non-search v1 endpoint kept working, so the fix
+    is scoped to search — a blanket swap would break the many endpoints that have
+    no v2 equivalent.
+    """
+
+    @pytest.mark.parametrize(
+        ('tool', 'args', 'path'),
+        [
+            ('person_search', {'term': 'ada'}, '/persons/search'),
+            ('organization_search', {'term': 'acme'}, '/organizations/search'),
+            ('deal_search', {'term': 'acme'}, '/deals/search'),
+            ('lead_search', {'term': 'acme'}, '/leads/search'),
+            ('product_search', {'term': 'widget'}, '/products/search'),
+            ('item_search', {'term': 'acme'}, '/itemSearch'),
+            ('lookup', {'term': 'acme'}, '/itemSearch'),
+        ],
+    )
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_search_tools_target_v2(self, mock_request, tool, args, path):
+        mock_request.return_value = _ok({'items': []})
+        getattr(_instance(tool_groups=ALL_GROUPS), tool)(args)
+        assert mock_request.call_args[0][1] == f'{BASE_URL_V2}{path}'
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_item_search_by_field_targets_v2(self, mock_request):
+        mock_request.return_value = _ok([])
+        _instance(tool_groups=ALL_GROUPS).item_search_by_field(
+            {'term': 'acme', 'entity_type': 'person', 'field_key': 'name'}
+        )
+        assert mock_request.call_args[0][1] == f'{BASE_URL_V2}/itemSearch/field'
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_item_search_by_field_uses_the_v2_parameter_names(self, mock_request):
+        """v2 renamed ``field_type`` to ``entity_type`` and replaced the ``exact_match`` flag with ``match``."""
+        mock_request.return_value = _ok([])
+        _instance(tool_groups=ALL_GROUPS).item_search_by_field(
+            {'term': 'acme', 'entity_type': 'person', 'field_key': 'name', 'match': 'beginning'}
+        )
+        params = mock_request.call_args[1]['params']
+        assert params['entity_type'] == 'person'
+        assert params['field_key'] == 'name'
+        assert params['match'] == 'beginning'
+        assert 'field_type' not in params
+        assert 'exact_match' not in params
+
+    @pytest.mark.parametrize(
+        ('tool', 'args', 'path'),
+        [
+            ('organization_list', {}, '/organizations'),
+            ('person_list', {}, '/persons'),
+            ('deal_list', {}, '/deals'),
+            ('recents_list', {'since_timestamp': '2026-07-16 00:00:00'}, '/recents'),
+        ],
+    )
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_non_search_tools_stay_on_v1(self, mock_request, tool, args, path):
+        """Guards against an accidental global version swap."""
+        mock_request.return_value = _ok([])
+        getattr(_instance(tool_groups=ALL_GROUPS), tool)(args)
+        assert mock_request.call_args[0][1] == f'{BASE_URL}{path}'
+
+    def test_v2_base_url_defaults_to_the_generic_host(self):
+        assert base_url_v2_for('') == BASE_URL_V2
+        assert base_url_v2_for(None) == BASE_URL_V2
+
+    @pytest.mark.parametrize('domain', ['acme', 'acme.pipedrive.com', 'https://acme.pipedrive.com/'])
+    def test_v2_base_url_normalises_the_company_domain(self, domain):
+        assert base_url_v2_for(domain) == 'https://acme.pipedrive.com/api/v2'
+
+    def test_both_versions_address_the_same_company(self):
+        """A domain that resolves differently per version would split one account in two."""
+        assert base_url_for('acme').rsplit('/', 1)[0] == base_url_v2_for('acme').rsplit('/', 1)[0]
+
+
+class TestCursorPagination:
+    """v2 replaced v1's numeric offset with an opaque cursor.
+
+    Running a v2 response through the v1 :func:`paginated` would read the absent
+    ``additional_data.pagination`` key, report a single page, and silently hide
+    every result after the first — hence the separate helpers.
+    """
+
+    def test_paging_params_v2_never_sends_start(self):
+        assert 'start' not in paging_params_v2({'start': 40, 'limit': 10})
+
+    def test_paging_params_v2_passes_the_cursor_through_trimmed(self):
+        assert paging_params_v2({'cursor': ' abc123 '})['cursor'] == 'abc123'
+
+    def test_paging_params_v2_omits_a_blank_cursor(self):
+        assert 'cursor' not in paging_params_v2({'cursor': '   '})
+        assert 'cursor' not in paging_params_v2({})
+
+    def test_paging_params_v2_clamps_limit(self):
+        assert paging_params_v2({'limit': MAX_LIMIT + 1})['limit'] == MAX_LIMIT
+        assert paging_params_v2({'limit': 0})['limit'] == 1
+
+    def test_paginated_v2_surfaces_next_cursor(self):
+        out = paginated_v2({'additional_data': {'next_cursor': 'abc'}}, [1, 2])
+        assert out['next_cursor'] == 'abc'
+        assert out['count'] == 2
+        assert out['more_items_in_collection'] is True
+        assert 'next_start' not in out
+
+    def test_paginated_v2_reports_the_last_page(self):
+        out = paginated_v2({'additional_data': {'next_cursor': None}}, [1])
+        assert out['next_cursor'] is None
+        assert out['more_items_in_collection'] is False
+
+    def test_paginated_v2_tolerates_a_missing_envelope(self):
+        out = paginated_v2(None, [])
+        assert out == {'items': [], 'count': 0, 'more_items_in_collection': False, 'next_cursor': None}
+
+    def test_v2_schema_advertises_cursor_and_v1_still_advertises_start(self):
+        """The schema is rendered verbatim into the agent prompt, so the wrong key invites dead calls."""
+        assert 'cursor' in PAGING_V2()
+        assert 'start' not in PAGING_V2()
+        assert 'start' in PAGING()
+        assert 'cursor' not in PAGING()
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_a_search_round_trips_the_cursor(self, mock_request):
+        mock_request.return_value = _ok({'items': []}, additional={'next_cursor': 'page2'})
+        result = _instance().person_search({'term': 'ada', 'cursor': 'page1'})
+        assert mock_request.call_args[1]['params']['cursor'] == 'page1'
+        assert result['next_cursor'] == 'page2'

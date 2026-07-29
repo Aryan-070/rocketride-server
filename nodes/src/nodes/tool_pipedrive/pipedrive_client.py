@@ -45,6 +45,15 @@ import requests
 from tenacity import RetryCallState, Retrying, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 BASE_URL = 'https://api.pipedrive.com/api/v1'
+
+#: Pipedrive retired the v1 search routes: ``/persons/search`` and its siblings
+#: answer 404 ``Unknown method .`` (the resource still exists, the action does
+#: not) and ``/itemSearch`` answers a plain 404 ``Not Found`` (no such resource
+#: any more). Non-search v1 endpoints are unaffected and still route normally,
+#: so only the search tools read this base. See ``tools/search.py`` and the
+#: ``*_search`` methods in the per-entity mixins.
+BASE_URL_V2 = 'https://api.pipedrive.com/api/v2'
+
 DEFAULT_TIMEOUT = 30
 
 #: Pipedrive's offset pagination caps ``limit`` at 500.
@@ -153,22 +162,44 @@ def _auth(token: str) -> tuple[dict, dict]:
     return {}, {'api_token': token}
 
 
-def base_url_for(company_domain: str | None) -> str:
-    """Build the API base URL for an optional company domain.
+def _company_host(company_domain: str | None) -> str | None:
+    """Reduce a configured company domain to its bare subdomain.
 
     Accepts ``acme``, ``acme.pipedrive.com`` or ``https://acme.pipedrive.com/``
-    and normalises all three to ``https://acme.pipedrive.com/api/v1``.
+    and returns ``acme``. Returns ``None`` when nothing usable was configured, so
+    callers fall back to the generic host.
+
+    Shared by both version-specific builders below: the v1 and v2 base URLs must
+    always agree about which company they address.
     """
     domain = (company_domain or '').strip()
     if not domain:
-        return BASE_URL
+        return None
     domain = re.sub(r'^https?://', '', domain).strip('/')
     domain = domain.split('/')[0]
     if domain.endswith('.pipedrive.com'):
         domain = domain[: -len('.pipedrive.com')]
-    if not domain:
-        return BASE_URL
-    return f'https://{domain}.pipedrive.com/api/v1'
+    return domain or None
+
+
+def base_url_for(company_domain: str | None) -> str:
+    """Build the v1 API base URL for an optional company domain.
+
+    Accepts ``acme``, ``acme.pipedrive.com`` or ``https://acme.pipedrive.com/``
+    and normalises all three to ``https://acme.pipedrive.com/api/v1``.
+    """
+    host = _company_host(company_domain)
+    return f'https://{host}.pipedrive.com/api/v1' if host else BASE_URL
+
+
+def base_url_v2_for(company_domain: str | None) -> str:
+    """Build the v2 API base URL for an optional company domain.
+
+    Same normalisation as :func:`base_url_for`, emitting ``/api/v2``. Only the
+    search tools use this — see :data:`BASE_URL_V2`.
+    """
+    host = _company_host(company_domain)
+    return f'https://{host}.pipedrive.com/api/v2' if host else BASE_URL_V2
 
 
 # ---------------------------------------------------------------------------
@@ -326,7 +357,7 @@ def call(token: str, method: str, path: str, **kwargs: Any) -> Any:
 
 
 def paginated(envelope: Any, items: list) -> dict:
-    """Wrap a cleaned list plus Pipedrive's pagination cursor for the agent."""
+    """Wrap a cleaned list plus Pipedrive's v1 offset cursor for the agent."""
     pagination = {}
     if isinstance(envelope, dict):
         pagination = ((envelope.get('additional_data') or {}).get('pagination')) or {}
@@ -335,6 +366,27 @@ def paginated(envelope: Any, items: list) -> dict:
         'count': len(items),
         'more_items_in_collection': bool(pagination.get('more_items_in_collection', False)),
         'next_start': pagination.get('next_start'),
+    }
+
+
+def paginated_v2(envelope: Any, items: list) -> dict:
+    """Wrap a cleaned list plus Pipedrive's v2 opaque cursor for the agent.
+
+    v2 replaced offset pagination with cursors: ``additional_data.next_cursor``
+    holds an opaque string to pass back as ``cursor``, and is absent or null on
+    the last page. Running v2 responses through :func:`paginated` instead would
+    read the v1 ``additional_data.pagination`` key, find nothing, and silently
+    report a single page — so the two wrappers stay separate.
+    """
+    additional = {}
+    if isinstance(envelope, dict):
+        additional = envelope.get('additional_data') or {}
+    next_cursor = additional.get('next_cursor')
+    return {
+        'items': items,
+        'count': len(items),
+        'more_items_in_collection': bool(next_cursor),
+        'next_cursor': next_cursor,
     }
 
 

@@ -25,12 +25,14 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'tool_pipedrive'))
-from pipedrive_client import base_url_for, call, call_envelope  # noqa: E402
+from pipedrive_client import PipedriveAPIError, base_url_for, base_url_v2_for, call, call_envelope  # noqa: E402
 
 TOKEN = os.getenv('PIPEDRIVE_API_TOKEN', '')
 DOMAIN = os.getenv('PIPEDRIVE_COMPANY_DOMAIN', '')
 ALLOW_WRITES = os.getenv('PIPEDRIVE_ALLOW_WRITES', '') == '1'
 BASE = base_url_for(DOMAIN)
+#: Search moved to v2 when Pipedrive retired the v1 search routes.
+BASE_V2 = base_url_v2_for(DOMAIN)
 
 pytestmark = pytest.mark.skipif(not TOKEN, reason='PIPEDRIVE_API_TOKEN must be set')
 
@@ -50,6 +52,14 @@ def c(method, path, *, params=None, body=None):
 
 def envelope(method, path, *, params=None):
     return call_envelope(TOKEN, method, path, base_url=BASE, params=params)
+
+
+def c_v2(method, path, *, params=None, body=None):
+    return call(TOKEN, method, path, base_url=BASE_V2, params=params, body=body)
+
+
+def envelope_v2(method, path, *, params=None):
+    return call_envelope(TOKEN, method, path, base_url=BASE_V2, params=params)
 
 
 def uid(prefix):
@@ -163,31 +173,69 @@ class TestListings:
 
 
 class TestSearch:
+    """Search lives on /api/v2 — Pipedrive retired the v1 routes.
+
+    Run this against the sandbox to confirm the v2 contract before trusting the
+    node's search tools:
+
+        PIPEDRIVE_API_TOKEN=... PIPEDRIVE_COMPANY_DOMAIN=... \\
+            python -m pytest nodes/test/tool_pipedrive/test_tools.py -k Search -v
+    """
+
     def test_item_search(self):
-        env = envelope('GET', '/itemSearch', params={'term': 'a', 'limit': 1})
+        env = envelope_v2('GET', '/itemSearch', params={'term': 'a', 'limit': 1})
         assert 'items' in (env.get('data') or {})
 
     def test_item_search_by_field(self):
-        data = c(
+        """v2 renamed ``field_type`` to ``entity_type`` and swapped ``exact_match`` for ``match``."""
+        data = c_v2(
             'GET',
             '/itemSearch/field',
-            params={'term': 'a', 'field_type': 'dealField', 'field_key': 'title', 'limit': 1},
+            params={'term': 'a', 'entity_type': 'deal', 'field_key': 'title', 'limit': 1},
         )
         assert data is not None
 
     def test_deal_search(self):
-        env = envelope('GET', '/deals/search', params={'term': 'a', 'limit': 1})
+        env = envelope_v2('GET', '/deals/search', params={'term': 'a', 'limit': 1})
         assert 'items' in (env.get('data') or {})
 
     def test_person_search(self):
-        env = envelope('GET', '/persons/search', params={'term': 'a', 'limit': 1})
+        env = envelope_v2('GET', '/persons/search', params={'term': 'a', 'limit': 1})
         assert 'items' in (env.get('data') or {})
 
     def test_organization_search(self):
-        env = envelope('GET', '/organizations/search', params={'term': 'a', 'limit': 1})
+        env = envelope_v2('GET', '/organizations/search', params={'term': 'a', 'limit': 1})
         assert 'items' in (env.get('data') or {})
 
-    def test_recents(self):
+    def test_lead_search(self):
+        env = envelope_v2('GET', '/leads/search', params={'term': 'a', 'limit': 1})
+        assert 'items' in (env.get('data') or {})
+
+    def test_product_search(self):
+        env = envelope_v2('GET', '/products/search', params={'term': 'a', 'limit': 1})
+        assert 'items' in (env.get('data') or {})
+
+    def test_v2_pages_with_a_cursor_not_an_offset(self):
+        """Pins the field name the node's paginated_v2 reads."""
+        env = envelope_v2('GET', '/persons/search', params={'term': 'a', 'limit': 1})
+        additional = env.get('additional_data') or {}
+        assert 'pagination' not in additional, 'v2 should not carry the v1 offset block'
+        # next_cursor is absent on a final page, so only assert the shape when present.
+        if additional:
+            assert set(additional) <= {'next_cursor'}, f'unexpected v2 pagination keys: {sorted(additional)}'
+
+    @pytest.mark.parametrize(
+        'path',
+        ['/itemSearch', '/deals/search', '/persons/search', '/organizations/search'],
+    )
+    def test_v1_search_is_gone(self, path):
+        """Documents why the node moved. Delete this class of test if Pipedrive restores v1."""
+        with pytest.raises(PipedriveAPIError) as exc:
+            call_envelope(TOKEN, 'GET', path, base_url=BASE, params={'term': 'a', 'limit': 1})
+        assert exc.value.status_code == 404
+
+    def test_recents_stays_on_v1(self):
+        """Non-search v1 endpoints were never affected."""
         data = c('GET', '/recents', params={'since_timestamp': '2020-01-01 00:00:00', 'limit': 1})
         assert data is not None
 

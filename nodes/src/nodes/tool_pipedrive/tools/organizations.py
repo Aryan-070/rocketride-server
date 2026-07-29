@@ -36,6 +36,7 @@ from ..pipedrive_client import (
     clean_person,
     clean_search_item,
     paginated,
+    paginated_v2,
 )
 from ..tool_groups import pipedrive_tool
 from ._base import (
@@ -45,11 +46,13 @@ from ._base import (
     EXTRA,
     INT,
     PAGING,
+    PAGING_V2,
     STR,
     PipedriveToolsBase,
     args_of,
     body_from,
     paging_params,
+    paging_params_v2,
     params_from,
     passthrough,
     require_id,
@@ -108,18 +111,19 @@ class OrganizationsMixin(PipedriveToolsBase):
             term=STR('Search term, at least 2 characters (1 when exact_match is true).'),
             fields=STR('Comma-separated fields to search in: address, custom_fields, notes, name.'),
             exact_match=BOOL('Require an exact, case-sensitive match.'),
-            **PAGING(),
+            **PAGING_V2(),
         ),
         description='Search organizations by name, address, notes or custom field values.',
     )
     def organization_search(self, args):
+        # v2: Pipedrive retired /api/v1/organizations/search (404 "Unknown method .").
         args = args_of(args)
-        params = paging_params(args)
+        params = paging_params_v2(args)
         params['term'] = require_text(args, 'term', 'organization_search')
         params.update(params_from(args, ('fields', 'exact_match')))
-        envelope = self._call_envelope('GET', '/organizations/search', params=params)
+        envelope = self._call_envelope_v2('GET', '/organizations/search', params=params)
         items = ((envelope.get('data') or {}).get('items')) or []
-        return paginated(envelope, [clean_search_item(i) for i in items])
+        return paginated_v2(envelope, [clean_search_item(i) for i in items])
 
     @pipedrive_tool(
         group='organizations',

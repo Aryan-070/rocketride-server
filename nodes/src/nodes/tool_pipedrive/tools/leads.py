@@ -27,7 +27,7 @@
 
 from __future__ import annotations
 
-from ..pipedrive_client import clean_lead, clean_search_item, paginated
+from ..pipedrive_client import clean_lead, clean_search_item, paginated_v2
 from ..tool_groups import pipedrive_tool
 from ._base import (
     ARR,
@@ -37,11 +37,12 @@ from ._base import (
     INT,
     OBJ,
     PAGING,
+    PAGING_V2,
     STR,
     PipedriveToolsBase,
     args_of,
     body_from,
-    paging_params,
+    paging_params_v2,
     params_from,
     passthrough,
     require_text,
@@ -127,18 +128,19 @@ class LeadsMixin(PipedriveToolsBase):
             person_id=INT('Only leads linked to this person.'),
             organization_id=INT('Only leads linked to this organization.'),
             include_fields=STR('Extra fields to include, e.g. "lead.was_seen".'),
-            **PAGING(),
+            **PAGING_V2(),
         ),
         description='Search leads by title, notes or custom field values.',
     )
     def lead_search(self, args):
+        # v2: Pipedrive retired /api/v1/leads/search (404 "Unknown method .").
         args = args_of(args)
-        params = paging_params(args)
+        params = paging_params_v2(args)
         params['term'] = require_text(args, 'term', 'lead_search')
         params.update(params_from(args, ('fields', 'exact_match', 'person_id', 'organization_id', 'include_fields')))
-        envelope = self._call_envelope('GET', '/leads/search', params=params)
+        envelope = self._call_envelope_v2('GET', '/leads/search', params=params)
         items = ((envelope.get('data') or {}).get('items')) or []
-        return paginated(envelope, [clean_search_item(i) for i in items])
+        return paginated_v2(envelope, [clean_search_item(i) for i in items])
 
     @pipedrive_tool(
         group='leads',

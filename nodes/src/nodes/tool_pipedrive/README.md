@@ -30,7 +30,7 @@ mutating tool.
 | `apiToken` | string | Default empty. Pipedrive API token (Settings -> Personal preferences -> API), or an OAuth access token. Stored encrypted. |
 | `companyDomain` | string | Default empty. The "acme" in `https://acme.pipedrive.com`. When set, requests go to `https://{domain}.pipedrive.com/api/v1`; otherwise `https://api.pipedrive.com/api/v1`. |
 | `readOnly` | boolean | Default false. When enabled, every create, update and delete tool is blocked and `request` only accepts GET. |
-| `toolGroups` | array | Default `["deals", "persons", "organizations", "activities", "pipelines", "stages", "notes", "search"]`. Which groups of tools to publish. Use `["all"]` for everything. |
+| `toolGroups` | array | Default `["deals", "persons", "organizations", "activities", "pipelines", "stages", "notes", "search"]`. Which groups of tools to publish, shown as a multi-select dropdown with per-group tool counts. Select **All groups** for everything. |
 | `allowRawRequest` | boolean | Default true. Publishes the generic `request` tool. |
 
 ### Tool groups
@@ -40,12 +40,18 @@ and more than some providers accept in one request, so the node only publishes t
 groups listed in **Tool groups**. The default eight groups publish 108 tools — the
 everyday CRM surface. Add group names to reach further, or use `all`.
 
-Available groups:
+Available groups, with the number of tools each publishes:
 
-`activities`, `call_logs`, `deals`, `fields`, `files`, `filters`, `goals`, `leads`,
-`mailbox`, `misc`, `notes`, `org_relationships`, `organizations`, `permission_sets`,
-`persons`, `pipelines`, `products`, `projects`, `roles`, `search`, `stages`,
-`subscriptions`, `teams`, `users`, `webhooks`.
+`deals` (28), `projects` (22), `organizations` (18), `persons` (18), `products` (16),
+`activities` (13), `roles` (13), `leads` (12), `users` (12), `notes` (11),
+`subscriptions` (9), `files` (8), `misc` (8), `pipelines` (8), `teams` (8),
+`filters` (7), `stages` (7), `fields` (6), `mailbox` (6), `call_logs` (5),
+`goals` (5), `org_relationships` (5), `search` (4), `permission_sets` (3),
+`webhooks` (3).
+
+The config panel renders these as a multi-select dropdown. RJSF picks that widget for
+an array carrying `uniqueItems: true` and an `items.enum`; **All groups** is the last
+option.
 
 A tool in a group that is not published is invisible to the agent and refused if
 invoked anyway.

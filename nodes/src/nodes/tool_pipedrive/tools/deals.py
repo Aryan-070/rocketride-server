@@ -36,6 +36,7 @@ from ..pipedrive_client import (
     clean_search_item,
     clean_user,
     paginated,
+    paginated_v2,
 )
 from ..tool_groups import pipedrive_tool
 from ._base import (
@@ -47,11 +48,13 @@ from ._base import (
     NUM,
     OBJ,
     PAGING,
+    PAGING_V2,
     STR,
     PipedriveToolsBase,
     args_of,
     body_from,
     paging_params,
+    paging_params_v2,
     params_from,
     passthrough,
     require_id,
@@ -145,20 +148,21 @@ class DealsMixin(PipedriveToolsBase):
             organization_id=INT('Only deals linked to this organization.'),
             status=ENUM('Only deals with this status.', ['open', 'won', 'lost']),
             include_fields=STR('Extra fields to include, e.g. "deal.cc_email".'),
-            **PAGING(),
+            **PAGING_V2(),
         ),
         description='Search deals by title, notes or custom field values.',
     )
     def deal_search(self, args):
+        # v2: Pipedrive retired /api/v1/deals/search (404 "Unknown method .").
         args = args_of(args)
-        params = paging_params(args)
+        params = paging_params_v2(args)
         params['term'] = require_text(args, 'term', 'deal_search')
         params.update(
             params_from(args, ('fields', 'exact_match', 'person_id', 'organization_id', 'status', 'include_fields'))
         )
-        envelope = self._call_envelope('GET', '/deals/search', params=params)
+        envelope = self._call_envelope_v2('GET', '/deals/search', params=params)
         items = ((envelope.get('data') or {}).get('items')) or []
-        return paginated(envelope, [clean_search_item(i) for i in items])
+        return paginated_v2(envelope, [clean_search_item(i) for i in items])
 
     @pipedrive_tool(
         group='deals',

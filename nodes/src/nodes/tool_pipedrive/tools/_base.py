@@ -112,6 +112,20 @@ def PAGING() -> dict:
     }
 
 
+def PAGING_V2() -> dict:
+    """Cursor paging for the v2 search endpoints.
+
+    v2 dropped the numeric offset: there is no ``start``, only an opaque
+    ``cursor`` echoed back from the previous page. This schema is rendered
+    verbatim into the agent's tool prompt, so advertising ``start`` here would
+    invite calls Pipedrive silently ignores.
+    """
+    return {
+        'cursor': STR('Pagination cursor from a previous call (its next_cursor). Omit for the first page.'),
+        'limit': INT(f'Number of records to return (1-{MAX_LIMIT}, default 100).'),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Mixin base
 # ---------------------------------------------------------------------------
@@ -131,6 +145,10 @@ class PipedriveToolsBase:
     def _base(self) -> str:
         return self.IGlobal.base_url
 
+    def _base_v2(self) -> str:
+        """The ``/api/v2`` base. Search tools only — see ``BASE_URL_V2``."""
+        return self.IGlobal.base_url_v2
+
     def _require_write(self) -> None:
         if self.IGlobal.read_only:
             raise ValueError('This operation is not permitted: the node is configured in read-only mode')
@@ -142,6 +160,15 @@ class PipedriveToolsBase:
 
     def _call_envelope(self, method: str, path: str, **kwargs: Any) -> Any:
         return call_envelope(self._token(), method, path, base_url=self._base(), **kwargs)
+
+    def _call_envelope_v2(self, method: str, path: str, **kwargs: Any) -> Any:
+        """Same as :meth:`_call_envelope` but against ``/api/v2``.
+
+        Only the search tools use this. Everything else stays on v1, which still
+        routes normally — a blanket swap would break the many endpoints that have
+        no v2 equivalent yet.
+        """
+        return call_envelope(self._token(), method, path, base_url=self._base_v2(), **kwargs)
 
     def _list(self, path: str, args: dict, cleaner, *, extra: dict | None = None) -> dict:
         """GET a collection with offset pagination and return cleaned items + cursor."""
@@ -177,10 +204,27 @@ def args_of(args: Any) -> dict:
 
 
 def paging_params(args: dict) -> dict:
-    """Clamp start/limit to what Pipedrive accepts."""
+    """Clamp start/limit to what Pipedrive's v1 offset pagination accepts."""
     params: dict = {}
     if args.get('start') is not None:
         params['start'] = max(0, int(args['start']))
+    if args.get('limit') is not None:
+        params['limit'] = max(1, min(int(args['limit']), MAX_LIMIT))
+    return params
+
+
+def paging_params_v2(args: dict) -> dict:
+    """Clamp limit and pass through the v2 cursor.
+
+    ``cursor`` is opaque: it is echoed back exactly as Pipedrive issued it, never
+    parsed or clamped. ``start`` is deliberately not emitted — v2 has no offset
+    parameter, and sending one would be ignored rather than rejected, which reads
+    as a silently truncated result set.
+    """
+    params: dict = {}
+    cursor = args.get('cursor')
+    if cursor is not None and str(cursor).strip():
+        params['cursor'] = str(cursor).strip()
     if args.get('limit') is not None:
         params['limit'] = max(1, min(int(args['limit']), MAX_LIMIT))
     return params
