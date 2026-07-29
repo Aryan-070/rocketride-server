@@ -150,40 +150,33 @@ discord_applied_tags() {
     | .[0:5]'
 }
 
-# ── Forum thread archiving ───────────────────────────────────────────────
-# discord_archive_thread <thread_id> <true|false> — archive/unarchive a forum
-# thread so its Discord state mirrors the GitHub issue/PR/discussion (closed →
-# archived, reopened → unarchived). Forum threads can only be (un)archived with
-# a BOT token that has Manage Threads — webhooks cannot do it — so this is a
-# no-op (returns 0) unless DISCORD_GITHUB_BOT_TOKEN is set and a thread id is known.
-# Best-effort: archiving is cosmetic (the embed already reflects state), so a
-# transient failure must never abort the calling workflow.
-discord_archive_thread() {
-  local thread_id="$1" archived="$2"
+# ── Forum thread sync (archive state + tags in one PATCH) ────────────────
+# discord_sync_thread <thread_id> <archived:true|false> <applied_tags_json>
+# — mirror the GitHub state onto the forum thread: set the archived flag AND
+# re-apply applied_tags so tags track state/labels (open→closed→merged, label
+# adds). Both are set in a SINGLE PATCH on purpose: Discord rejects an
+# applied_tags edit on an already-archived thread (400), so setting tags and
+# then (un)archiving in separate calls fails on reopen or on threads Discord
+# auto-archived by inactivity. Combining them works from any state.
+#
+# Forum threads can only be edited with a BOT token that has Manage Threads/
+# Posts — webhooks cannot — so this is a no-op unless DISCORD_GITHUB_BOT_TOKEN
+# and a thread id are set. If <applied_tags_json> is empty ("" or "[]") only the
+# archived flag is sent (an empty list means the channel has no tag config, so
+# never clobber it to untagged). Best-effort: a transient failure never aborts
+# the calling workflow (the embed already reflects state).
+discord_sync_thread() {
+  local thread_id="$1" archived="$2" tags="$3" body
   [ -z "${DISCORD_GITHUB_BOT_TOKEN:-}" ] && return 0
   [ -z "$thread_id" ] && return 0
+  if [ -z "$tags" ] || [ "$tags" = "[]" ]; then
+    body="{\"archived\": ${archived}}"
+  else
+    body="{\"archived\": ${archived}, \"applied_tags\": ${tags}}"
+  fi
   curl -sS -o /dev/null --connect-timeout 10 --max-time 30 -X PATCH \
     -H "Authorization: Bot ${DISCORD_GITHUB_BOT_TOKEN}" \
     -H "Content-Type: application/json" \
-    -d "{\"archived\": ${archived}}" \
-    "https://discord.com/api/v10/channels/${thread_id}" || true
-}
-
-# ── Live forum tag sync ──────────────────────────────────────────────────
-# discord_set_tags <thread_id> <applied_tags_json> — re-apply a forum thread's
-# tags so they track the current state/labels (open→closed→merged, label adds).
-# Webhooks can only set applied_tags at creation, so keeping them live needs a
-# BOT token with Manage Threads/Posts. No-op unless DISCORD_GITHUB_BOT_TOKEN is
-# set, a thread id is known, and the tag list is non-empty (an empty list means
-# the channel has no tag config — never clobber it to untagged). Best-effort.
-discord_set_tags() {
-  local thread_id="$1" tags="$2"
-  [ -z "${DISCORD_GITHUB_BOT_TOKEN:-}" ] && return 0
-  [ -z "$thread_id" ] && return 0
-  { [ -z "$tags" ] || [ "$tags" = "[]" ]; } && return 0
-  curl -sS -o /dev/null --connect-timeout 10 --max-time 30 -X PATCH \
-    -H "Authorization: Bot ${DISCORD_GITHUB_BOT_TOKEN}" \
-    -H "Content-Type: application/json" \
-    -d "{\"applied_tags\": ${tags}}" \
+    -d "$body" \
     "https://discord.com/api/v10/channels/${thread_id}" || true
 }
