@@ -7,14 +7,10 @@ maps, and pass-through of every non-fact record shape.
 
 import os
 import sys
-import types
 
-# validate.py has no rocketlib import, but stub it defensively so importing the
-# node package stays isolated from the native engine.
-rocketlib = types.ModuleType('rocketlib')
-rocketlib.debug = lambda *a, **kw: None
-sys.modules.setdefault('rocketlib', rocketlib)
-
+# validate.py is pure and stdlib-only, so it imports directly from the node dir
+# with nothing stubbed into sys.modules — no core-module stub leaks into later
+# test modules (see nodes/test/_sys_modules_guard.py, #1640).
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'nodes', 'schema_validate'))
 from validate import NODE_OP, default_config, validate_fact, validate_payload  # noqa: E402
 
