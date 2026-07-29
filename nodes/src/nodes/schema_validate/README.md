@@ -41,9 +41,9 @@ pass through untouched.
 | `missing_currency` | warning | `currency_field` is absent, `null`, or blank. |
 | `category_metric_mismatch` | **error** | The metric label implies one category but the fact declares another — the headline "cost row stored as revenue" guard. |
 | `ambiguous_metric` | warning | The metric label matches keywords from two or more categories, so the declared category can't be corroborated (suppresses the mismatch check). |
-| `sign_category_mismatch` | configurable (`sign`, default warning) | The amount's sign contradicts its class (an expense/liability with a positive amount, or revenue/asset with a negative amount). Zero never fires. |
+| `sign_category_mismatch` | configurable (`sign`, default warning) | The amount's sign contradicts its class (an expense/liability with a positive amount, or revenue/asset with a negative amount). Zero never fires. Applies only to the four built-in signed classes (revenue/expense/asset/liability); a custom category has no sign convention and is not sign-checked. |
 | `unknown_category` | warning | `category_field` is present but is not a recognised classification. |
-| `missing_provenance` | configurable (`require_provenance`, default error) | The **incoming** fact has no `provenance` list. |
+| `missing_provenance` | configurable (`require_provenance`, default error) | The **incoming** fact has no usable `provenance` list — the value is absent, `null`, an **empty list** `[]`, or not a list at all. |
 | `malformed_provenance` | warning | `provenance` is present but is not a list (the original value is preserved, never discarded). |
 
 `valid` is `true` when no `error`-severity flag fired (warnings do not invalidate).
@@ -107,9 +107,12 @@ and a provenance entry with `"flag_codes": []` — proof it was checked.
 The node always appends its own `{ "op": "schema_validate", ... }` entry, never
 rewriting existing entries and preserving order:
 
-- if `provenance` is a list → the entry is appended to a copy of it;
+- if `provenance` is a non-empty list → the entry is appended to a copy of it;
 - if `provenance` is absent/`null` → a new `[entry]` list is created (and
   `missing_provenance` fires);
+- if `provenance` is an **empty list** `[]` → the entry is appended (result
+  `[entry]`), and `missing_provenance` fires — an empty chain is treated as no
+  usable provenance;
 - if `provenance` is present but not a list → the original value is preserved in
   place as `[original, entry]` (and `malformed_provenance` fires).
 

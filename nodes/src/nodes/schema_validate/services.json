@@ -145,7 +145,7 @@
 		"schema_validate.require_provenance": {
 			"type": "string",
 			"title": "Require provenance",
-			"description": "Severity for a fact that arrives with no provenance. Set to 'off' to disable the flag; a provenance entry is still appended.",
+			"description": "Severity for a fact that arrives with no usable provenance list (absent, empty, or not a list). Set to 'off' to disable the flag; a provenance entry is still appended.",
 			"default": "error",
 			"enum": ["off", "warning", "error"]
 		},

@@ -344,6 +344,52 @@ def test_sign_severity_ok_falls_back_to_warning():
     assert flag['severity'] == 'warning'
 
 
+def test_custom_map_key_that_is_builtin_alias_no_false_mismatch():
+    # A custom map key that is itself a built-in alias ('cost' -> expense) must
+    # infer through the same alias table as the declared category, so a fact
+    # declaring that key is consistent, not a false category_metric_mismatch.
+    c = cfg(category_metric_map={'cost': ['cost of goods', 'cogs'], 'revenue': ['revenue', 'sales']})
+    out = validate_fact(
+        {
+            'metric': 'Cost of goods sold',
+            'category': 'cost',
+            'amount': -500,
+            'currency': 'USD',
+            'provenance': [{'op': 'x'}],
+        },
+        c,
+    )
+    assert 'category_metric_mismatch' not in codes(out)
+    assert out['validation']['valid'] is True
+
+
+def test_alias_synonym_keys_not_ambiguous():
+    # Two map keys that resolve to the same canonical class ('cost' and
+    # 'expense' both -> expense) must not make a matching metric 'ambiguous'.
+    c = cfg(category_metric_map={'cost': ['cogs'], 'expense': ['operating'], 'revenue': ['sales']})
+    out = validate_fact({'metric': 'cogs operating', 'category': 'expense', 'provenance': [{'op': 'x'}]}, c)
+    assert 'ambiguous_metric' not in codes(out)
+    assert 'category_metric_mismatch' not in codes(out)
+
+
+def test_empty_provenance_list_flags_missing():
+    # An empty provenance list is treated as no usable provenance.
+    out = validate_fact({'amount': 5, 'currency': 'USD', 'provenance': []}, CFG)
+    flag = next(f for f in out['validation']['flags'] if f['code'] == 'missing_provenance')
+    assert flag['severity'] == 'error'
+    assert out['validation']['valid'] is False
+    # The node's own entry is still appended.
+    assert out['provenance'][-1]['op'] == NODE_OP
+
+
+def test_map_non_list_value_does_not_crash():
+    # A malformed map whose value is not a list must not raise (pure-function
+    # robustness); the offending key is simply skipped.
+    c = cfg(category_metric_map={'revenue': 5, 'expense': ['cogs']})
+    out = validate_fact({'metric': 'cogs', 'category': 'expense', 'provenance': [{'op': 'x'}]}, c)
+    assert 'category_metric_mismatch' not in codes(out)
+
+
 def test_empty_map_skips_mismatch():
     c = cfg(category_metric_map={})
     out = validate_fact(

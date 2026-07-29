@@ -175,17 +175,25 @@ def _canonical_category(value: Any, alias: Dict[str, str]) -> Optional[str]:
     return alias.get(value.strip().lower())
 
 
-def _infer_class(metric_value: Any, category_metric_map: Dict[str, List[str]]) -> Tuple[Optional[str], List[str]]:
+def _infer_class(
+    metric_value: Any, category_metric_map: Dict[str, List[str]], category_alias: Dict[str, str]
+) -> Tuple[Optional[str], List[str]]:
     """Infer a fact's canonical class from its metric label.
 
     Returns ``(inferred, matched_categories)`` where ``inferred`` is:
 
-    - a single canonical category when the label matches keyword(s) from exactly
-      one category,
-    - ``'ambiguous'`` when it matches keywords from two or more categories,
+    - a single canonical category when the label matches keyword(s) resolving to
+      exactly one category,
+    - ``'ambiguous'`` when it matches keywords resolving to two or more distinct
+      categories,
     - ``None`` when it matches none.
 
-    ``matched_categories`` lists the distinct categories hit, for messaging.
+    Each map key is resolved through ``category_alias`` — the same table the
+    declared category uses — so the two sides of the mismatch comparison share
+    one normalisation and cannot drift apart (e.g. a custom map key ``"cost"``,
+    a built-in alias for ``expense``, infers ``expense`` just as a declared
+    ``"cost"`` resolves to ``expense``). ``matched_categories`` lists the
+    distinct resolved categories hit, for messaging.
     """
     if metric_value is None:
         return None, []
@@ -195,13 +203,16 @@ def _infer_class(metric_value: Any, category_metric_map: Dict[str, List[str]]) -
 
     matched: List[str] = []
     for category, keywords in category_metric_map.items():
-        # Canonicalize the key so an inferred class compares equal to a declared
-        # category (which is always lowercased), even for a custom map that uses
-        # mixed-case keys like "Equity".
-        canon_category = str(category).strip().lower()
+        if not isinstance(keywords, (list, tuple)):
+            # Defensive: uphold the pure-function contract even if a caller
+            # passes a map whose values are not keyword lists.
+            continue
+        canon = str(category).strip().lower()
+        canon = category_alias.get(canon, canon)
         for kw in keywords:
-            if kw and kw in label:
-                matched.append(canon_category)
+            if kw and isinstance(kw, str) and kw in label:
+                if canon not in matched:
+                    matched.append(canon)
                 break
 
     if not matched:
@@ -300,15 +311,17 @@ def validate_fact(fact: Any, config: Dict[str, Any]) -> Any:
         )
 
     # --- Metric / category coherence (checks 4, 5, 7) ------------------------
-    inferred, matched = _infer_class(fact.get(metric_field), cat_map)
     # Recognised declared categories = the built-in aliases plus the (possibly
     # custom) map keys, so a user-defined category such as ``equity`` added to
-    # ``category_metric_map`` is not falsely flagged ``unknown_category``.
+    # ``category_metric_map`` is not falsely flagged ``unknown_category``. Built
+    # once here and shared by both the inferred and declared sides so they use
+    # one normalisation and cannot disagree.
     category_alias = dict(CATEGORY_ALIAS)
     for key in cat_map:
         canon = str(key).strip().lower()
         if canon:
             category_alias.setdefault(canon, canon)
+    inferred, matched = _infer_class(fact.get(metric_field), cat_map, category_alias)
     declared = _canonical_category(fact.get(category_field), category_alias)
     has_metric = metric_field in fact and fact.get(metric_field) is not None
     has_category = category_field in fact and fact.get(category_field) is not None
