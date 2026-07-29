@@ -487,11 +487,11 @@ dep_install() {
 # the NCURSES_TINFO_5 versioned symbols, which libtinfo.so.6 does NOT export — so a
 # .so.6 -> .so.5 symlink fails to load. Sources it root-free into lib-compat: an
 # apt-get download, then (Ubuntu 24.04+, where the package is gone) a pinned jammy
-# .deb by URL; dnf uses ncurses-compat-libs (also pulled system-wide under
-# --autoinstall on dnf, see check_dependencies).
+# .deb by URL, verified by sha256; dnf uses ncurses-compat-libs (also pulled
+# system-wide under --autoinstall on dnf, see check_dependencies).
 # $1 = target dir, $2 = apt|dnf.
 provide_libtinfo5() {
-    local compat="$1" mgr="$2" existing real tmp deb rpm larch ldeb lurl
+    local compat="$1" mgr="$2" existing real tmp deb rpm larch ldeb lurl lsha
 
     # A genuine libtinfo.so.5 already on the system (e.g. installed above) → link it.
     existing=$(ldconfig -p 2>/dev/null | grep -oE '/[^ ]*/libtinfo\.so\.5(\.[0-9]+)*' | head -1)
@@ -507,13 +507,26 @@ provide_libtinfo5() {
             # Fall back to a pinned jammy .deb — it still ships a genuine
             # libtinfo.so.5 that the tarball clang loads.
             if [ -z "$deb" ]; then
+                # This path bypasses apt's signed index, and the .so it yields is
+                # loaded by clang on every build via lib-compat on LD_LIBRARY_PATH.
+                # The digest is the only thing vouching for the file, so a mismatch
+                # must discard it rather than fall through.
                 case "$(uname -m)" in
-                    x86_64)        larch=amd64; lurl="http://archive.ubuntu.com/ubuntu/pool/universe/n/ncurses" ;;
-                    aarch64|arm64) larch=arm64; lurl="http://ports.ubuntu.com/ubuntu-ports/pool/universe/n/ncurses" ;;
+                    x86_64)        larch=amd64
+                                   lurl="https://archive.ubuntu.com/ubuntu/pool/universe/n/ncurses"
+                                   lsha=b9bb64e716a7d9de05b1b33992763142ca81bcae3a7f8ce7e29fa3c6fd32f1e8 ;;
+                    aarch64|arm64) larch=arm64
+                                   lurl="https://ports.ubuntu.com/ubuntu-ports/pool/universe/n/ncurses"
+                                   lsha=79498b68a0253005d483021563414f8595bd3d81a3d32af08fc5ba04ff4b9631 ;;
                 esac
                 if [ -n "$larch" ]; then
                     ldeb="libtinfo5_6.3-2ubuntu0.2_${larch}.deb"
-                    as_user curl -fsSL --retry 3 -o "$tmp/$ldeb" "$lurl/$ldeb" >/dev/null 2>&1 || true
+                    if ! as_user curl -fsSL --retry 3 -o "$tmp/$ldeb" "$lurl/$ldeb" >/dev/null 2>&1; then
+                        echo "⚠ could not download $ldeb — the pin may have been superseded in the pool"
+                    elif ! (cd "$tmp" && echo "$lsha  $ldeb" | sha256sum -c -) >/dev/null 2>&1; then
+                        echo "⚠ $ldeb failed its sha256 check — discarding it"
+                        as_user rm -f "$tmp/$ldeb"
+                    fi
                     deb=$(ls "$tmp"/*.deb 2>/dev/null | head -1)
                 fi
             fi
