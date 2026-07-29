@@ -31,6 +31,10 @@
 
 #undef AP_PLAT_MINIDUMP_CPP_PRIVATE_INCLUDE
 
+#include <sys/stat.h>
+#include <unistd.h>
+#include <cerrno>
+#include <cstdio>
 #include <filesystem>
 #include <map>
 #include <string>
@@ -53,13 +57,75 @@ inline base::FilePath toFilePath(const file::Path &path) noexcept {
     return base::FilePath{std::string{_ts(path).c_str()}};
 }
 
+// Create `dir` 0700 and confirm it is really ours. Linux temp is world-writable,
+// so a predictable name lets any local user pre-create the directory -- or leave
+// a symlink there -- and quietly divert minidumps, which carry process memory.
+// lstat, not stat, is what rejects the symlink.
+inline bool ensurePrivateDir(const std::filesystem::path &dir) noexcept {
+    if (::mkdir(dir.c_str(), 0700) != 0 && errno != EEXIST) return false;
+
+    struct ::stat st {};
+    if (::lstat(dir.c_str(), &st) != 0) return false;
+
+    return S_ISDIR(st.st_mode) && st.st_uid == ::geteuid()
+           && (st.st_mode & (S_IRWXG | S_IRWXO)) == 0;
+}
+
+inline std::filesystem::path computeCrashDbDir() noexcept {
+    std::filesystem::path dir;
+
+    if (auto env = plat::env("ROCKETRIDE_CRASHDB_DIR")) {
+        dir = std::filesystem::path{_ts(_cast<file::Path>(env)).c_str()};
+    } else {
+        std::error_code ec;
+        auto base = std::filesystem::temp_directory_path(ec);
+        if (ec) {
+            LOG(Error, "No usable temp dir; crash reporting disabled",
+                ec.message());
+            return {};
+        }
+
+        // Scoped by uid so another user cannot pre-empt or read the database,
+        // and by the executable so two installs on one box stay apart. Never by
+        // pid: the next startup has to find the previous run's dumps.
+        //
+        // Read /proc/self/exe rather than application::execPath(): we run from
+        // plat::init(), and linmain only resolves the real exec path *after*
+        // that, so execPath() would still be argv[0] -- which varies with how
+        // the engine was launched and would send each run to a different
+        // database. Empty on macOS (no /proc), whose temp is per-user anyway.
+        std::error_code exeEc;
+        auto exe =
+            std::filesystem::read_symlink("/proc/self/exe", exeEc).string();
+        auto tag = crypto::crc32({_reCast<const uint8_t *>(exe.data()),
+                                  exe.size() * sizeof(exe.data()[0])});
+
+        char suffix[48];
+        std::snprintf(suffix, sizeof suffix, "rocketride-crashdb-%u-%08x",
+                      static_cast<unsigned>(::geteuid()),
+                      static_cast<unsigned>(tag));
+        dir = base / suffix;
+    }
+
+    std::error_code ec;
+    std::filesystem::create_directories(dir.parent_path(), ec);
+
+    if (!ensurePrivateDir(dir)) {
+        LOG(Error,
+            "Crash DB dir is not private (wrong owner, wrong mode, or a "
+            "symlink); crash reporting disabled",
+            dir.string());
+        return {};
+    }
+    return dir;
+}
+
 // Stable, writable Crashpad database (settings.dat / pending / completed). Kept
 // separate from crashDumpLocation(), which is re-pointed per task and may sit in
-// a read-only install dir; temp is writable in every deployment.
-inline std::filesystem::path crashDbDir() noexcept {
-    std::error_code ec;
-    auto dir = std::filesystem::temp_directory_path(ec) / "rocketride-crashdb";
-    std::filesystem::create_directories(dir, ec);
+// a read-only install dir; temp is writable in every deployment. Resolved once
+// so the ownership check, and its error log, happen a single time per process.
+inline const std::filesystem::path &crashDbDir() noexcept {
+    static const std::filesystem::path dir = computeCrashDbDir();
     return dir;
 }
 
@@ -92,6 +158,8 @@ inline void relocateAndNotify(const std::filesystem::path &src) noexcept {
 // crashDumpCreatedCallback cannot fire at crash time. We instead recover a
 // previous run's dumps on the next startup -- notification is deferred one run.
 inline void sweepPreviousDumps(const std::filesystem::path &dbDir) noexcept {
+    if (dbDir.empty()) return;  // crash reporting is off; nothing to recover
+
     for (const char *sub : {"pending", "completed"}) {
         auto dir = dbDir / sub;
         std::error_code ec;
@@ -126,11 +194,17 @@ public:
             return;
         }
 
-        auto dbDir = internal::crashDbDir();
+        const auto &dbDir = internal::crashDbDir();
+        if (dbDir.empty()) return;  // computeCrashDbDir() logged the reason
 
         auto database = crashpad::CrashReportDatabase::Initialize(
             base::FilePath{std::string{dbDir.string()}});
-        if (database && database->GetSettings())
+        if (!database)
+            // StartHandler below still reports success, so without this the
+            // failure is indistinguishable from a healthy start.
+            LOG(Error, "Crashpad database unusable; dumps will not be recorded",
+                dbDir.string());
+        else if (database->GetSettings())
             database->GetSettings()->SetUploadsEnabled(false);
 
         // Static process context; per-task id is applied to the recovered dump

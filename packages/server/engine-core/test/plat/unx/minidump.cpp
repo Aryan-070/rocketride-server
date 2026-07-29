@@ -23,6 +23,7 @@
 
 #include "test.h"
 
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <cstdlib>
@@ -43,8 +44,9 @@ static std::set<std::filesystem::path> dumpsIn(
 // Re-exec this test binary as a fresh process (RR_CRASH_CHILD handled in
 // testMain.ipp) so the child registers Crashpad and faults/exits without the
 // fork-in-a-threaded-process deadlock a plain fork() would hit. Returns the
-// child's wait status.
-static int runCrashChild(const char *mode) {
+// child's wait status. `crashDb` overrides the child's crash DB directory --
+// the parent has already resolved (and cached) its own.
+static int runCrashChild(const char *mode, const char *crashDb = nullptr) {
     auto exe = _ts(application::execPath());
     // Resolve the handler here (parent) and hand it to the child explicitly: a
     // re-exec'd child can compute an empty execDir(), so it can't self-locate the
@@ -60,6 +62,7 @@ static int runCrashChild(const char *mode) {
     if (pid == 0) {
         ::setenv("RR_CRASH_CHILD", mode, 1);
         ::setenv("ROCKETRIDE_CRASHPAD_HANDLER", handler.c_str(), 1);
+        if (crashDb) ::setenv("ROCKETRIDE_CRASHDB_DIR", crashDb, 1);
         char *const argv[] = {const_cast<char *>(exe.c_str()), nullptr};
         ::execv(exe.c_str(), argv);
         ::_exit(127);  // exec failed
@@ -110,5 +113,65 @@ TEST_CASE("crashpad") {
         plat::minidumpRegister();
 
         REQUIRE(dumpsIn(crashDir) == before);
+    }
+
+    // The crash DB sits in world-writable temp, so anything the engine does not
+    // privately own is refused rather than used.
+    SECTION("a crash DB dir that is a symlink is rejected") {
+        auto link = std::filesystem::temp_directory_path() / "rr-crashdb-link";
+        auto target = std::filesystem::temp_directory_path() / "rr-crashdb-tgt";
+        std::error_code ec;
+        std::filesystem::remove(link, ec);
+        std::filesystem::remove_all(target, ec);
+        std::filesystem::create_directories(target, ec);
+        std::filesystem::create_directory_symlink(target, link, ec);
+        REQUIRE(!ec);
+
+        REQUIRE(WIFSIGNALED(runCrashChild("crash", link.c_str())));
+
+        REQUIRE(dumpsIn(target / "pending").empty());
+        REQUIRE(dumpsIn(target / "completed").empty());
+
+        std::filesystem::remove(link, ec);
+        std::filesystem::remove_all(target, ec);
+    }
+
+    SECTION("a world-writable crash DB dir is rejected") {
+        auto dir = std::filesystem::temp_directory_path() / "rr-crashdb-open";
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+        std::filesystem::create_directories(dir, ec);
+        REQUIRE(::chmod(dir.c_str(), 0777) == 0);
+
+        REQUIRE(WIFSIGNALED(runCrashChild("crash", dir.c_str())));
+
+        REQUIRE(dumpsIn(dir / "pending").empty());
+        REQUIRE(dumpsIn(dir / "completed").empty());
+
+        std::filesystem::remove_all(dir, ec);
+    }
+
+    SECTION("a fresh crash DB dir is created 0700 and used") {
+        auto dir = std::filesystem::temp_directory_path() / "rr-crashdb-ok";
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+
+        REQUIRE(WIFSIGNALED(runCrashChild("crash", dir.c_str())));
+
+        struct ::stat st {};
+        REQUIRE(::stat(dir.c_str(), &st) == 0);
+        REQUIRE((st.st_mode & 0777) == 0700);
+
+        // Uploads are disabled, so a finished report stays in pending. The
+        // handler is out-of-process and can outlive the child, so poll for it.
+        bool landed = false;
+        for (int i = 0; i < 50 && !landed; ++i) {
+            landed = !(dumpsIn(dir / "pending").empty()
+                       && dumpsIn(dir / "completed").empty());
+            if (!landed) ::usleep(100 * 1000);  // 100ms * 50 = 5s cap
+        }
+        REQUIRE(landed);
+
+        std::filesystem::remove_all(dir, ec);
     }
 }

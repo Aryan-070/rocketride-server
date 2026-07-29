@@ -17,13 +17,44 @@ platform, so one symbolication workflow covers all of them.
 ## Where dumps go
 
 Because Crashpad writes the dump *after* the crashing process is gone, the dump
-first lands in a private Crashpad database (a subdirectory of the system temp
-dir). On the **next engine startup** it is moved into the configured crash-dump
-location and the monitor is notified. So crash notification for Linux/macOS is
-delivered one run later, not at crash time.
+first lands in a private Crashpad database under the system temp dir, named
+`rocketride-crashdb-<uid>-<exe-hash>`. On the **next engine startup** it is moved
+into the configured crash-dump location and the monitor is notified. So crash
+notification for Linux/macOS is delivered one run later, not at crash time.
 
-Set `ROCKETRIDE_CRASHPAD_HANDLER` to override the handler path (relocated
-installs, containers).
+The database directory is created `0700` and re-checked on every start. If it
+already exists but is a symlink, is owned by another user, or grants group or
+other access, the engine logs an error and turns crash reporting off rather than
+write minidumps -- which contain process memory -- somewhere another user can
+read them.
+
+The uid and the executable hash keep separate users and separate installs apart.
+Two instances of the *same* install running as the *same* user still share one
+database, and whichever starts first recovers both sets of dumps. Give each
+instance its own `ROCKETRIDE_CRASHDB_DIR` in that setup.
+
+| Variable | Purpose |
+| --- | --- |
+| `ROCKETRIDE_CRASHPAD_HANDLER` | Override the handler path (relocated installs, containers). |
+| `ROCKETRIDE_CRASHDB_DIR` | Override the crash database directory. The same ownership and mode checks apply, so let the engine create it -- a directory you pre-create with the usual `0755` umask is rejected. `chmod 700` it if it must exist first. |
+
+## Getting a dump by hand
+
+The file in the database is already a complete minidump, so you do not have to
+restart the engine to collect one. Restarting only moves and renames it.
+
+```bash
+# after the crash -- the glob avoids computing the exe hash yourself
+ls -l /tmp/rocketride-crashdb-$(id -u)-*/pending/*.dmp
+```
+
+Read `pending/`, not `new/`: Crashpad writes into `new/` and moves the report to
+`pending/` once it is complete.
+
+If you do restart, the dump is no longer in the database. It has been moved to
+the crash-dump location -- `<base>/logs/` when a task set it, otherwise the
+system temp dir -- and renamed to
+`<exe>.<version>.<build>.<host>.<UTC-timestamp>.<pid>.dmp`.
 
 ## Generating symbols
 
