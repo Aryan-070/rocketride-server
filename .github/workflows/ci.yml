@@ -216,6 +216,26 @@ jobs:
       - run: ruff format --check
 
   # ---------------------------------------------------------------------------
+  #  README sources — the four registry READMEs (npm, PyPI x2, VS Code
+  #  Marketplace + OpenVSX) are NOT stored in git: each package's
+  #  scripts/tasks.js copies one in from docs/ at build time. That copy is
+  #  silent when it breaks, and a registry README cannot be corrected without
+  #  publishing a new version — so a stale one is live until the next release
+  #  of that artifact. This makes the three ways it breaks loud instead.
+  # ---------------------------------------------------------------------------
+  readme-sources:
+    name: README sources
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      # Dependency-free (node:fs + node:path only), so no install step.
+      - run: node .github/scripts/check-readme-sources.mjs
+
+  # ---------------------------------------------------------------------------
   #  gitleaks — secret scan. Installs the binary directly because the upstream
   #  gitleaks-action v2 requires a paid GITLEAKS_LICENSE for org-owned repos;
   #  the binary itself is MIT-licensed and free. Mirrors the local lefthook hook.
