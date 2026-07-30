@@ -193,6 +193,18 @@ class TestGeneratedTypes:
         schema = _schema_of({'type': 'object', 'required': ['x'], 'properties': {'x': {}}})
         assert schema.model_validate({'x': 'anything'}).x == 'anything'
 
+    @pytest.mark.parametrize('json_type', [['string', 'null'], ['integer', 'string'], 123, {'oneOf': []}])
+    def test_non_string_type_falls_back_to_any(self, json_type):
+        """A JSON Schema union — `"type": ["string", "null"]` — is not a map key.
+
+        Handing that list to dict.get raises TypeError on the unhashable key rather
+        than returning the default, so one nullable property would abort the whole
+        _build_crew_tools loop instead of leaving that field untyped.
+        """
+        schema = _schema_of({'type': 'object', 'required': ['x'], 'properties': {'x': {'type': json_type}}})
+        assert schema.model_validate({'x': 'anything'}).x == 'anything'
+        assert schema.model_validate({'x': None}).x is None
+
 
 def _is_typed(prop: dict) -> bool:
     """Whether a rendered property advertises a type to the model.

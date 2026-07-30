@@ -34,7 +34,6 @@ from ..pipedrive_client import (
     clean_mail_message,
     clean_person,
     clean_search_item,
-    clean_user,
     paginated,
     paginated_v2,
 )
@@ -95,6 +94,7 @@ _DEAL_WRITE_PROPS = {
     'lost_reason': STR('Free-text reason, only meaningful when status is "lost".'),
     'visible_to': ENUM('Visibility group id.', ['1', '3', '5', '7']),
     'label': STR('Deal label id, or a comma-separated list of label ids.'),
+    'add_time': STR('Creation timestamp, YYYY-MM-DD HH:MM:SS. Use to backdate an imported record.'),
     'extra': EXTRA(),
 }
 
@@ -555,31 +555,20 @@ class DealsMixin(PipedriveToolsBase):
 
     # -- misc -------------------------------------------------------------
 
-    @pipedrive_tool(
-        group='deals',
-        input_schema=schema(required=['deal_id'], deal_id=INT('Deal id.'), **PAGING()),
-        description='List users who follow a deal, resolved to full user records.',
-    )
-    def deal_followers_users_list(self, args):
-        args = args_of(args)
-        deal_id = require_id(args, 'deal_id', 'deal_followers_users_list')
-        return self._list(f'/deals/{deal_id}/followers', args, clean_user)
+    # There is no deal_followers_users_list tool: it would GET the same
+    # /deals/{id}/followers as deal_followers_list and only differ by running the
+    # rows through clean_user, which builds a user-shaped object out of follower
+    # fields. Resolving followers to users needs a /users/{id} call per follower —
+    # not worth another entry in an already large tool surface.
 
     @pipedrive_tool(
         group='deals',
         input_schema=schema(
+            required=['ids'],
             ids=ARR('Deal ids to delete.', 'integer'),
             extra=OBJ('Additional query parameters passed straight through.'),
         ),
         description='Delete multiple deals in one call.',
     )
     def deal_delete_bulk(self, args):
-        args = args_of(args)
-        ids = args.get('ids') or []
-        if not isinstance(ids, list) or not ids:
-            raise ValueError('deal_delete_bulk: "ids" must be a non-empty array of deal ids')
-        params = {'ids': ','.join(str(int(i)) for i in ids)}
-        if isinstance(args.get('extra'), dict):
-            params.update(args['extra'])
-        self._require_write()
-        return {'deleted': True, 'data': self._call('DELETE', '/deals', params=params)}
+        return self._delete_bulk('/deals', args_of(args), 'deal_delete_bulk', extra_key='extra')

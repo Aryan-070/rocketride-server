@@ -197,13 +197,31 @@ class TestBaseUrl:
 
     @pytest.mark.parametrize(
         'domain',
-        ['acme', 'acme.pipedrive.com', 'https://acme.pipedrive.com', 'https://acme.pipedrive.com/', 'ACME'.lower()],
+        ['acme', 'acme.pipedrive.com', 'https://acme.pipedrive.com', 'https://acme.pipedrive.com/', 'ACME', ' Acme '],
     )
     def test_company_domain_forms(self, domain):
         assert base_url_for(domain) == 'https://acme.pipedrive.com/api/v1'
 
     def test_garbage_domain_falls_back(self):
         assert base_url_for('https://') == BASE_URL
+
+    @pytest.mark.parametrize(
+        'domain',
+        [
+            'evil.example#',  # fragment: requests would send this to evil.example
+            'evil.example?',
+            'evil.example/',
+            'acme@evil.example',
+            'acme:8080',
+            'evil.example',  # a company domain is one label, never a dotted host
+            'acme_corp',
+            '-acme',
+            'acme.pipedrive.com.evil.example',
+        ],
+    )
+    def test_domain_that_could_retarget_the_request_falls_back(self, domain):
+        assert base_url_for(domain) == BASE_URL
+        assert base_url_v2_for(domain) == BASE_URL_V2
 
 
 class TestAuth:
@@ -601,6 +619,36 @@ class TestReadOnly:
         with pytest.raises(ValueError, match='read-only mode'):
             _instance(read_only=True).deal_delete_bulk({'ids': [1, 2]})
         mock_request.assert_not_called()
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_bulk_delete_reports_read_only_before_argument_problems(self, mock_request):
+        """The write gate runs first: a read-only node has nothing to say about ids."""
+        with pytest.raises(ValueError, match='read-only mode'):
+            _instance(read_only=True).deal_delete_bulk({})
+        mock_request.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Path building
+# ---------------------------------------------------------------------------
+
+
+class TestPathSegments:
+    @pytest.mark.parametrize(
+        'tool,args,expected',
+        [
+            ('lead_get', {'lead_id': '../deals/1'}, '/leads/..%2Fdeals%2F1'),
+            ('call_log_get', {'call_log_id': 'a/b'}, '/callLogs/a%2Fb'),
+            ('permission_set_get', {'permission_set_id': 'x?y=1'}, '/permissionSets/x%3Fy%3D1'),
+            ('lead_get', {'lead_id': 'plain-uuid'}, '/leads/plain-uuid'),
+        ],
+    )
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_string_ids_are_encoded_into_one_segment(self, mock_request, tool, args, expected):
+        """An agent-supplied id must not be able to re-target the request."""
+        mock_request.return_value = _ok({'id': 1})
+        getattr(_instance(), tool)(args)
+        assert mock_request.call_args[0][1] == f'{BASE_URL}{expected}'
 
 
 # ---------------------------------------------------------------------------

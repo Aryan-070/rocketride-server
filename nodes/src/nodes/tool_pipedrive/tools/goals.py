@@ -39,6 +39,7 @@ from ._base import (
     args_of,
     body_from,
     params_from,
+    path_segment,
     require_text,
     schema,
 )
@@ -120,7 +121,7 @@ class GoalsMixin(PipedriveToolsBase):
     def goal_update(self, args):
         args = args_of(args)
         goal_id = require_text(args, 'goal_id', 'goal_update')
-        return self._write('PUT', f'/goals/{goal_id}', clean_goal, body=body_from(args, _GOAL_WRITE_KEYS))
+        return self._write('PUT', f'/goals/{path_segment(goal_id)}', clean_goal, body=body_from(args, _GOAL_WRITE_KEYS))
 
     @pipedrive_tool(
         group='goals',
@@ -129,7 +130,7 @@ class GoalsMixin(PipedriveToolsBase):
     )
     def goal_delete(self, args):
         args = args_of(args)
-        return self._delete(f'/goals/{require_text(args, "goal_id", "goal_delete")}')
+        return self._delete(f'/goals/{path_segment(require_text(args, "goal_id", "goal_delete"))}')
 
     @pipedrive_tool(
         group='goals',
@@ -148,4 +149,4 @@ class GoalsMixin(PipedriveToolsBase):
             'period.start': require_text(args, 'period_start', 'goal_results_get'),
             'period.end': require_text(args, 'period_end', 'goal_results_get'),
         }
-        return self._call('GET', f'/goals/{goal_id}/results', params=params)
+        return self._call('GET', f'/goals/{path_segment(goal_id)}/results', params=params)

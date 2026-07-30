@@ -39,6 +39,7 @@ from ._base import (
     PipedriveToolsBase,
     args_of,
     body_from,
+    path_segment,
     require_text,
     schema,
 )
@@ -81,7 +82,7 @@ class CallLogsMixin(PipedriveToolsBase):
     def call_log_get(self, args):
         args = args_of(args)
         log_id = require_text(args, 'call_log_id', 'call_log_get')
-        return self._get(f'/callLogs/{log_id}', clean_call_log)
+        return self._get(f'/callLogs/{path_segment(log_id)}', clean_call_log)
 
     @pipedrive_tool(
         group='call_logs',
@@ -121,7 +122,7 @@ class CallLogsMixin(PipedriveToolsBase):
     def call_log_delete(self, args):
         args = args_of(args)
         log_id = require_text(args, 'call_log_id', 'call_log_delete')
-        return self._delete(f'/callLogs/{log_id}')
+        return self._delete(f'/callLogs/{path_segment(log_id)}')
 
     @pipedrive_tool(
         group='call_logs',
@@ -144,4 +145,4 @@ class CallLogsMixin(PipedriveToolsBase):
         except Exception as exc:
             raise ValueError('call_log_recording_add: "content_base64" is not valid base64') from exc
         files = {'file': (file_name, content)}
-        return self._call('POST', f'/callLogs/{log_id}/recordings', files=files)
+        return self._call('POST', f'/callLogs/{path_segment(log_id)}/recordings', files=files)

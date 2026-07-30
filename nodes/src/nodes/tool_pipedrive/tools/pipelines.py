@@ -274,17 +274,11 @@ class PipelinesMixin(PipedriveToolsBase):
 
     @pipedrive_tool(
         group='stages',
-        input_schema=schema(ids=ARR('Stage ids to delete.', 'integer')),
+        input_schema=schema(required=['ids'], ids=ARR('Stage ids to delete.', 'integer')),
         description='Delete multiple stages in one call.',
     )
     def stage_delete_bulk(self, args):
-        args = args_of(args)
-        ids = args.get('ids') or []
-        if not isinstance(ids, list) or not ids:
-            raise ValueError('stage_delete_bulk: "ids" must be a non-empty array of stage ids')
-        self._require_write()
-        params = {'ids': ','.join(str(int(i)) for i in ids)}
-        return {'deleted': True, 'data': self._call('DELETE', '/stages', params=params)}
+        return self._delete_bulk('/stages', args_of(args), 'stage_delete_bulk')
 
     @pipedrive_tool(
         group='stages',

@@ -39,6 +39,7 @@ from ._base import (
     body_from,
     params_from,
     passthrough,
+    path_segment,
     require_text,
     schema,
 )
@@ -93,7 +94,7 @@ class MiscMixin(PipedriveToolsBase):
     def meeting_link_delete(self, args):
         args = args_of(args)
         link_id = require_text(args, 'link_id', 'meeting_link_delete')
-        return self._delete(f'/meetings/userProviderLinks/{link_id}')
+        return self._delete(f'/meetings/userProviderLinks/{path_segment(link_id)}')
 
     @pipedrive_tool(
         group='misc',
@@ -122,7 +123,7 @@ class MiscMixin(PipedriveToolsBase):
     def channel_delete(self, args):
         args = args_of(args)
         channel_id = require_text(args, 'channel_id', 'channel_delete')
-        return self._delete(f'/channels/{channel_id}')
+        return self._delete(f'/channels/{path_segment(channel_id)}')
 
     @pipedrive_tool(
         group='misc',
@@ -176,4 +177,4 @@ class MiscMixin(PipedriveToolsBase):
         args = args_of(args)
         channel_id = require_text(args, 'channel_id', 'channel_conversation_delete')
         conversation_id = require_text(args, 'conversation_id', 'channel_conversation_delete')
-        return self._delete(f'/channels/{channel_id}/conversations/{conversation_id}')
+        return self._delete(f'/channels/{path_segment(channel_id)}/conversations/{path_segment(conversation_id)}')

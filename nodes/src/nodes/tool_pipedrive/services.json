@@ -56,12 +56,12 @@
 		"pipedrive.toolGroups": {
 			"type": "array",
 			"title": "Tool groups",
-			"description": "Which groups of Pipedrive tools this node publishes to the agent. The full API is 256 tools, which is more than an LLM can choose between reliably, so only the selected groups are exposed. Pick one or more from the list; tool counts are shown per group, and selections totalling more than 120 log a warning but still run. Selecting <b>All groups</b> publishes everything and skips that warning.",
+			"description": "Which groups of Pipedrive tools this node publishes to the agent. The full API is 255 tools, which is more than an LLM can choose between reliably, so only the selected groups are exposed. Pick one or more from the list; tool counts are shown per group, and selections totalling more than 120 log a warning but still run. Selecting <b>All groups</b> publishes everything and skips that warning.",
 			"uniqueItems": true,
 			"items": {
 				"type": "string",
 				"enum": [
-					["deals", "Deals (28)"],
+					["deals", "Deals (27)"],
 					["persons", "Persons (18)"],
 					["organizations", "Organizations (18)"],
 					["activities", "Activities (13)"],
@@ -86,7 +86,7 @@
 					["teams", "Teams (8)"],
 					["users", "Users (12)"],
 					["webhooks", "Webhooks (3)"],
-					["all", "All groups (256) - skips the size warning"]
+					["all", "All groups (255) - skips the size warning"]
 				]
 			},
 			"default": ["deals", "persons", "organizations", "activities", "pipelines", "stages", "notes", "search"]

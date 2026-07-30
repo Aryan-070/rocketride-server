@@ -132,14 +132,32 @@ test('getStatus returns null before any snapshot', async () => {
 	assert.equal(await createLiveEventSession().getStatus(), null);
 });
 
-test('getStatus returns the most recent snapshot', async () => {
+test('getStatus returns the most recent snapshot at the live edge', async () => {
 	const session = createLiveEventSession();
 	session.ingestLive(evt('apaevt_status', { objects: 1 }));
 	session.ingestLive(evt('apaevt_flow'));
 	session.ingestLive(evt('apaevt_status_update', { objects: 7 }));
 
+	await session.seek('live');
 	const status = await session.getStatus();
 	assert.equal(status?.objects, 7);
+});
+
+test('getStatus is bounded by the session position, not the live edge', async () => {
+	const session = createLiveEventSession();
+	const early = evt('apaevt_status', { objects: 1 });
+	const later = evt('apaevt_status_update', { objects: 7 });
+	session.ingestLive(early);
+	session.ingestLive(evt('apaevt_flow'));
+	session.ingestLive(later);
+
+	// Rewind to just after the early snapshot: the status seeded for a replayed
+	// run must be the one in force back then, not the current one.
+	await session.seek(Number(later.body.eventTime));
+	assert.equal((await session.getStatus())?.objects, 1);
+
+	await session.seek(Number(early.body.eventTime));
+	assert.equal(await session.getStatus(), null);
 });
 
 // --- trace detail ------------------------------------------------------------

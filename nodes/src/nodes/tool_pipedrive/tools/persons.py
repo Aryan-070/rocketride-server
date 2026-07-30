@@ -88,6 +88,7 @@ _PERSON_WRITE_PROPS = {
     'marketing_status': ENUM(
         'Consent status for marketing emails.', ['no_consent', 'unsubscribed', 'subscribed', 'archived']
     ),
+    'add_time': STR('Creation timestamp, YYYY-MM-DD HH:MM:SS. Use to backdate an imported record.'),
     'extra': EXTRA(),
 }
 
@@ -202,17 +203,11 @@ class PersonsMixin(PipedriveToolsBase):
 
     @pipedrive_tool(
         group='persons',
-        input_schema=schema(ids=ARR('Person ids to delete.', 'integer')),
+        input_schema=schema(required=['ids'], ids=ARR('Person ids to delete.', 'integer')),
         description='Delete multiple persons in one call.',
     )
     def person_delete_bulk(self, args):
-        args = args_of(args)
-        ids = args.get('ids') or []
-        if not isinstance(ids, list) or not ids:
-            raise ValueError('person_delete_bulk: "ids" must be a non-empty array of person ids')
-        self._require_write()
-        params = {'ids': ','.join(str(int(i)) for i in ids)}
-        return {'deleted': True, 'data': self._call('DELETE', '/persons', params=params)}
+        return self._delete_bulk('/persons', args_of(args), 'person_delete_bulk')
 
     # -- related records --------------------------------------------------
 

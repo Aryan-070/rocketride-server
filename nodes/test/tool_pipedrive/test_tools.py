@@ -24,8 +24,20 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'tool_pipedrive'))
-from pipedrive_client import PipedriveAPIError, base_url_for, base_url_v2_for, call, call_envelope  # noqa: E402
+# Import through the node package, as test_pipedrive.py does. Inserting the node
+# directory itself would publish `pipedrive_client` under a second, generic module
+# identity, so a run collecting both files would load the same source twice.
+_NODES_SRC = str(Path(__file__).resolve().parents[2] / 'src' / 'nodes')
+while _NODES_SRC in sys.path:
+    sys.path.remove(_NODES_SRC)
+sys.path.insert(0, _NODES_SRC)
+from tool_pipedrive.pipedrive_client import (  # noqa: E402
+    PipedriveAPIError,
+    base_url_for,
+    base_url_v2_for,
+    call,
+    call_envelope,
+)
 
 TOKEN = os.getenv('PIPEDRIVE_API_TOKEN', '')
 DOMAIN = os.getenv('PIPEDRIVE_COMPANY_DOMAIN', '')
@@ -269,6 +281,7 @@ class TestReporting:
 
     def test_pipeline_movement_statistics(self):
         pipelines = c('GET', '/pipelines')
+        assert pipelines, 'account has no pipelines'
         stats = c(
             'GET',
             f'/pipelines/{pipelines[0]["id"]}/movement_statistics',
@@ -393,7 +406,6 @@ class TestProducts:
 @writes
 class TestFiles:
     def test_upload_download_delete(self, deal):
-        import base64
         import io
 
         import requests
@@ -412,7 +424,6 @@ class TestFiles:
         try:
             downloaded = call(TOKEN, 'GET', f'/files/{file_id}/download', base_url=BASE, raw=True)
             assert downloaded == payload
-            assert base64.b64encode(downloaded)
         finally:
             c('DELETE', f'/files/{file_id}')
 
@@ -420,12 +431,21 @@ class TestFiles:
 @writes
 class TestFilters:
     def test_create_and_delete(self):
+        # Resolve a real deal field rather than assuming id 1 exists and is a
+        # status field — on a fresh sandbox that assumption fails as a client
+        # error instead of a skip.
+        fields = c('GET', '/dealFields') or []
+        status_field = next((f for f in fields if f.get('key') == 'status'), None)
+        if status_field is None:
+            pytest.skip('account exposes no "status" deal field to filter on')
         conditions = {
             'glue': 'and',
             'conditions': [
                 {
                     'glue': 'and',
-                    'conditions': [{'object': 'deal', 'field_id': '1', 'operator': '=', 'value': 'open'}],
+                    'conditions': [
+                        {'object': 'deal', 'field_id': str(status_field['id']), 'operator': '=', 'value': 'open'}
+                    ],
                 },
                 {'glue': 'or', 'conditions': []},
             ],

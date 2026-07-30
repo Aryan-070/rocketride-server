@@ -33,7 +33,7 @@ offsets the rest of v1 uses, so these tools take a ``cursor`` and return
 
 from __future__ import annotations
 
-from ..pipedrive_client import MAX_LIMIT, clean_activity, clean_project, clean_task
+from ..pipedrive_client import clean_activity, clean_project, clean_task, paginated_v2
 from ..tool_groups import pipedrive_tool
 from ._base import (
     ARR,
@@ -41,21 +41,18 @@ from ._base import (
     ENUM,
     EXTRA,
     INT,
+    PAGING_V2,
     STR,
     PipedriveToolsBase,
     args_of,
     body_from,
+    paging_params_v2,
     params_from,
     passthrough,
     require_id,
     require_text,
     schema,
 )
-
-_CURSOR_PROPS = {
-    'cursor': STR('Pagination cursor from a previous call. Omit for the first page.'),
-    'limit': INT(f'Number of records to return (1-{MAX_LIMIT}, default 100).'),
-}
 
 _PROJECT_WRITE_KEYS = (
     'title',
@@ -116,29 +113,26 @@ class ProjectsMixin(PipedriveToolsBase):
     """Tools for the ``projects`` group."""
 
     def _cursor_list(self, path: str, args: dict, cleaner, *, extra: dict | None = None) -> dict:
-        params: dict = {}
-        if args.get('cursor'):
-            params['cursor'] = args['cursor']
-        if args.get('limit') is not None:
-            params['limit'] = max(1, min(int(args['limit']), MAX_LIMIT))
+        """GET a cursor-paged collection. Same contract as the v2 search tools.
+
+        The project endpoints are v1 routes but page by opaque cursor rather than
+        offset, so they borrow the v2 paging vocabulary — one implementation of
+        the cursor contract, not two that can drift over clamping or cursor
+        trimming.
+        """
+        params = paging_params_v2(args)
         if extra:
             params.update(extra)
         envelope = self._call_envelope('GET', path, params=params)
         data = envelope.get('data') if isinstance(envelope, dict) else None
-        items = [cleaner(item) for item in (data or [])]
-        additional = (envelope.get('additional_data') or {}) if isinstance(envelope, dict) else {}
-        return {
-            'items': items,
-            'count': len(items),
-            'next_cursor': additional.get('next_cursor'),
-        }
+        return paginated_v2(envelope, [cleaner(item) for item in (data or [])])
 
     # -- projects ---------------------------------------------------------
 
     @pipedrive_tool(
         group='projects',
         input_schema=schema(
-            **_CURSOR_PROPS,
+            **PAGING_V2(),
             filter_id=INT('Apply a saved filter by id.'),
             status=STR('Comma-separated statuses to include: open, completed, canceled, deleted.'),
             phase_id=INT('Only projects in this phase.'),
@@ -234,7 +228,7 @@ class ProjectsMixin(PipedriveToolsBase):
         return self._write(
             'PUT',
             f'/projects/{project_id}/plan/activities/{activity_id}',
-            dict,
+            passthrough,
             body=body_from(args, ('phase_id', 'group_id')),
         )
 
@@ -256,7 +250,7 @@ class ProjectsMixin(PipedriveToolsBase):
         return self._write(
             'PUT',
             f'/projects/{project_id}/plan/tasks/{task_id}',
-            dict,
+            passthrough,
             body=body_from(args, ('phase_id', 'group_id')),
         )
 
@@ -286,7 +280,7 @@ class ProjectsMixin(PipedriveToolsBase):
 
     @pipedrive_tool(
         group='projects',
-        input_schema=schema(**_CURSOR_PROPS, project_id=INT('Only tasks of this project.')),
+        input_schema=schema(**PAGING_V2(), project_id=INT('Only tasks of this project.')),
         description='List project tasks.',
     )
     def project_task_list(self, args):
@@ -377,7 +371,7 @@ class ProjectsMixin(PipedriveToolsBase):
 
     @pipedrive_tool(
         group='projects',
-        input_schema=schema(**_CURSOR_PROPS),
+        input_schema=schema(**PAGING_V2()),
         description='List project templates.',
     )
     def project_template_list(self, args):

@@ -39,6 +39,7 @@ from ._base import (
     body_from,
     params_from,
     passthrough,
+    path_segment,
     require_id,
     require_text,
     schema,
@@ -164,7 +165,7 @@ class NotesMixin(PipedriveToolsBase):
         args = args_of(args)
         note_id = require_id(args, 'note_id', 'note_comment_get')
         comment_id = require_text(args, 'comment_id', 'note_comment_get')
-        return self._call('GET', f'/notes/{note_id}/comments/{comment_id}')
+        return self._call('GET', f'/notes/{note_id}/comments/{path_segment(comment_id)}')
 
     @pipedrive_tool(
         group='notes',
@@ -194,7 +195,9 @@ class NotesMixin(PipedriveToolsBase):
         note_id = require_id(args, 'note_id', 'note_comment_update')
         comment_id = require_text(args, 'comment_id', 'note_comment_update')
         content = require_text(args, 'content', 'note_comment_update')
-        return self._write('PUT', f'/notes/{note_id}/comments/{comment_id}', passthrough, body={'content': content})
+        return self._write(
+            'PUT', f'/notes/{note_id}/comments/{path_segment(comment_id)}', passthrough, body={'content': content}
+        )
 
     @pipedrive_tool(
         group='notes',
@@ -207,7 +210,7 @@ class NotesMixin(PipedriveToolsBase):
         args = args_of(args)
         note_id = require_id(args, 'note_id', 'note_comment_delete')
         comment_id = require_text(args, 'comment_id', 'note_comment_delete')
-        return self._delete(f'/notes/{note_id}/comments/{comment_id}')
+        return self._delete(f'/notes/{note_id}/comments/{path_segment(comment_id)}')
 
     # -- fields -----------------------------------------------------------
 

@@ -162,24 +162,38 @@ def _auth(token: str) -> tuple[dict, dict]:
     return {}, {'api_token': token}
 
 
+#: A company subdomain is a single DNS label — letters, digits and inner hyphens.
+_SUBDOMAIN_RE = re.compile(r'^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$')
+
+
 def _company_host(company_domain: str | None) -> str | None:
     """Reduce a configured company domain to its bare subdomain.
 
     Accepts ``acme``, ``acme.pipedrive.com`` or ``https://acme.pipedrive.com/``
-    and returns ``acme``. Returns ``None`` when nothing usable was configured, so
-    callers fall back to the generic host.
+    (in any case) and returns ``acme``. Returns ``None`` when nothing usable was
+    configured, so callers fall back to the generic host.
+
+    The result is interpolated into ``https://{host}.pipedrive.com``, so anything
+    that could end the host early has to be rejected rather than passed through:
+    ``evil.example#`` would otherwise build ``https://evil.example#.pipedrive.com``
+    and send the request — carrying the ``api_token`` or ``Authorization`` that
+    :func:`call_envelope` attaches — to ``evil.example``. Cut at the first path,
+    query or fragment delimiter, refuse userinfo and ports, and require what
+    remains to be a single DNS label.
 
     Shared by both version-specific builders below: the v1 and v2 base URLs must
     always agree about which company they address.
     """
-    domain = (company_domain or '').strip()
+    domain = (company_domain or '').strip().lower()
     if not domain:
         return None
-    domain = re.sub(r'^https?://', '', domain).strip('/')
-    domain = domain.split('/')[0]
+    domain = re.sub(r'^https?://', '', domain)
+    domain = re.split(r'[/?#]', domain, maxsplit=1)[0]
+    if '@' in domain or ':' in domain:
+        return None
     if domain.endswith('.pipedrive.com'):
         domain = domain[: -len('.pipedrive.com')]
-    return domain or None
+    return domain if _SUBDOMAIN_RE.match(domain) else None
 
 
 def base_url_for(company_domain: str | None) -> str:

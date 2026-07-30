@@ -307,7 +307,7 @@ class ProductsMixin(PipedriveToolsBase):
         return self._write(
             'PUT',
             f'/products/{product_id}/variations/{variation_id}',
-            dict,
+            passthrough,
             body=body_from(args, ('name', 'prices')),
         )
 

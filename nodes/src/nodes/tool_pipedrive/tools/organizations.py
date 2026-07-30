@@ -68,6 +68,7 @@ _ORG_WRITE_PROPS = {
     'address': STR('Postal address as a single line.'),
     'label': INT('Organization label id.'),
     'visible_to': ENUM('Visibility group id.', ['1', '3', '5', '7']),
+    'add_time': STR('Creation timestamp, YYYY-MM-DD HH:MM:SS. Use to backdate an imported record.'),
     'extra': EXTRA(),
 }
 
@@ -173,17 +174,11 @@ class OrganizationsMixin(PipedriveToolsBase):
 
     @pipedrive_tool(
         group='organizations',
-        input_schema=schema(ids=ARR('Organization ids to delete.', 'integer')),
+        input_schema=schema(required=['ids'], ids=ARR('Organization ids to delete.', 'integer')),
         description='Delete multiple organizations in one call.',
     )
     def organization_delete_bulk(self, args):
-        args = args_of(args)
-        ids = args.get('ids') or []
-        if not isinstance(ids, list) or not ids:
-            raise ValueError('organization_delete_bulk: "ids" must be a non-empty array of organization ids')
-        self._require_write()
-        params = {'ids': ','.join(str(int(i)) for i in ids)}
-        return {'deleted': True, 'data': self._call('DELETE', '/organizations', params=params)}
+        return self._delete_bulk('/organizations', args_of(args), 'organization_delete_bulk')
 
     # -- related records --------------------------------------------------
 

@@ -324,9 +324,10 @@ class CrewBase(AgentBase):
         """
         Convert host tool descriptors into CrewAI BaseTool instances.
 
-        Each tool's JSON Schema is embedded in the description so CrewAI can
-        pass structured arguments. A dynamic Pydantic args_schema is built per
-        tool to preserve real parameter names through CrewAI's argument filter.
+        A dynamic Pydantic args_schema is built per tool to preserve real
+        parameter names through CrewAI's argument filter. The JSON Schema is not
+        copied into the description: CrewAI renders args_schema into the prompt
+        itself, so a second copy would give the model two contracts to reconcile.
 
         The inner `HostTool` subclass captures `self` and `context` via closure
         on this method so its `_run` / `_arun` methods can call
@@ -366,8 +367,15 @@ class CrewBase(AgentBase):
             `Any` is the deliberate fallback for unions, `null`, and anything the map
             does not cover — a wrong guess here would reject valid tool calls, which
             is worse than leaving the field untyped.
+
+            The non-`str` check is what makes that fallback reachable for unions:
+            JSON Schema spells a nullable field as `"type": ["string", "null"]`, and
+            handing that list to `dict.get` raises TypeError on the unhashable key
+            rather than returning the default — one nullable property would abort the
+            whole `_build_crew_tools` loop.
             """
-            return _JSON_TYPE_MAP.get(prop.get('type'), Any)
+            prop_type = prop.get('type')
+            return _JSON_TYPE_MAP.get(prop_type, Any) if isinstance(prop_type, str) else Any
 
         def _make_args_schema(input_schema: Optional[Dict[str, Any]]) -> type[BaseModel]:
             """

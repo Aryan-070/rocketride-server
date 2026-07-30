@@ -161,10 +161,4 @@ class FieldsMixin(PipedriveToolsBase):
     )
     def field_delete_bulk(self, args):
         args = args_of(args)
-        base = _path(args, 'field_delete_bulk')
-        ids = args.get('ids') or []
-        if not isinstance(ids, list) or not ids:
-            raise ValueError('field_delete_bulk: "ids" must be a non-empty array of field ids')
-        self._require_write()
-        params = {'ids': ','.join(str(int(i)) for i in ids)}
-        return {'deleted': True, 'data': self._call('DELETE', base, params=params)}
+        return self._delete_bulk(_path(args, 'field_delete_bulk'), args, 'field_delete_bulk')

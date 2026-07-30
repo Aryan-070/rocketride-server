@@ -6,7 +6,7 @@ A RocketRide tool node that exposes the Pipedrive CRM to an AI agent.
 
 Gives an agent the full Pipedrive REST API v1: deals, persons, organizations,
 activities, pipelines, stages, notes, leads, products, files, users, roles, teams,
-goals, filters, webhooks, subscriptions, mail, call logs and projects — 256 tools in
+goals, filters, webhooks, subscriptions, mail, call logs and projects — 255 tools in
 all, plus a generic `request` tool for anything Pipedrive adds later. Useful for
 sales automation, lead triage, CRM reporting, and RAG pipelines that read from a CRM.
 
@@ -35,14 +35,14 @@ mutating tool.
 
 ### Tool groups
 
-Full v1 coverage is 256 tools. That is more than an LLM can choose between reliably,
+Full v1 coverage is 255 tools. That is more than an LLM can choose between reliably,
 and more than some providers accept in one request, so the node only publishes the
 groups listed in **Tool groups**. The default eight groups publish 108 tools — the
 everyday CRM surface. Add group names to reach further, or use `all`.
 
 Available groups, with the number of tools each publishes:
 
-`deals` (28), `projects` (22), `organizations` (18), `persons` (18), `products` (16),
+`deals` (27), `projects` (22), `organizations` (18), `persons` (18), `products` (16),
 `activities` (13), `roles` (13), `leads` (12), `users` (12), `notes` (11),
 `subscriptions` (9), `files` (8), `misc` (8), `pipelines` (8), `teams` (8),
 `filters` (7), `stages` (7), `fields` (6), `mailbox` (6), `call_logs` (5),
@@ -58,7 +58,7 @@ invoked anyway.
 
 ### Tool-count guard rail
 
-Group sizes are uneven — `deals` is 28 tools, `permission_sets` is 3 — so counting
+Group sizes are uneven — `deals` is 27 tools, `permission_sets` is 3 — so counting
 groups tells you little. The node counts **published tools** instead and warns when
 a selection exceeds **120**, both in the config panel and at pipeline start:
 
@@ -71,15 +71,16 @@ request. Drop a group, or use "all" if this is deliberate.
 It is a warning, not a block: the tools are still published and the pipeline still
 runs. Silently dropping tools an operator asked for fails later and more
 confusingly than a noisy config panel. `all` is exempt, since it is already an
-explicit opt-in to the full 256-tool surface and suits scripted callers that do not
+explicit opt-in to the full 255-tool surface and suits scripted callers that do not
 route through an LLM.
 
 ### Pagination
 
 List tools take `start` (offset, default 0) and `limit` (1-500, default 100), and
 return `{items, count, more_items_in_collection, next_start}`. Pass `next_start` back
-as `start` for the next page. The project tools use Pipedrive's cursor pagination
-instead: pass `cursor` and read `next_cursor`.
+as `start` for the next page. `file_list` is the exception: `/files` documents a
+maximum `limit` of 100, so that tool advertises and clamps to 100. The project tools
+use Pipedrive's cursor pagination instead: pass `cursor` and read `next_cursor`.
 
 ### Custom fields
 
@@ -153,7 +154,7 @@ Tools are published as `pipedrive.<tool>`.
 | `call_log_list` | List the call logs of the authenticated user. |
 | `call_log_recording_add` | Attach an audio recording to a call log. |
 
-#### `deals` — 28 tools
+#### `deals` — 27 tools
 
 | Tool | Description |
 |---|---|
@@ -166,7 +167,6 @@ Tools are published as `pipedrive.<tool>`.
 | `deal_follower_add` | Add a follower to a deal. |
 | `deal_follower_delete` | Remove a follower from a deal. |
 | `deal_followers_list` | List followers of a deal. |
-| `deal_followers_users_list` | List users who follow a deal, resolved to full user records. |
 | `deal_get` | Get a single deal by id, including its custom fields. |
 | `deal_list` | List deals, optionally filtered by owner, stage, status or a saved filter. |
 | `deal_mail_messages_list` | List email messages associated with a deal. |

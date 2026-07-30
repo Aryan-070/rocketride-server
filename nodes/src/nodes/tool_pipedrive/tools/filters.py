@@ -121,17 +121,11 @@ class FiltersMixin(PipedriveToolsBase):
 
     @pipedrive_tool(
         group='filters',
-        input_schema=schema(ids=ARR('Filter ids to delete.', 'integer')),
+        input_schema=schema(required=['ids'], ids=ARR('Filter ids to delete.', 'integer')),
         description='Delete multiple saved filters in one call.',
     )
     def filter_delete_bulk(self, args):
-        args = args_of(args)
-        ids = args.get('ids') or []
-        if not isinstance(ids, list) or not ids:
-            raise ValueError('filter_delete_bulk: "ids" must be a non-empty array of filter ids')
-        self._require_write()
-        params = {'ids': ','.join(str(int(i)) for i in ids)}
-        return {'deleted': True, 'data': self._call('DELETE', '/filters', params=params)}
+        return self._delete_bulk('/filters', args_of(args), 'filter_delete_bulk')
 
     @pipedrive_tool(
         group='filters',

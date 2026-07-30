@@ -26,13 +26,13 @@
 """
 Tool grouping for the Pipedrive node.
 
-Full v1 coverage is 256 tools, which is far more than an LLM can choose between
+Full v1 coverage is 255 tools, which is far more than an LLM can choose between
 reliably. Every tool is therefore tagged with a resource group, and the node only
 publishes the groups named in the ``pipedrive.toolGroups`` config field. The
 filtering happens in ``IInstance._collect_tool_methods()``, so a group that is not
 published is invisible to ``tool.query`` and rejected by ``tool.invoke`` alike.
 
-Group sizes are very uneven (``deals`` is 28 tools, ``permission_sets`` is 3), so
+Group sizes are very uneven (``deals`` is 27 tools, ``permission_sets`` is 3), so
 the guard rail counts published *tools* rather than groups. Crossing it only warns:
 scripted callers legitimately want a wide surface, and silently dropping tools an
 operator asked for is worse than a noisy config panel.

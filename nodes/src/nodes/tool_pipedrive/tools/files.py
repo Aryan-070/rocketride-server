@@ -57,17 +57,22 @@ _ATTACH_PROPS = {
 }
 
 
+#: /files documents a maximum ``limit`` of 100, below the 500 the other v1
+#: collections accept — asking for more is rejected rather than clamped.
+_FILES_MAX_LIMIT = 100
+
+
 class FilesMixin(PipedriveToolsBase):
     """Tools for the ``files`` group."""
 
     @pipedrive_tool(
         group='files',
-        input_schema=schema(sort=STR('Sort clause, e.g. "update_time DESC".'), **PAGING()),
+        input_schema=schema(sort=STR('Sort clause, e.g. "update_time DESC".'), **PAGING(_FILES_MAX_LIMIT)),
         description='List files stored in Pipedrive.',
     )
     def file_list(self, args):
         args = args_of(args)
-        return self._list('/files', args, clean_file, extra=params_from(args, ('sort',)))
+        return self._list('/files', args, clean_file, extra=params_from(args, ('sort',)), max_limit=_FILES_MAX_LIMIT)
 
     @pipedrive_tool(
         group='files',

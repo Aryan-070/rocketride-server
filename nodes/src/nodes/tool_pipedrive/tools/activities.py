@@ -170,17 +170,11 @@ class ActivitiesMixin(PipedriveToolsBase):
 
     @pipedrive_tool(
         group='activities',
-        input_schema=schema(ids=ARR('Activity ids to delete.', 'integer')),
+        input_schema=schema(required=['ids'], ids=ARR('Activity ids to delete.', 'integer')),
         description='Delete multiple activities in one call.',
     )
     def activity_delete_bulk(self, args):
-        args = args_of(args)
-        ids = args.get('ids') or []
-        if not isinstance(ids, list) or not ids:
-            raise ValueError('activity_delete_bulk: "ids" must be a non-empty array of activity ids')
-        self._require_write()
-        params = {'ids': ','.join(str(int(i)) for i in ids)}
-        return {'deleted': True, 'data': self._call('DELETE', '/activities', params=params)}
+        return self._delete_bulk('/activities', args_of(args), 'activity_delete_bulk')
 
     # -- activity types ---------------------------------------------------
 
@@ -247,17 +241,11 @@ class ActivitiesMixin(PipedriveToolsBase):
 
     @pipedrive_tool(
         group='activities',
-        input_schema=schema(ids=ARR('Activity type ids to delete.', 'integer')),
+        input_schema=schema(required=['ids'], ids=ARR('Activity type ids to delete.', 'integer')),
         description='Delete multiple activity types in one call.',
     )
     def activity_type_delete_bulk(self, args):
-        args = args_of(args)
-        ids = args.get('ids') or []
-        if not isinstance(ids, list) or not ids:
-            raise ValueError('activity_type_delete_bulk: "ids" must be a non-empty array of activity type ids')
-        self._require_write()
-        params = {'ids': ','.join(str(int(i)) for i in ids)}
-        return {'deleted': True, 'data': self._call('DELETE', '/activityTypes', params=params)}
+        return self._delete_bulk('/activityTypes', args_of(args), 'activity_type_delete_bulk')
 
     # -- activity fields --------------------------------------------------
 

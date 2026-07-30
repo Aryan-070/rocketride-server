@@ -39,6 +39,7 @@ from ._base import (
     body_from,
     params_from,
     passthrough,
+    path_segment,
     require_id,
     require_text,
     schema,
@@ -234,7 +235,7 @@ class RolesMixin(PipedriveToolsBase):
     def permission_set_get(self, args):
         args = args_of(args)
         set_id = require_text(args, 'permission_set_id', 'permission_set_get')
-        return self._call('GET', f'/permissionSets/{set_id}')
+        return self._call('GET', f'/permissionSets/{path_segment(set_id)}')
 
     @pipedrive_tool(
         group='permission_sets',
@@ -244,4 +245,4 @@ class RolesMixin(PipedriveToolsBase):
     def permission_set_assignments_list(self, args):
         args = args_of(args)
         set_id = require_text(args, 'permission_set_id', 'permission_set_assignments_list')
-        return self._list(f'/permissionSets/{set_id}/assignments', args, clean_user)
+        return self._list(f'/permissionSets/{path_segment(set_id)}/assignments', args, clean_user)

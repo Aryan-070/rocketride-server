@@ -45,6 +45,7 @@ from ._base import (
     paging_params_v2,
     params_from,
     passthrough,
+    path_segment,
     require_text,
     schema,
 )
@@ -76,6 +77,7 @@ _LEAD_WRITE_PROPS = {
     'was_seen': BOOL('Whether the lead has been opened by a user.'),
     'channel': INT('Marketing channel id the lead came from.'),
     'channel_id': STR('Optional identifier within the marketing channel.'),
+    'origin_id': STR('Free-text id of the system this lead originated from.'),
     'extra': EXTRA(),
 }
 
@@ -116,7 +118,7 @@ class LeadsMixin(PipedriveToolsBase):
     )
     def lead_get(self, args):
         args = args_of(args)
-        return self._get(f'/leads/{require_text(args, "lead_id", "lead_get")}', clean_lead)
+        return self._get(f'/leads/{path_segment(require_text(args, "lead_id", "lead_get"))}', clean_lead)
 
     @pipedrive_tool(
         group='leads',
@@ -166,7 +168,7 @@ class LeadsMixin(PipedriveToolsBase):
         args = args_of(args)
         lead_id = require_text(args, 'lead_id', 'lead_update')
         body = body_from(args, (*_LEAD_WRITE_KEYS, 'is_archived'))
-        return self._write('PATCH', f'/leads/{lead_id}', clean_lead, body=body)
+        return self._write('PATCH', f'/leads/{path_segment(lead_id)}', clean_lead, body=body)
 
     @pipedrive_tool(
         group='leads',
@@ -175,7 +177,7 @@ class LeadsMixin(PipedriveToolsBase):
     )
     def lead_delete(self, args):
         args = args_of(args)
-        return self._delete(f'/leads/{require_text(args, "lead_id", "lead_delete")}')
+        return self._delete(f'/leads/{path_segment(require_text(args, "lead_id", "lead_delete"))}')
 
     @pipedrive_tool(
         group='leads',
@@ -185,7 +187,7 @@ class LeadsMixin(PipedriveToolsBase):
     def lead_permitted_users_list(self, args):
         args = args_of(args)
         lead_id = require_text(args, 'lead_id', 'lead_permitted_users_list')
-        return {'user_ids': self._call('GET', f'/leads/{lead_id}/permittedUsers')}
+        return {'user_ids': self._call('GET', f'/leads/{path_segment(lead_id)}/permittedUsers')}
 
     # -- labels -----------------------------------------------------------
 
@@ -230,7 +232,9 @@ class LeadsMixin(PipedriveToolsBase):
     def lead_label_update(self, args):
         args = args_of(args)
         label_id = require_text(args, 'label_id', 'lead_label_update')
-        return self._write('PATCH', f'/leadLabels/{label_id}', passthrough, body=body_from(args, ('name', 'color')))
+        return self._write(
+            'PATCH', f'/leadLabels/{path_segment(label_id)}', passthrough, body=body_from(args, ('name', 'color'))
+        )
 
     @pipedrive_tool(
         group='leads',
@@ -239,7 +243,7 @@ class LeadsMixin(PipedriveToolsBase):
     )
     def lead_label_delete(self, args):
         args = args_of(args)
-        return self._delete(f'/leadLabels/{require_text(args, "label_id", "lead_label_delete")}')
+        return self._delete(f'/leadLabels/{path_segment(require_text(args, "label_id", "lead_label_delete"))}')
 
     # -- sources ----------------------------------------------------------
 

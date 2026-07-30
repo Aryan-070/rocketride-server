@@ -156,11 +156,15 @@ export function createLiveEventStore(): LiveEventStore {
 			},
 
 			/**
-			 * The most recent status snapshot, or null when none has arrived —
-			 * the hook falls back to its own seed in that case.
+			 * The most recent status snapshot at-or-before this view's position,
+			 * or null when none has arrived — the hook falls back to its own seed
+			 * in that case. Scanning back from the watermark rather than the live
+			 * edge is what makes it honour a `seek()` to an earlier anchor: the
+			 * hook calls this straight after seeking, and the live-edge status
+			 * would otherwise seed a replayed run with the current one.
 			 */
 			async getStatus(): Promise<Record<string, unknown> | null> {
-				for (let index = buffer.length - 1; index >= 0; index--) {
+				for (let index = Math.min(watermark, buffer.length) - 1; index >= 0; index--) {
 					const message = buffer[index];
 					if (message.event === 'apaevt_status' || message.event === 'apaevt_status_update') {
 						return (message.body ?? null) as Record<string, unknown> | null;

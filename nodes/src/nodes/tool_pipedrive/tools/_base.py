@@ -34,6 +34,7 @@ definitions stay readable.
 from __future__ import annotations
 
 from typing import Any, Iterable
+from urllib.parse import quote
 
 from ai.common.utils import normalize_tool_input, require_int, require_str
 
@@ -105,10 +106,13 @@ def EXTRA() -> dict:
 
 
 #: Offset-pagination properties, spread into list-tool schemas.
-def PAGING() -> dict:
+def PAGING(max_limit: int = MAX_LIMIT) -> dict:
+    """Offset-paging schema. ``max_limit`` overrides the ceiling for endpoints
+    that document a smaller one than the shared default (``/files`` caps at 100).
+    """
     return {
         'start': INT('Pagination offset, 0-based (default 0). Pass the next_start value from a previous call.'),
-        'limit': INT(f'Number of records to return (1-{MAX_LIMIT}, default 100).'),
+        'limit': INT(f'Number of records to return (1-{max_limit}, default 100).'),
     }
 
 
@@ -170,9 +174,9 @@ class PipedriveToolsBase:
         """
         return call_envelope(self._token(), method, path, base_url=self._base_v2(), **kwargs)
 
-    def _list(self, path: str, args: dict, cleaner, *, extra: dict | None = None) -> dict:
+    def _list(self, path: str, args: dict, cleaner, *, extra: dict | None = None, max_limit: int = MAX_LIMIT) -> dict:
         """GET a collection with offset pagination and return cleaned items + cursor."""
-        params = paging_params(args)
+        params = paging_params(args, max_limit)
         if extra:
             params.update(extra)
         envelope = self._call_envelope('GET', path, params=params)
@@ -192,6 +196,23 @@ class PipedriveToolsBase:
         data = self._call('DELETE', path, params=params)
         return {'deleted': True, 'data': data}
 
+    def _delete_bulk(self, path: str, args: dict, tool: str, *, extra_key: str | None = None) -> dict:
+        """Delete several records in one call: ``DELETE path?ids=1,2,3``.
+
+        The write gate runs before the argument check on purpose — a read-only
+        node should say so rather than complain about arguments it would never
+        act on. ``ids`` is also marked required in each caller's schema, so the
+        guard here only catches a malformed list that passed validation.
+        """
+        self._require_write()
+        ids = args.get('ids')
+        if not isinstance(ids, list) or not ids:
+            raise ValueError(f'{tool}: "ids" must be a non-empty array of ids')
+        params = {'ids': ','.join(str(int(i)) for i in ids)}
+        if extra_key and isinstance(args.get(extra_key), dict):
+            params.update(args[extra_key])
+        return {'deleted': True, 'data': self._call('DELETE', path, params=params)}
+
 
 # ---------------------------------------------------------------------------
 # Argument helpers
@@ -203,13 +224,13 @@ def args_of(args: Any) -> dict:
     return normalize_tool_input(args, tool_name=TOOL_NAME)
 
 
-def paging_params(args: dict) -> dict:
+def paging_params(args: dict, max_limit: int = MAX_LIMIT) -> dict:
     """Clamp start/limit to what Pipedrive's v1 offset pagination accepts."""
     params: dict = {}
     if args.get('start') is not None:
         params['start'] = max(0, int(args['start']))
     if args.get('limit') is not None:
-        params['limit'] = max(1, min(int(args['limit']), MAX_LIMIT))
+        params['limit'] = max(1, min(int(args['limit']), max_limit))
     return params
 
 
@@ -255,3 +276,15 @@ def require_id(args: dict, key: str, tool: str) -> int:
 
 def require_text(args: dict, key: str, tool: str) -> str:
     return require_str(args, key, tool_name=tool)
+
+
+def path_segment(value: Any) -> str:
+    """URL-encode an agent-supplied id before it is interpolated into a path.
+
+    Numeric ids are safe because :func:`require_id` coerces them, but uuids,
+    permission-set ids and channel ids arrive as free-form strings straight from
+    the model. A value carrying ``/``, ``..``, ``?`` or ``#`` would silently
+    retarget the request at a different Pipedrive endpoint — for the delete tools,
+    an unintended destructive one.
+    """
+    return quote(str(value), safe='')
