@@ -36,11 +36,11 @@ class GLiNERLoader(BaseLoader):
 
     LOADER_TYPE: str = 'gliner'
     _REQUIREMENTS_FILE = os.path.join(os.path.dirname(__file__), 'requirements_gliner.txt')
-    _DEFAULTS: dict = {
-        'threshold': 0.5,
-        'flat_ner': True,
-        'multi_label': False,
-    }
+
+    # No identity defaults. `threshold`, `flat_ner` and `multi_label` are inference-time
+    # arguments applied per call in inference(), not load-time ones — load() builds the
+    # model with from_pretrained(model_name) alone. Folding them in here made two GLiNER
+    # instances differing only in threshold load separate copies of identical weights.
 
     @staticmethod
     def load(
@@ -324,10 +324,14 @@ class GLiNER:
         Args:
             model_name_or_path: Model name or path
             device: Device ('server', 'cuda', 'cpu', 'cuda:N', or None for auto)
-            threshold: Confidence threshold for entity detection
-            flat_ner: Whether to use flat NER (no nested entities)
-            multi_label: Whether to allow multiple labels per span
+            threshold: Default confidence threshold, applied per call
+            flat_ner: Default flat-NER setting, applied per call
+            multi_label: Default multi-label setting, applied per call
             **kwargs: Additional arguments for model loading
+
+        The three inference defaults above are applied at predict time and can be
+        overridden per call in predict_entities(). They are not part of model identity,
+        so instances differing only in these values share one copy on the model server.
         """
         self.model_name = model_name_or_path
         self.device = device
@@ -360,11 +364,14 @@ class GLiNER:
             )
 
     def _init_proxy(self) -> None:
-        """Initialize proxy connection and load model on server."""
+        """Initialize proxy connection and load model on server.
+
+        `threshold`, `flat_ner` and `multi_label` are deliberately not sent: they are
+        inference-time arguments, re-sent per request by _predict_remote(), and
+        generate_model_id() hashes loader options into model identity — so including
+        them would load a separate identical copy of the weights per distinct value.
+        """
         loader_options = {
-            'threshold': self.threshold,
-            'flat_ner': self.flat_ner,
-            'multi_label': self.multi_label,
             **self.kwargs,
         }
         self._client.load_model(
