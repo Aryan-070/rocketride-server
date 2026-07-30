@@ -51,8 +51,8 @@ class WhisperLoader(BaseLoader):
         See _DEFAULTS for default values applied before hashing.
 
         `language` is deliberately excluded: faster-whisper models are multilingual and
-        `language` is a transcribe()-time decode hint, so folding it in loaded one
-        identical copy of the weights per language. `compute_type` stays — precision
+        `language` is a transcribe()-time decode hint, so folding it into identity loads
+        an identical copy of the weights per language. `compute_type` stays — precision
         genuinely changes the loaded weights.
 
     Performance Note:
@@ -447,6 +447,7 @@ class WhisperLoader(BaseLoader):
         raw_output: List[Dict[str, Any]],
         batch_size: int,
         output_fields: List[str],
+        language: Optional[str] = None,
         **kwargs,
     ) -> List[Dict[str, Any]]:
         """
@@ -457,6 +458,9 @@ class WhisperLoader(BaseLoader):
             raw_output: Output from inference()
             batch_size: Expected batch size
             output_fields: Fields to extract (e.g., ['$text', '$segments'])
+            language: Language resolved for this request. Used only as a fallback for
+                results that don't already carry one; falls back to the loaded value
+                when not supplied, preserving the previous behaviour.
             **kwargs: Additional parameters (ignored)
 
         Returns:
@@ -464,17 +468,20 @@ class WhisperLoader(BaseLoader):
         """
         from ..extract import extract_outputs
 
-        # Get language from metadata
-        if hasattr(model, 'metadata'):
-            language = model.metadata.get('language', 'en')
-        elif isinstance(model, dict):
-            language = model.get('language', 'en')
-        else:
-            language = 'en'
+        # Fall back to the loaded language only when the caller didn't resolve one.
+        if language is None:
+            if hasattr(model, 'metadata'):
+                language = model.metadata.get('language', 'en')
+            elif isinstance(model, dict):
+                language = model.get('language', 'en')
+            else:
+                language = 'en'
 
         results = []
         for output in raw_output:
-            output_with_lang = {**output, 'language': language}
+            # Fallback first, so a language already on the output — the one the decoder
+            # actually detected — is preserved rather than overwritten.
+            output_with_lang = {'language': language, **output}
             extracted = extract_outputs(output_with_lang, output_fields)
             results.append(extracted)
 
@@ -682,7 +689,13 @@ class Whisper:
 
         # Postprocess phase — extract requested output fields
         t0 = time.perf_counter()
-        results = WhisperLoader.postprocess(self._model, raw_output, 1, self.output_fields)
+        results = WhisperLoader.postprocess(
+            self._model,
+            raw_output,
+            1,
+            self.output_fields,
+            language=language,
+        )
         t_post = (time.perf_counter() - t0) * 1000
 
         # Report all perf counters — same keys as model server response

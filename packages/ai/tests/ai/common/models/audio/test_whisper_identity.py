@@ -98,18 +98,62 @@ def test_per_call_language_overrides_the_instance_default(monkeypatch):
     assert args['language'] == 'fr'
 
 
-def test_inference_falls_back_to_loaded_language_when_not_passed():
-    """Back-compat: an older caller that omits `language` keeps the previous behaviour."""
-    captured = {}
+class _FakeWhisperModel:
+    """Records the decode kwargs faster-whisper would have received."""
 
-    class _FakeWhisperModel:
-        def transcribe(self, audio, **kw):
-            captured.update(kw)
-            return iter(()), type('Info', (), {'language': kw.get('language')})()
+    def __init__(self):
+        self.captured = {}
 
-    bundle = {'model': _FakeWhisperModel(), 'language': 'ja'}
-    preprocessed = {'audios': [[0.0] * 2000], 'batch_size': 1, 'language': 'ja'}
+    def transcribe(self, audio, **kw):
+        self.captured.update(kw)
+        return iter(()), type('Info', (), {'language': kw.get('language')})()
 
-    WhisperLoader.inference(bundle, preprocessed)
 
-    assert captured['language'] == 'ja'
+def _run_inference(bundle_language=None, preprocessed_language=None, language=None):
+    model = _FakeWhisperModel()
+    bundle = {'model': model}
+    if bundle_language is not None:
+        bundle['language'] = bundle_language
+
+    preprocessed = {'audios': [[0.0] * 2000], 'batch_size': 1}
+    if preprocessed_language is not None:
+        preprocessed['language'] = preprocessed_language
+
+    WhisperLoader.inference(bundle, preprocessed, language=language)
+    return model.captured
+
+
+def test_inference_falls_back_to_bundle_language():
+    """Back-compat: with nothing on preprocessed, the loaded bundle value is used."""
+    assert _run_inference(bundle_language='ja')['language'] == 'ja'
+
+
+def test_inference_falls_back_to_preprocessed_language():
+    """preprocess() carries the loaded language forward; it beats the bundle value."""
+    assert _run_inference(bundle_language='ja', preprocessed_language='ko')['language'] == 'ko'
+
+
+def test_inference_prefers_the_per_request_language():
+    """An explicit per-request language wins over both fallbacks."""
+    captured = _run_inference(bundle_language='ja', preprocessed_language='ko', language='fr')
+    assert captured['language'] == 'fr'
+
+
+def test_postprocess_does_not_clobber_the_request_language():
+    """Regression: decoding in `fr` must not be reported as the loaded `de`."""
+    bundle = {'model': _FakeWhisperModel(), 'language': 'de'}
+    raw_output = [{'segments': [], 'text': 'bonjour', 'language': 'fr'}]
+
+    results = WhisperLoader.postprocess(bundle, raw_output, 1, ['$text', 'language'], language='fr')
+
+    assert results[0]['language'] == 'fr'
+
+
+def test_postprocess_still_falls_back_to_loaded_language():
+    """Callers that don't resolve a language keep the previous metadata-derived value."""
+    bundle = {'model': _FakeWhisperModel(), 'language': 'de'}
+    raw_output = [{'segments': [], 'text': 'hallo'}]
+
+    results = WhisperLoader.postprocess(bundle, raw_output, 1, ['$text', 'language'])
+
+    assert results[0]['language'] == 'de'
