@@ -650,6 +650,31 @@ class TestPathSegments:
         getattr(_instance(), tool)(args)
         assert mock_request.call_args[0][1] == f'{BASE_URL}{expected}'
 
+    @pytest.mark.parametrize('bad_id', ['.', '..', ' .. '])
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_dot_segments_are_rejected_not_encoded(self, mock_request, bad_id):
+        """quote() escapes nothing in ".."; it would reach the API and walk up a level."""
+        with pytest.raises(ValueError, match='another resource'):
+            _instance().lead_get({'lead_id': bad_id})
+        mock_request.assert_not_called()
+
+
+class TestBulkDeleteParams:
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_extra_cannot_override_the_validated_ids(self, mock_request):
+        """A pass-through "ids" must not replace the list that was validated."""
+        mock_request.return_value = _ok({'success': True})
+        _instance().deal_delete_bulk({'ids': [1], 'extra': {'ids': '2,3'}})
+        assert mock_request.call_args[1]['params']['ids'] == '1'
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_extra_still_passes_other_params_through(self, mock_request):
+        mock_request.return_value = _ok({'success': True})
+        _instance().deal_delete_bulk({'ids': [1, 2], 'extra': {'force': 1}})
+        params = mock_request.call_args[1]['params']
+        assert params['ids'] == '1,2'
+        assert params['force'] == 1
+
 
 # ---------------------------------------------------------------------------
 # The raw request escape hatch

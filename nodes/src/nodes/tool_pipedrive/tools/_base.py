@@ -203,14 +203,19 @@ class PipedriveToolsBase:
         node should say so rather than complain about arguments it would never
         act on. ``ids`` is also marked required in each caller's schema, so the
         guard here only catches a malformed list that passed validation.
+
+        ``extra`` is merged *before* ``ids`` is assigned: a pass-through of
+        ``{'ids': '2,3'}`` must not quietly replace the list that was validated
+        and delete a different set of records.
         """
         self._require_write()
         ids = args.get('ids')
         if not isinstance(ids, list) or not ids:
             raise ValueError(f'{tool}: "ids" must be a non-empty array of ids')
-        params = {'ids': ','.join(str(int(i)) for i in ids)}
+        params: dict = {}
         if extra_key and isinstance(args.get(extra_key), dict):
             params.update(args[extra_key])
+        params['ids'] = ','.join(str(int(i)) for i in ids)
         return {'deleted': True, 'data': self._call('DELETE', path, params=params)}
 
 
@@ -283,8 +288,15 @@ def path_segment(value: Any) -> str:
 
     Numeric ids are safe because :func:`require_id` coerces them, but uuids,
     permission-set ids and channel ids arrive as free-form strings straight from
-    the model. A value carrying ``/``, ``..``, ``?`` or ``#`` would silently
-    retarget the request at a different Pipedrive endpoint — for the delete tools,
-    an unintended destructive one.
+    the model. A value carrying ``/``, ``?`` or ``#`` would silently retarget the
+    request at a different Pipedrive endpoint — for the delete tools, an
+    unintended destructive one.
+
+    ``.`` and ``..`` are rejected rather than encoded: they contain no character
+    :func:`quote` escapes, so ``/notes/{id}/comments/..`` would survive encoding
+    intact and resolve to the parent resource.
     """
-    return quote(str(value), safe='')
+    segment = str(value)
+    if segment.strip() in ('.', '..'):
+        raise ValueError(f'invalid id {segment!r}: "." and ".." address another resource')
+    return quote(segment, safe='')
