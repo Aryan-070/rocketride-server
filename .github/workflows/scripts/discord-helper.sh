@@ -170,7 +170,13 @@ discord_sync_thread() {
   [ -z "${DISCORD_GITHUB_BOT_TOKEN:-}" ] && return 0
   [ -z "$thread_id" ] && return 0
   if [ -z "$tags" ] || [ "$tags" = "[]" ]; then
+    # Omitting the key (never sending applied_tags:[]) is deliberate: an empty
+    # resolve can mean "no tag config for this channel" OR "config present but
+    # nothing matched" (e.g. a state/label name missing from the ids map).
+    # Either way, leaving existing tags untouched is safer than clobbering them
+    # to empty on a config typo — but warn so a real misconfiguration is visible.
     body="{\"archived\": ${archived}}"
+    echo "::warning::Discord thread sync: no tags resolved for thread ${thread_id} — leaving existing tags untouched (check discord-forum-tags.json if this is unexpected)" >&2
   else
     body="{\"archived\": ${archived}, \"applied_tags\": ${tags}}"
   fi
