@@ -1,5 +1,6 @@
 """Unit tests for the Surya loader + facade (no torch/surya needed)."""
 
+from ai.common.models.base import BaseLoader
 from ai.common.models.ocr.surya import SuryaLoader, Surya
 import ai.common.models.ocr.surya as suryamod
 
@@ -19,10 +20,13 @@ def test_model_id_ignores_languages():
     assert base == en == multi
 
 
-def test_model_id_still_splits_on_real_load_params():
-    """Guard against over-broad filtering: genuine load params must still change identity."""
-    base = SuryaLoader.generate_model_id('surya')
-    assert SuryaLoader.generate_model_id('surya', revision='abc') != base
+def test_identity_exclusion_is_not_widened():
+    """Guard against over-broad filtering: `languages` is the only addition to the base set.
+
+    Asserting on a sample loader kwarg instead would be misleading here — `SuryaLoader.load()`
+    ignores `**kwargs` entirely, so no extra kwarg actually changes the loaded predictors.
+    """
+    assert SuryaLoader._SERVER_PARAMS == BaseLoader._SERVER_PARAMS | {'languages'}
 
 
 class _FakeClient:
@@ -65,14 +69,7 @@ def test_facade_still_accepts_languages_and_forwards_kwargs(monkeypatch):
     assert loader_options == {'revision': 'abc'}
 
 
-def test_differing_languages_produce_one_identity(monkeypatch):
-    """End-to-end of the acceptance criterion, through the facade rather than the loader."""
-    _proxy_surya(monkeypatch, languages=['en'])
-    en_options = _FakeClient.captured['load'][2]
-
-    _proxy_surya(monkeypatch, languages=['en', 'de', 'fr'])
-    multi_options = _FakeClient.captured['load'][2]
-
-    assert SuryaLoader.generate_model_id('surya', **en_options) == SuryaLoader.generate_model_id(
-        'surya', **multi_options
-    )
+def test_identity_stable_if_an_older_client_still_sends_languages():
+    """The facade no longer sends `languages`, but an older client on a newer server may."""
+    base = SuryaLoader.generate_model_id('surya')
+    assert SuryaLoader.generate_model_id('surya', languages=['en', 'de']) == base

@@ -278,10 +278,11 @@ class Surya:
     def _init_proxy(self, server_addr: str) -> None:
         """Initialize proxy to model server.
 
-        `languages` is deliberately not sent: it has no effect on the loaded model
-        (see SuryaLoader.load) and `generate_model_id()` hashes every loader option
-        into model identity, so including it would load a separate identical copy of
-        the ~3GB weights per distinct language list.
+        `languages` is not sent because it has no effect on the loaded model (see
+        SuryaLoader.load). Identity stability does not depend on that omission: the
+        guarantee is `_SERVER_PARAMS`, which excludes `languages` from the hash even
+        when a caller does send it, so one copy of the ~3GB weights is shared across
+        every language list.
         """
         self._client = ModelClient(server_addr)
         self._client.load_model(
