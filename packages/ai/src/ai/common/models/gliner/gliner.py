@@ -38,9 +38,9 @@ class GLiNERLoader(BaseLoader):
     _REQUIREMENTS_FILE = os.path.join(os.path.dirname(__file__), 'requirements_gliner.txt')
 
     # No identity defaults. `threshold`, `flat_ner` and `multi_label` are inference-time
-    # arguments applied per call in inference(), not load-time ones — load() builds the
-    # model with from_pretrained(model_name) alone. Folding them in here made two GLiNER
-    # instances differing only in threshold load separate copies of identical weights.
+    # arguments applied per call in inference(), not load-time ones. Folding them in here
+    # made two GLiNER instances differing only in threshold load separate copies of
+    # identical weights.
 
     @staticmethod
     def load(
@@ -48,6 +48,9 @@ class GLiNERLoader(BaseLoader):
         device: Optional[str] = None,
         allocate_gpu: Optional[callable] = None,
         exclude_gpus: Optional[List[int]] = None,
+        threshold: Optional[float] = None,
+        flat_ner: Optional[bool] = None,
+        multi_label: Optional[bool] = None,
         **kwargs,
     ) -> Tuple[Any, Dict[str, Any], int]:
         """
@@ -62,10 +65,19 @@ class GLiNERLoader(BaseLoader):
             device: Device for local mode ('cuda:0', 'cpu', etc.)
             allocate_gpu: Callback for server mode (memory_gb, exclude_gpus) -> (gpu_index, device_str)
             exclude_gpus: GPUs to exclude (server mode)
-            **kwargs: Additional arguments for GLiNER
+            threshold: Accepted and ignored. Inference-time only — see inference().
+            flat_ner: Accepted and ignored. Inference-time only — see inference().
+            multi_label: Accepted and ignored. Inference-time only — see inference().
+            **kwargs: Additional arguments forwarded to GLiNER.from_pretrained()
+                (e.g. `revision`)
 
         Returns:
             Tuple of (model_object, metadata_dict, gpu_index)
+
+        Note:
+            The three inference params are named explicitly so they are absorbed rather
+            than forwarded: an older client can still put them in `loader_options`, and
+            passing them through to `from_pretrained()` would raise.
         """
         GLiNERLoader._ensure_dependencies()
         GLiNERLoader._patch_mecab()
@@ -77,7 +89,7 @@ class GLiNERLoader(BaseLoader):
         if allocate_gpu:
             # === SERVER MODE: CPU-first for accurate memory measurement ===
             logger.info(f'Loading GLiNER {model_name} to CPU...')
-            model = GLiNERModel.from_pretrained(model_name)
+            model = GLiNERModel.from_pretrained(model_name, **kwargs)
             model.to('cpu')
             model.eval()
 
@@ -98,7 +110,7 @@ class GLiNERLoader(BaseLoader):
                 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
             logger.info(f'Loading GLiNER {model_name} to {device}')
-            model = GLiNERModel.from_pretrained(model_name)
+            model = GLiNERModel.from_pretrained(model_name, **kwargs)
             model.to(device)
             model.eval()
 

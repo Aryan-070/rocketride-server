@@ -1,9 +1,66 @@
 """Unit tests for the GLiNER loader + facade (no torch/gliner needed)."""
 
+import sys
+import types
+
 from ai.common.models.gliner.gliner import GLiNERLoader, GLiNER
 import ai.common.models.gliner.gliner as glinermod
 
 MODEL = 'urchade/gliner_small-v2.1'
+
+
+class _FakeGLiNERModel:
+    """Stand-in for the upstream gliner.GLiNER class."""
+
+    last_from_pretrained: tuple = ()
+
+    @classmethod
+    def from_pretrained(cls, model_name, **kwargs):
+        cls.last_from_pretrained = (model_name, kwargs)
+        return cls()
+
+    def to(self, device):
+        return self
+
+    def eval(self):
+        return self
+
+
+def _load_with_fake_upstream(monkeypatch, **load_kwargs):
+    """Run GLiNERLoader.load() against a fake upstream package, on CPU."""
+    _FakeGLiNERModel.last_from_pretrained = ()
+
+    fake_pkg = types.ModuleType('gliner')
+    fake_pkg.GLiNER = _FakeGLiNERModel
+    monkeypatch.setitem(sys.modules, 'gliner', fake_pkg)
+
+    monkeypatch.setattr(GLiNERLoader, '_ensure_dependencies', staticmethod(lambda: None))
+    monkeypatch.setattr(GLiNERLoader, '_patch_mecab', staticmethod(lambda: None))
+    monkeypatch.setattr(GLiNERLoader, '_get_memory_footprint', staticmethod(lambda model: 1.0))
+
+    GLiNERLoader.load(MODEL, device='cpu', **load_kwargs)
+    return _FakeGLiNERModel.last_from_pretrained
+
+
+def test_load_forwards_genuine_kwargs_to_from_pretrained(monkeypatch):
+    """`revision` must actually reach the weights, not just the model id."""
+    model_name, kwargs = _load_with_fake_upstream(monkeypatch, revision='abc')
+
+    assert model_name == MODEL
+    assert kwargs == {'revision': 'abc'}
+
+
+def test_load_absorbs_inference_params_instead_of_forwarding(monkeypatch):
+    """An older client may still send these in loader_options; they must not reach load."""
+    _, kwargs = _load_with_fake_upstream(
+        monkeypatch,
+        threshold=0.3,
+        flat_ner=False,
+        multi_label=True,
+        revision='abc',
+    )
+
+    assert kwargs == {'revision': 'abc'}
 
 
 def test_model_id_is_stable():
