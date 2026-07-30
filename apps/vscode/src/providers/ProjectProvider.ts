@@ -26,6 +26,7 @@ import { icons } from '../shared/util/icons';
 import { PipelineFileParser } from '../shared/util/pipelineParser';
 import { isSubscribed } from '../shared/util/subscriptionGate';
 import { handleMissingEnvVars } from '../shared/util/envVarCheck';
+import { routeEmbeddedClipboardCommand } from '../shared/util/embeddedClipboardBridge';
 
 // =============================================================================
 // CONSTANTS
@@ -64,6 +65,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	private connectionManager = ConnectionManager.getInstance();
 	private logger = getLogger();
 	private savesForRun: Set<string> = new Set();
+	private activeExternalPanel?: vscode.WebviewPanel;
 	// OAuth tokens that arrived while no live webview existed for their
 	// document (e.g. the editor was recycled during the browser round-trip),
 	// keyed by document URI. Redelivered after the next view:ready.
@@ -308,6 +310,22 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 					await vscode.commands.executeCommand('workbench.action.reloadWindow');
 				}
 			}),
+
+			vscode.commands.registerCommand('rocketride.embedded.copy', () =>
+				routeEmbeddedClipboardCommand(this.activeExternalPanel?.webview, vscode.env.clipboard, 'copy')
+			),
+
+			vscode.commands.registerCommand('rocketride.embedded.cut', () =>
+				routeEmbeddedClipboardCommand(this.activeExternalPanel?.webview, vscode.env.clipboard, 'cut')
+			),
+
+			vscode.commands.registerCommand('rocketride.embedded.paste', () =>
+				routeEmbeddedClipboardCommand(this.activeExternalPanel?.webview, vscode.env.clipboard, 'paste')
+			),
+
+			vscode.commands.registerCommand('rocketride.embedded.selectAll', () =>
+				routeEmbeddedClipboardCommand(this.activeExternalPanel?.webview, vscode.env.clipboard, 'selectAll')
+			),
 		];
 
 		this.disposables.push(...commands);
@@ -910,6 +928,14 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			enableScripts: true,
 			retainContextWhenHidden: true,
 		});
+		this.activeExternalPanel = panel;
+		const viewStateSubscription = panel.onDidChangeViewState(({ webviewPanel }) => {
+			if (webviewPanel.active) this.activeExternalPanel = webviewPanel;
+		});
+		panel.onDidDispose(() => {
+			viewStateSubscription.dispose();
+			if (this.activeExternalPanel === panel) this.activeExternalPanel = undefined;
+		});
 
 		panel.webview.html = `<!DOCTYPE html>
 <html><head>
@@ -917,7 +943,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>body{margin:0;padding:0}iframe{width:100%;height:100vh;border:none}</style>
 </head><body>
-<iframe id="app-iframe" src="${url}${url.includes('?') ? '&' : '?'}_t=${Date.now()}" allow="clipboard-read; clipboard-write"></iframe>
+<iframe id="app-iframe" src="${url}${url.includes('?') ? '&' : '?'}_t=${Date.now()}&_rocketrideHost=vscode" allow="clipboard-read; clipboard-write"></iframe>
 <script>
 (function() {
 	const vscode = acquireVsCodeApi();
@@ -1000,6 +1026,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 		const msg = event.data;
 		if (msg.type === 'themeChanged') setTimeout(() => sendDataToIframe(), 50);
 		if (msg.type === 'pasteContent' && msg.text && iframe.contentWindow) iframe.contentWindow.postMessage({ type: 'paste', text: msg.text }, iframeOrigin);
+		if (msg.type === 'clipboardCommand' && iframe.contentWindow) iframe.contentWindow.postMessage(msg, iframeOrigin);
 		if (msg.type === 'nativeFilesSelected' && iframe.contentWindow) iframe.contentWindow.postMessage({ type: 'nativeFilesSelected', files: msg.files }, iframeOrigin);
 	});
 })();

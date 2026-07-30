@@ -24,6 +24,12 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Send } from 'lucide-react';
+import {
+	cutClipboardText,
+	getEmbeddedClipboardCommand,
+	insertClipboardText,
+	isActiveClipboardTextControl,
+} from '../clipboardBridge';
 
 interface ChatInputProps {
 	onSend: (message: string) => Promise<void>;
@@ -54,20 +60,40 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
 		inputRef.current?.focus();
 
 		const handleMessage = (event: MessageEvent) => {
-			if (event.data?.type === 'paste' && event.data.text) {
+			if (window.parent !== window && event.source !== window.parent) return;
+
+			if (event.data?.type === 'paste' && typeof event.data.text === 'string') {
 				setInputText(prev => {
 					const textarea = inputRef.current;
 					if (textarea) {
-						const start = textarea.selectionStart;
-						const end = textarea.selectionEnd;
-						const newValue = prev.slice(0, start) + event.data.text + prev.slice(end);
+						const result = insertClipboardText(
+							prev,
+							textarea.selectionStart,
+							textarea.selectionEnd,
+							event.data.text
+						);
 						// Restore cursor position after React re-render
 						requestAnimationFrame(() => {
-							textarea.selectionStart = textarea.selectionEnd = start + event.data.text.length;
+							textarea.setSelectionRange(result.caret, result.caret);
 						});
-						return newValue;
+						return result.value;
 					}
 					return prev + event.data.text;
+				});
+			}
+			if (event.data?.type === 'clipboardCommand' && event.data.command === 'cut') {
+				setInputText(prev => {
+					const textarea = inputRef.current;
+					if (!isActiveClipboardTextControl(document.activeElement, textarea)) return prev;
+
+					const result = cutClipboardText(prev, textarea.selectionStart, textarea.selectionEnd);
+					if (!result.text) return prev;
+
+					window.parent.postMessage({ type: 'copyText', text: result.text }, '*');
+					requestAnimationFrame(() => {
+						textarea.setSelectionRange(result.caret, result.caret);
+					});
+					return result.value;
 				});
 			}
 		};
@@ -97,17 +123,32 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
 	 * Shift+Enter: New line
 	 */
 	const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+		const clipboardCommand = getEmbeddedClipboardCommand(e);
+		if (window.parent !== window && clipboardCommand === 'paste') {
+			e.preventDefault();
+			window.parent.postMessage({ type: 'requestPaste' }, '*');
+			return;
+		}
+
+		if (window.parent !== window && clipboardCommand === 'cut') {
+			const textarea = inputRef.current;
+			if (!textarea) return;
+
+			const result = cutClipboardText(inputText, textarea.selectionStart, textarea.selectionEnd);
+			if (!result.text) return;
+
+			e.preventDefault();
+			setInputText(result.value);
+			window.parent.postMessage({ type: 'copyText', text: result.text }, '*');
+			requestAnimationFrame(() => {
+				textarea.setSelectionRange(result.caret, result.caret);
+			});
+			return;
+		}
+
 		if (e.key === 'Enter' && !e.shiftKey) {
 			e.preventDefault();
 			handleSend();
-		}
-		if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
-			// In VSCode webview iframes, native paste is blocked.
-			// Request clipboard from the parent webview via postMessage.
-			if (window.parent !== window) {
-				e.preventDefault();
-				window.parent.postMessage({ type: 'requestPaste' }, '*');
-			}
 		}
 	};
 

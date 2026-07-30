@@ -28,9 +28,19 @@ import { VSCodeProvider, VSCodeContextType } from './hooks/useVSCode';
 import { ChatContainer } from './components/ChatContainer';
 import { API_CONFIG, setAPIConfig } from './config/apiConfig';
 import { startClient } from './hooks/clientSingleton';
+import {
+	getEmbeddedClipboardCommand,
+	getSelectedClipboardText,
+	isClipboardTextControl,
+	isVSCodeEmbeddedChat,
+	selectAllChatContent,
+	type EmbeddedClipboardCommand,
+} from './clipboardBridge';
 
 const App: React.FC = () => {
-	const [isVSCode] = useState(() => 'acquireVsCodeApi' in window);
+	// The chat is loaded inside a remote iframe nested in the VS Code/Cursor
+	// webview, so acquireVsCodeApi is available only to its parent bridge.
+	const [isVSCode] = useState(() => isVSCodeEmbeddedChat(window.location.search));
 	const [authToken, setAuthToken] = useState<string | null>(null);
 
 	// Initialize VSCode state
@@ -52,22 +62,64 @@ const App: React.FC = () => {
 		}
 	});
 
-	// Bridge copy to parent VS Code webview so Cmd/Ctrl+C works in the iframe
+	// Handle clipboard commands relayed by the VS Code/Cursor extension host.
 	useEffect(() => {
 		if (!isVSCode) return;
 
-		const handleCopy = (e: KeyboardEvent) => {
-			if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
-				const selection = window.getSelection()?.toString();
-				if (selection) {
-					e.preventDefault();
-					window.parent.postMessage({ type: 'copyText', text: selection }, '*');
-				}
+		const selectTranscript = () => {
+			const transcript = document.querySelector('[data-chat-transcript]');
+			const selection = window.getSelection();
+			if (!transcript || !selection) return false;
+
+			const range = document.createRange();
+			range.selectNodeContents(transcript);
+			selection.removeAllRanges();
+			selection.addRange(range);
+			return true;
+		};
+
+		const runClipboardCommand = (
+			command: Exclude<EmbeddedClipboardCommand, 'paste'>,
+			preventDefault?: () => void
+		) => {
+			const activeElement = document.activeElement;
+			if (command === 'selectAll') {
+				preventDefault?.();
+				selectAllChatContent(activeElement, selectTranscript);
+				return;
+			}
+
+			// ChatInput owns controlled-input mutation for Cut. The App handles
+			// transcript Cut as a safe, non-destructive copy.
+			if (command === 'cut' && isClipboardTextControl(activeElement)) return;
+
+			const text = getSelectedClipboardText(activeElement, window.getSelection()?.toString() ?? '');
+			if (text) {
+				preventDefault?.();
+				window.parent.postMessage({ type: 'copyText', text }, '*');
 			}
 		};
 
-		document.addEventListener('keydown', handleCopy);
-		return () => document.removeEventListener('keydown', handleCopy);
+		const handleClipboardCommand = (event: MessageEvent) => {
+			if (event.source !== window.parent) return;
+
+			const command = event.data?.type === 'clipboardCommand' ? event.data.command : undefined;
+			if (command !== 'copy' && command !== 'cut' && command !== 'selectAll') return;
+			runClipboardCommand(command);
+		};
+
+		const handleClipboardKeyDown = (event: KeyboardEvent) => {
+			const command = getEmbeddedClipboardCommand(event);
+			if (!command || command === 'paste') return;
+			runClipboardCommand(command, () => event.preventDefault());
+		};
+
+		window.addEventListener('message', handleClipboardCommand);
+		document.addEventListener('keydown', handleClipboardKeyDown);
+		return () => {
+			window.removeEventListener('message', handleClipboardCommand);
+			document.removeEventListener('keydown', handleClipboardKeyDown);
+		};
 	}, [isVSCode]);
 
 	useEffect(() => {
