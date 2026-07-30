@@ -114,6 +114,11 @@ def _load_classes(node_config):
         saved[name] = sys.modules.get(name)
         sys.modules[name] = stub
 
+    # Snapshot any pre-existing node-package modules so cleanup restores them
+    # instead of clobbering modules another test loaded first.
+    pkg_prefix = 'currency_convert_explicit'
+    saved_pkg = {k: v for k, v in sys.modules.items() if k == pkg_prefix or k.startswith(pkg_prefix + '.')}
+
     try:
         pkg_spec = importlib.util.spec_from_file_location(
             'currency_convert_explicit',
@@ -141,9 +146,10 @@ def _load_classes(node_config):
                 sys.modules.pop(name, None)
             else:
                 sys.modules[name] = saved[name]
-        for mod_name in list(sys.modules.keys()):
-            if mod_name == 'currency_convert_explicit' or mod_name.startswith('currency_convert_explicit.'):
-                sys.modules.pop(mod_name, None)
+        # Drop what this helper loaded, then restore any pre-existing entries.
+        for mod_name in [k for k in sys.modules if k == pkg_prefix or k.startswith(pkg_prefix + '.')]:
+            sys.modules.pop(mod_name, None)
+        sys.modules.update(saved_pkg)
 
 
 def _build_instance(node_config):
