@@ -127,7 +127,9 @@ TEST_CASE("crashpad") {
         std::filesystem::create_directory_symlink(target, link, ec);
         REQUIRE(!ec);
 
-        REQUIRE(WIFSIGNALED(runCrashChild("crash", link.c_str())));
+        // Bind the status first: macOS's WIFSIGNALED takes the address of its argument.
+        int status = runCrashChild("crash", link.c_str());
+        REQUIRE(WIFSIGNALED(status));
 
         REQUIRE(dumpsIn(target / "pending").empty());
         REQUIRE(dumpsIn(target / "completed").empty());
@@ -143,7 +145,8 @@ TEST_CASE("crashpad") {
         std::filesystem::create_directories(dir, ec);
         REQUIRE(::chmod(dir.c_str(), 0777) == 0);
 
-        REQUIRE(WIFSIGNALED(runCrashChild("crash", dir.c_str())));
+        int status = runCrashChild("crash", dir.c_str());
+        REQUIRE(WIFSIGNALED(status));
 
         REQUIRE(dumpsIn(dir / "pending").empty());
         REQUIRE(dumpsIn(dir / "completed").empty());
@@ -156,7 +159,8 @@ TEST_CASE("crashpad") {
         std::error_code ec;
         std::filesystem::remove_all(dir, ec);
 
-        REQUIRE(WIFSIGNALED(runCrashChild("crash", dir.c_str())));
+        int status = runCrashChild("crash", dir.c_str());
+        REQUIRE(WIFSIGNALED(status));
 
         struct ::stat st {};
         REQUIRE(::stat(dir.c_str(), &st) == 0);
