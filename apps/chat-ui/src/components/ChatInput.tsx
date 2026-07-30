@@ -84,18 +84,20 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
 				});
 			}
 			if (event.data?.type === 'clipboardCommand' && event.data.command === 'cut') {
-				setInputText(prev => {
-					const textarea = inputRef.current;
-					if (!isActiveClipboardTextControl(document.activeElement, textarea)) return prev;
+				const textarea = inputRef.current;
+				if (!isActiveClipboardTextControl(document.activeElement, textarea)) return;
 
-					const result = cutClipboardText(prev, textarea.selectionStart, textarea.selectionEnd);
-					if (!result.text) return prev;
+				const result = cutClipboardText(
+					textarea.value,
+					textarea.selectionStart,
+					textarea.selectionEnd
+				);
+				if (!result.text) return;
 
-					window.parent.postMessage({ type: 'copyText', text: result.text }, '*');
-					requestAnimationFrame(() => {
-						textarea.setSelectionRange(result.caret, result.caret);
-					});
-					return result.value;
+				setInputText(result.value);
+				window.parent.postMessage({ type: 'copyText', text: result.text }, '*');
+				requestAnimationFrame(() => {
+					textarea.setSelectionRange(result.caret, result.caret);
 				});
 			}
 		};

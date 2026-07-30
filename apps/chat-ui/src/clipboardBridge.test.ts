@@ -166,7 +166,7 @@ test('copy button sends the complete message through the parent bridge when embe
 	const posted: unknown[] = [];
 	const written: string[] = [];
 
-	await copyChatText(
+	const didCopy = await copyChatText(
 		'complete assistant answer',
 		true,
 		message => posted.push(message),
@@ -175,6 +175,7 @@ test('copy button sends the complete message through the parent bridge when embe
 		}
 	);
 
+	assert.equal(didCopy, true);
 	assert.deepEqual(posted, [{ type: 'copyText', text: 'complete assistant answer' }]);
 	assert.deepEqual(written, []);
 });
@@ -183,7 +184,7 @@ test('copy button uses the browser clipboard for standalone chat', async () => {
 	const posted: unknown[] = [];
 	const written: string[] = [];
 
-	await copyChatText(
+	const didCopy = await copyChatText(
 		'complete user question',
 		false,
 		message => posted.push(message),
@@ -192,6 +193,20 @@ test('copy button uses the browser clipboard for standalone chat', async () => {
 		}
 	);
 
+	assert.equal(didCopy, true);
 	assert.deepEqual(posted, []);
 	assert.deepEqual(written, ['complete user question']);
+});
+
+test('copy button reports browser clipboard failures without throwing or showing success', async () => {
+	const didCopy = await copyChatText(
+		'clipboard-denied message',
+		false,
+		() => assert.fail('standalone copy must not post to the parent'),
+		async () => {
+			throw new Error('clipboard permission denied');
+		}
+	);
+
+	assert.equal(didCopy, false);
 });

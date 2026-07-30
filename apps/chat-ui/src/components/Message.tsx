@@ -60,12 +60,14 @@ export const Message: React.FC<MessageProps> = ({ message }) => {
 	}
 
 	const handleCopy = async () => {
-		await copyChatText(
+		const didCopy = await copyChatText(
 			message.text,
 			isEmbeddedVSCode,
 			postedMessage => window.parent.postMessage(postedMessage, '*'),
 			text => navigator.clipboard.writeText(text)
 		);
+		if (!didCopy) return;
+
 		setCopied(true);
 		if (resetTimer.current) clearTimeout(resetTimer.current);
 		resetTimer.current = setTimeout(() => setCopied(false), 1500);

@@ -27,10 +27,12 @@ export interface ChatHostCapabilities {
 	isEmbeddedVSCode: boolean;
 }
 
+/** Returns whether the chat URL explicitly opts into the nested VS Code bridge. */
 export function isVSCodeEmbeddedChat(search: string): boolean {
 	return new URLSearchParams(search).get('_rocketrideHost') === 'vscode';
 }
 
+/** Separates top-level editor theming from nested clipboard integration. */
 export function getChatHostCapabilities(
 	hasVSCodeApi: boolean,
 	search: string
@@ -41,12 +43,14 @@ export function getChatHostCapabilities(
 	};
 }
 
+/** Removes transient query parameters while retaining the non-secret host marker. */
 export function getSanitizedChatPath(pathname: string, search: string): string {
 	return isVSCodeEmbeddedChat(search)
 		? `${pathname}?_rocketrideHost=vscode`
 		: pathname;
 }
 
+/** Maps platform clipboard shortcuts to commands understood by the bridge. */
 export function getEmbeddedClipboardCommand(
 	event: EmbeddedClipboardKeyboardEvent
 ): EmbeddedClipboardCommand | undefined {
@@ -66,20 +70,27 @@ export function getEmbeddedClipboardCommand(
 	}
 }
 
+/** Copies message text through the editor bridge or the browser clipboard. */
 export async function copyChatText(
 	text: string,
 	isEmbedded: boolean,
 	postMessage: (message: unknown) => void,
 	writeText: (text: string) => Promise<void>
-): Promise<void> {
+): Promise<boolean> {
 	if (isEmbedded) {
 		postMessage({ type: 'copyText', text });
-		return;
+		return true;
 	}
 
-	await writeText(text);
+	try {
+		await writeText(text);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
+/** Identifies editable controls whose selection can be read or changed. */
 export function isClipboardTextControl(element: unknown): element is ClipboardTextControl {
 	if (!element || typeof element !== 'object') return false;
 
@@ -91,6 +102,7 @@ export function isClipboardTextControl(element: unknown): element is ClipboardTe
 	);
 }
 
+/** Verifies that a text control is the document's exact active element. */
 export function isActiveClipboardTextControl(
 	activeElement: unknown,
 	textControl: unknown
@@ -104,6 +116,7 @@ function clampSelection(value: string, start: number | null, end: number | null)
 	return [safeStart, safeEnd];
 }
 
+/** Returns the active input selection, or the transcript selection otherwise. */
 export function getSelectedClipboardText(activeElement: unknown, documentSelection: string): string {
 	if (!isClipboardTextControl(activeElement)) return documentSelection;
 
@@ -111,6 +124,7 @@ export function getSelectedClipboardText(activeElement: unknown, documentSelecti
 	return activeElement.value.slice(start, end);
 }
 
+/** Selects the focused input, falling back to the complete transcript. */
 export function selectAllChatContent(
 	activeElement: unknown,
 	selectTranscript: () => boolean
@@ -123,6 +137,7 @@ export function selectAllChatContent(
 	return selectTranscript() ? 'transcript' : 'none';
 }
 
+/** Replaces the selected input range with pasted text and returns its new caret. */
 export function insertClipboardText(
 	value: string,
 	selectionStart: number | null,
@@ -136,6 +151,7 @@ export function insertClipboardText(
 	};
 }
 
+/** Removes the selected input range and returns both clipboard text and caret. */
 export function cutClipboardText(
 	value: string,
 	selectionStart: number | null,
