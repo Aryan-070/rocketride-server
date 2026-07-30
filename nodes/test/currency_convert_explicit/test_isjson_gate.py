@@ -68,6 +68,14 @@ def _json_answer(value):
 
 
 def _load_classes(node_config):
+    """Load the node's IGlobal/IInstance classes from source in isolation.
+
+    Stubs ``rocketlib`` and ``ai.common.*`` in ``sys.modules`` (so the node
+    imports without the engine), loads ``convert``/``IGlobal``/``IInstance`` from
+    the node dir via ``importlib``, and restores the original ``sys.modules``
+    entries in a ``finally`` block so no stub leaks into other test modules.
+    ``Config.getNodeConfig`` is stubbed to return ``node_config``.
+    """
     saved = {}
 
     class FakeIInstanceBase:
