@@ -9,7 +9,9 @@ import test from 'node:test';
 import {
 	copyChatText,
 	cutClipboardText,
+	getChatHostCapabilities,
 	getEmbeddedClipboardCommand,
+	getSanitizedChatPath,
 	getSelectedClipboardText,
 	insertClipboardText,
 	isActiveClipboardTextControl,
@@ -112,6 +114,34 @@ test('VS Code integration requires the explicit host marker, not merely an ifram
 	assert.equal(isVSCodeEmbeddedChat('?auth=token&_rocketrideHost=vscode'), true);
 	assert.equal(isVSCodeEmbeddedChat('?auth=token'), false);
 	assert.equal(isVSCodeEmbeddedChat(''), false);
+});
+
+test('a nested VS Code chat uses the clipboard bridge without replacing the RocketRide theme', () => {
+	assert.deepEqual(getChatHostCapabilities(false, '?_rocketrideHost=vscode'), {
+		isVSCode: false,
+		isEmbeddedVSCode: true,
+	});
+});
+
+test('a top-level VS Code webview can use the editor theme without the nested bridge', () => {
+	assert.deepEqual(getChatHostCapabilities(true, ''), {
+		isVSCode: true,
+		isEmbeddedVSCode: false,
+	});
+});
+
+test('auth cleanup preserves only the non-secret nested host marker for reloads', () => {
+	assert.equal(
+		getSanitizedChatPath(
+			'/chat/project/source',
+			'?auth=sensitive-token&_t=123&_rocketrideHost=vscode'
+		),
+		'/chat/project/source?_rocketrideHost=vscode'
+	);
+	assert.equal(
+		getSanitizedChatPath('/chat/project/source', '?auth=sensitive-token&_t=123'),
+		'/chat/project/source'
+	);
 });
 
 test('embedded clipboard shortcuts recognize Command and Control variants', () => {

@@ -22,8 +22,29 @@ export interface EmbeddedClipboardKeyboardEvent {
 	altKey?: boolean;
 }
 
+export interface ChatHostCapabilities {
+	isVSCode: boolean;
+	isEmbeddedVSCode: boolean;
+}
+
 export function isVSCodeEmbeddedChat(search: string): boolean {
 	return new URLSearchParams(search).get('_rocketrideHost') === 'vscode';
+}
+
+export function getChatHostCapabilities(
+	hasVSCodeApi: boolean,
+	search: string
+): ChatHostCapabilities {
+	return {
+		isVSCode: hasVSCodeApi,
+		isEmbeddedVSCode: isVSCodeEmbeddedChat(search),
+	};
+}
+
+export function getSanitizedChatPath(pathname: string, search: string): string {
+	return isVSCodeEmbeddedChat(search)
+		? `${pathname}?_rocketrideHost=vscode`
+		: pathname;
 }
 
 export function getEmbeddedClipboardCommand(

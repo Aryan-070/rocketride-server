@@ -30,6 +30,7 @@ import {
 	insertClipboardText,
 	isActiveClipboardTextControl,
 } from '../clipboardBridge';
+import { useVSCode } from '../hooks/useVSCode';
 
 interface ChatInputProps {
 	onSend: (message: string) => Promise<void>;
@@ -52,6 +53,7 @@ interface ChatInputProps {
 export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
 	const [inputText, setInputText] = useState('');
 	const inputRef = useRef<HTMLTextAreaElement>(null);
+	const { isEmbeddedVSCode } = useVSCode();
 
 	/**
 	 * Focus input on mount and listen for paste messages from VSCode parent
@@ -60,7 +62,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
 		inputRef.current?.focus();
 
 		const handleMessage = (event: MessageEvent) => {
-			if (window.parent !== window && event.source !== window.parent) return;
+			if (!isEmbeddedVSCode || event.source !== window.parent) return;
 
 			if (event.data?.type === 'paste' && typeof event.data.text === 'string') {
 				setInputText(prev => {
@@ -100,7 +102,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
 
 		window.addEventListener('message', handleMessage);
 		return () => window.removeEventListener('message', handleMessage);
-	}, []);
+	}, [isEmbeddedVSCode]);
 
 	/**
 	 * Handles send button click or Enter key press
@@ -124,13 +126,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
 	 */
 	const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
 		const clipboardCommand = getEmbeddedClipboardCommand(e);
-		if (window.parent !== window && clipboardCommand === 'paste') {
+		if (isEmbeddedVSCode && clipboardCommand === 'paste') {
 			e.preventDefault();
 			window.parent.postMessage({ type: 'requestPaste' }, '*');
 			return;
 		}
 
-		if (window.parent !== window && clipboardCommand === 'cut') {
+		if (isEmbeddedVSCode && clipboardCommand === 'cut') {
 			const textarea = inputRef.current;
 			if (!textarea) return;
 

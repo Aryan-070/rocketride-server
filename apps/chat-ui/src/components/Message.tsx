@@ -26,6 +26,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Check, Copy } from 'lucide-react';
 import { Message as MessageType } from '../types/chat.types';
 import { copyChatText } from '../clipboardBridge';
+import { useVSCode } from '../hooks/useVSCode';
 import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface MessageProps {
@@ -43,6 +44,7 @@ interface MessageProps {
 export const Message: React.FC<MessageProps> = ({ message }) => {
 	const [copied, setCopied] = useState(false);
 	const resetTimer = useRef<ReturnType<typeof setTimeout>>();
+	const { isEmbeddedVSCode } = useVSCode();
 
 	useEffect(() => () => {
 		if (resetTimer.current) clearTimeout(resetTimer.current);
@@ -60,7 +62,7 @@ export const Message: React.FC<MessageProps> = ({ message }) => {
 	const handleCopy = async () => {
 		await copyChatText(
 			message.text,
-			window.parent !== window,
+			isEmbeddedVSCode,
 			postedMessage => window.parent.postMessage(postedMessage, '*'),
 			text => navigator.clipboard.writeText(text)
 		);
