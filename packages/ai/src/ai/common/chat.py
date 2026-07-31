@@ -18,6 +18,7 @@ from rocketlib import debug, warning
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
 from ai.common.util import parseJson
+from ai.common.utils.content_blocks import flatten_content_blocks
 from ai.common.validation import validate_model_name, validate_max_tokens, validate_prompt
 from ai.common.llm_native_stream import STOP_SEQUENCES_VAR, dispatch_native_chat_stream
 
@@ -242,8 +243,12 @@ class ChatBase:
         # so non-agent callers (and backends/mocks without a stop param) are unaffected.
         results = self._llm.invoke(prompt, **_stop_kwargs())
 
-        # Return the results
-        return results.content
+        # `content` is a plain string on OpenAI-style backends but a list of typed
+        # blocks on Anthropic with extended thinking. Returning that list verbatim
+        # hands every caller the repr of the blocks instead of the answer, and the
+        # reasoning is not the answer in any case. Flatten to the visible text.
+        text, _reasoning, _sig_only = flatten_content_blocks(results.content)
+        return text
 
     def getTokens(self, value: str) -> int:
         """
@@ -497,8 +502,14 @@ class ChatBase:
             # the full fallback would arrive on top of the partial we already streamed.
             if emitted is None or not emitted['any']:
                 results = self._llm.invoke(prompt, **_stop_kwargs())
-                content = getattr(results, 'content', '') or ''
-                content_text = content if isinstance(content, str) else str(content)
+                # str() on a typed-block list yields the blocks' repr, not the
+                # answer — it would put the model's raw reasoning (and its base64
+                # signatures) into the visible output.
+                content_text, fallback_reasoning, _sig_only = flatten_content_blocks(
+                    getattr(results, 'content', '') or ''
+                )
+                if fallback_reasoning and on_reasoning_chunk is not None:
+                    on_reasoning_chunk(fallback_reasoning)
                 text_parts = [content_text]
                 # Push the fallback answer through on_chunk so the open UI bubble
                 # gets the visible text (the caller dedupes the final pipeline result).
@@ -603,30 +614,16 @@ class ChatBase:
                     text = ''
                     thinking_delta = ''
                     if isinstance(content, list):
-                        for b in content:
-                            if not isinstance(b, dict):
-                                continue
-                            btype = b.get('type', '')
-                            if btype == 'thinking':
-                                # carries either text deltas or a signature-only final delta.
-                                piece_text = b.get('thinking') or b.get('text') or ''
-                                if piece_text:
-                                    thinking_delta += piece_text
-                                elif b.get('signature') and not _signature_only_note_sent:
-                                    if on_reasoning_chunk_w is not None:
-                                        thinking_delta += (
-                                            '_Extended thinking ran, but this stream only delivered the '
-                                            'block verification signature, not the readable chain-of-thought '
-                                            'text. The answer below still reflects internal reasoning._\n\n'
-                                        )
-                                        _signature_only_note_sent = True
-                            elif btype == 'reasoning':
-                                # LangChain v1 standard block (thinking → reasoning).
-                                piece_text = b.get('reasoning') or b.get('text') or ''
-                                if piece_text:
-                                    thinking_delta += piece_text
-                            elif btype == 'text' or not btype:
-                                text += b.get('text', '')
+                        # Block vocabulary lives in flatten_content_blocks so the
+                        # non-streaming paths cannot drift away from this one.
+                        text, thinking_delta, sig_only = flatten_content_blocks(content)
+                        if sig_only and not _signature_only_note_sent and on_reasoning_chunk_w is not None:
+                            thinking_delta += (
+                                '_Extended thinking ran, but this stream only delivered the '
+                                'block verification signature, not the readable chain-of-thought '
+                                'text. The answer below still reflects internal reasoning._\n\n'
+                            )
+                            _signature_only_note_sent = True
                     elif isinstance(content, str):
                         # Strip inline `<think>...</think>` (Perplexity sonar-reasoning fallback).
                         text, _thinking_inline = _think_split(content)
