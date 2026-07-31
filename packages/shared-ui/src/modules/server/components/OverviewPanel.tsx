@@ -4,7 +4,7 @@
 // =============================================================================
 
 /**
- * OverviewTab — the Monitor Overview page: hero stat strip, live activity
+ * OverviewPanel — the Monitor Overview page: hero stat strip, live activity
  * ticker, the unified Connections & Tasks grid, recent activity feed, and
  * resource summary.
  *
@@ -17,8 +17,8 @@
 import React, { CSSProperties } from 'react';
 import type { DashboardResponse, DashboardTask, ActivityEvent, DashboardEvent } from '../types';
 import { OverviewGrid } from './OverviewGrid';
-import { getEventDisplay } from './ActivityGrid';
-import type { EventTone } from './ActivityGrid';
+import { getEventDisplay } from './ActivityPanel';
+import type { EventTone } from './ActivityPanel';
 import { formatUptime, formatTime, formatNumber } from '../util';
 import { commonStyles } from '../../../themes/styles';
 
@@ -242,6 +242,10 @@ function getTickerSummary(event: ActivityEvent): { highlight: string; rest: stri
 			case 'running':
 				return { highlight: `${body.tasks.length} task(s)`, rest: 'running' };
 		}
+		// An action outside the known lifecycle set (a newer server) must
+		// never fall through to the dashboard-event shape below.
+		const unknown = body as { action?: string; name?: string };
+		return { highlight: unknown.name ?? 'task', rest: unknown.action ?? 'event' };
 	}
 	const body = event.body as DashboardEvent;
 	switch (body.action) {
@@ -260,8 +264,8 @@ function getTickerSummary(event: ActivityEvent): { highlight: string; rest: stri
 // COMPONENT
 // =============================================================================
 
-/** Props for the {@link OverviewTab} component. */
-interface OverviewTabProps {
+/** Props for the {@link OverviewPanel} component. */
+export interface IOverviewPanelProps {
 	/** Full dashboard snapshot (the hosting view gates on it being loaded). */
 	data: DashboardResponse;
 	/** Activity events pushed from the server (newest first). */
@@ -274,10 +278,10 @@ interface OverviewTabProps {
  * The Overview page body: stat tiles, ticker, the shared unified grid, and
  * the activity / resources cards.
  *
- * @param props - {@link OverviewTabProps}.
+ * @param props - {@link IOverviewPanelProps}.
  * @returns The overview page content.
  */
-export const OverviewTab: React.FC<OverviewTabProps> = ({ data, events, onRefresh }) => {
+export const OverviewPanel: React.FC<IOverviewPanelProps> = ({ data, events, onRefresh }) => {
 	// Snapshot-derived slices (small arrays; recomputed per poll).
 	const { overview, connections, tasks } = data;
 	const runningTasks = tasks.filter((t) => !t.completed);
@@ -370,7 +374,9 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ data, events, onRefres
 				<div style={commonStyles.card}>
 					<div style={commonStyles.cardHeader}>
 						<span>Resources</span>
-						<span style={commonStyles.textMuted}>{runningTasks.length} task{runningTasks.length !== 1 ? 's' : ''}</span>
+						<span style={commonStyles.textMuted}>
+							{runningTasks.length} task{runningTasks.length !== 1 ? 's' : ''}
+						</span>
 					</div>
 					<div style={S.resourceSummary}>
 						<div>
