@@ -23,12 +23,9 @@
 
 #pragma once
 
-namespace ap::plat {
+namespace ap::plat::mac {
 
-void minidumpRegister() noexcept;
-void minidumpDeregister() noexcept;
+void init() noexcept;
+void deinit() noexcept;
 
-void minidumpAltSignalHandlersEnable() noexcept;
-void minidumpAltSignalHandlersDisable() noexcept;
-
-}  // namespace ap::plat
+}  // namespace ap::plat::mac

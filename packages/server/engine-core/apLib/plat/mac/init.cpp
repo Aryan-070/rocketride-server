@@ -21,19 +21,12 @@
 // SOFTWARE.
 // =============================================================================
 
-#pragma once
+#include <apLib/ap.h>
 
-namespace ap::plat {
+namespace ap::plat::mac {
 
-void init() noexcept;
-void deinit() noexcept;
+void init() noexcept { minidumpRegister(); }
 
-// Recover crash dumps left by a previous run into dev::crashDumpLocation(), and
-// fire dev::crashDumpCreatedCallback() for each. Deliberately not part of
-// init(): the out-of-process handler must start as early as possible, but
-// recovery has to wait until the monitor has installed its callback and the
-// crash-dump location points somewhere that exists. No-op on Windows, which
-// writes and notifies in-process at crash time.
-void minidumpSweep() noexcept;
+void deinit() noexcept { minidumpDeregister(); }
 
-}  // namespace ap::plat
+}  // namespace ap::plat::mac
