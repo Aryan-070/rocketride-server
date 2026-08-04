@@ -60,8 +60,17 @@ def test_facade_proxy_does_not_send_languages(monkeypatch):
     assert 'languages' not in loader_options
 
 
-def test_facade_still_accepts_languages_and_forwards_kwargs(monkeypatch):
-    """`languages` stays on the public signature (no-op); real kwargs still reach the loader."""
+def test_facade_still_accepts_languages_and_forwards_other_kwargs(monkeypatch):
+    """`languages` stays on the public signature (no-op) and is the only key dropped.
+
+    `revision` here is a stand-in for "any other kwarg" — it verifies the facade
+    still forwards what it is given rather than swallowing everything. It is not
+    a load parameter in any meaningful sense: `SuryaLoader.load()` accepts
+    `**kwargs` and never reads them, so nothing a caller passes changes the
+    loaded predictors, while it does still split model identity. That is the
+    same class of waste this PR removes for `languages`, reachable through a
+    different door, and it wants its own fix rather than a wider exclusion here.
+    """
     ocr = _proxy_surya(monkeypatch, languages=['ja'], revision='abc')
 
     assert ocr.languages == ['ja']  # preserved on the facade for backwards compatibility
