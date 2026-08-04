@@ -3,6 +3,7 @@
 import sys
 import types
 
+from ai.common.models.base import BaseLoader
 from ai.common.models.gliner.gliner import GLiNERLoader, GLiNER
 import ai.common.models.gliner.gliner as glinermod
 
@@ -26,8 +27,13 @@ class _FakeGLiNERModel:
         return self
 
 
-def _load_with_fake_upstream(monkeypatch, **load_kwargs):
-    """Run GLiNERLoader.load() against a fake upstream package, on CPU."""
+def _load_with_fake_upstream(monkeypatch, server_mode=False, **load_kwargs):
+    """Run GLiNERLoader.load() against a fake upstream package.
+
+    load() has two branches with their own from_pretrained() call: local (a
+    device) and server (an allocate_gpu callback, CPU-first for memory
+    measurement). `server_mode` picks the branch so both get covered.
+    """
     _FakeGLiNERModel.last_from_pretrained = ()
 
     fake_pkg = types.ModuleType('gliner')
@@ -38,7 +44,10 @@ def _load_with_fake_upstream(monkeypatch, **load_kwargs):
     monkeypatch.setattr(GLiNERLoader, '_patch_mecab', staticmethod(lambda: None))
     monkeypatch.setattr(GLiNERLoader, '_get_memory_footprint', staticmethod(lambda model: 1.0))
 
-    GLiNERLoader.load(MODEL, device='cpu', **load_kwargs)
+    if server_mode:
+        GLiNERLoader.load(MODEL, allocate_gpu=lambda memory_gb, exclude: (0, 'cpu'), **load_kwargs)
+    else:
+        GLiNERLoader.load(MODEL, device='cpu', **load_kwargs)
     return _FakeGLiNERModel.last_from_pretrained
 
 
@@ -63,9 +72,51 @@ def test_load_absorbs_inference_params_instead_of_forwarding(monkeypatch):
     assert kwargs == {'revision': 'abc'}
 
 
+def test_server_mode_load_forwards_and_absorbs_the_same_way(monkeypatch):
+    """The allocate_gpu branch has its own from_pretrained() call — cover it too."""
+    model_name, kwargs = _load_with_fake_upstream(
+        monkeypatch,
+        server_mode=True,
+        threshold=0.3,
+        flat_ner=False,
+        multi_label=True,
+        revision='abc',
+    )
+
+    assert model_name == MODEL
+    assert kwargs == {'revision': 'abc'}
+
+
 def test_model_id_is_stable():
     a = GLiNERLoader.generate_model_id(MODEL)
     assert a == GLiNERLoader.generate_model_id(MODEL)  # same identity -> shared server copy
+
+
+def test_model_id_ignores_inference_params():
+    """Identity must not move for params load() absorbs and ignores.
+
+    The facade no longer sends these, but an older client on a newer server
+    still will. Without the exclusion each distinct threshold would hash to its
+    own model_id and load another copy of identical weights — the very waste
+    this change removes.
+    """
+    base = GLiNERLoader.generate_model_id(MODEL)
+
+    assert GLiNERLoader.generate_model_id(MODEL, threshold=0.3) == base
+    assert GLiNERLoader.generate_model_id(MODEL, threshold=0.9) == base
+    assert GLiNERLoader.generate_model_id(MODEL, flat_ner=False) == base
+    assert GLiNERLoader.generate_model_id(MODEL, multi_label=True) == base
+    assert GLiNERLoader.generate_model_id(MODEL, threshold=0.3, flat_ner=False, multi_label=True) == base
+
+
+def test_identity_exclusion_is_not_widened():
+    """Guard against over-broad filtering: only the three inference params are added."""
+    assert GLiNERLoader._SERVER_PARAMS == BaseLoader._SERVER_PARAMS | {'threshold', 'flat_ner', 'multi_label'}
+
+
+def test_model_id_still_splits_on_genuine_load_params():
+    """`revision` does reach from_pretrained(), so it must keep splitting identity."""
+    assert GLiNERLoader.generate_model_id(MODEL, revision='abc') != GLiNERLoader.generate_model_id(MODEL)
 
 
 def test_model_id_splits_on_model_name():

@@ -41,6 +41,12 @@ class GLiNERLoader(BaseLoader):
     # arguments applied per call in inference(), not load-time ones. Folding them in here
     # made two GLiNER instances differing only in threshold load separate copies of
     # identical weights.
+    #
+    # They are excluded from the identity hash for the same reason. load() absorbs and
+    # ignores them, so they cannot change the loaded weights — but an older client that
+    # still sends them in loader_options would otherwise hash to a different model_id
+    # and duplicate those weights for the length of a rolling upgrade.
+    _SERVER_PARAMS = BaseLoader._SERVER_PARAMS | {'threshold', 'flat_ner', 'multi_label'}
 
     @staticmethod
     def load(
