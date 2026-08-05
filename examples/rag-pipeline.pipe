@@ -1,4 +1,5 @@
 {
+	"source": "chat_1",
 	"components": [
 		{
 			"id": "webhook_1",

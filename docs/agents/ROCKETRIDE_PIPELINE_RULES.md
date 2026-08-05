@@ -369,8 +369,9 @@ ROCKETRIDE_COLLECTION_NAME=documents
 
 ### Rule 1: Source Components
 
-- Every pipeline must have exactly one source component
-- The `source` field must reference this component's `id`
+- Every pipeline must declare exactly one `source` **field**, naming the component where execution starts
+- The `source` field must reference that component's `id`
+- A pipeline may contain more than one source-kind component (an ingest branch and a query branch, say), but only the one named by `source` is started by `client.use()`. Start the others by passing `source=` explicitly
 - Source components typically don't have an `input` array
 - Examples: webhook, chat, dropper
 
