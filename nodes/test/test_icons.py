@@ -23,6 +23,7 @@ vendor mark -- a product decision, tracked separately.
 import hashlib
 import os
 from collections import defaultdict
+from xml.etree import ElementTree
 
 from test.test_contracts import NODES_SRC, get_all_services
 
@@ -99,6 +100,12 @@ def test_every_svg_declares_a_viewbox():
     The overflow pushes the node's title out of view, which reads exactly like
     an unregistered provider and sends you to the pipeline wiring instead of to
     the icon. Cheap to assert, expensive to diagnose.
+
+    Parsed rather than scanned as text: the attribute has to be on the ROOT
+    ``<svg>`` element and has to be non-empty. A substring search would pass on
+    a ``viewBox`` mentioned in a comment or set on a nested element, and would
+    fail on a valid file whose root tag happens to start beyond whatever byte
+    window the search used.
     """
     missing = []
     for root, _dirs, files in os.walk(NODES_SRC):
@@ -106,14 +113,18 @@ def test_every_svg_declares_a_viewbox():
             if not name.endswith('.svg'):
                 continue
             path = os.path.join(root, name)
-            with open(path, encoding='utf-8', errors='replace') as handle:
-                head = handle.read(600)
-            if 'viewBox' not in head:
-                missing.append(os.path.relpath(path, NODES_SRC))
+            rel = os.path.relpath(path, NODES_SRC)
+            try:
+                node = ElementTree.parse(path).getroot()
+            except ElementTree.ParseError as exc:
+                missing.append(f'{rel} (unparseable: {exc})')
+                continue
+            if not (node.get('viewBox') or '').strip():
+                missing.append(rel)
 
     assert not missing, (
-        'these icons declare no viewBox, so they render cropped and overflow the node '
-        f'card, hiding the title: {missing}'
+        'these icons declare no viewBox on their root <svg>, so they render cropped '
+        f'and overflow the node card, hiding the title: {missing}'
     )
 
 
