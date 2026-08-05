@@ -104,6 +104,26 @@ def test_parse_json_strips_think_then_fence():
     assert util.parseJson(raw) == {'x': 'y'}
 
 
+def test_parse_json_names_a_truncated_think_block():
+    """A model cut off mid-reasoning must be told apart from bad JSON.
+
+    The strip regex needs a closing ``</think>``, so a truncated block reaches
+    ``json.loads`` intact and fails at character zero. That generic message is
+    indistinguishable from a bad schema or a model returning prose, which have
+    entirely different fixes -- this one is ``modelOutputTokens``.
+    """
+    raw = '<think>The user wants a JSON summary. Let me work through the fields one at a'
+    with pytest.raises(ValueError, match='modelOutputTokens'):
+        util.parseJson(raw)
+
+
+def test_parse_json_names_a_truncated_think_block_after_a_complete_one():
+    """The check runs after the substitution, so a trailing truncated block is caught."""
+    raw = '<think>first thought</think><think>second one, cut off mid-'
+    with pytest.raises(ValueError, match='cut off inside a <think> block'):
+        util.parseJson(raw)
+
+
 def test_parse_json_keeps_inner_backticks_in_string_value():
     """Triple-backticks inside a JSON string value must NOT be treated as fences."""
     raw = '{"answer": "see ```python\\nprint(1)\\n``` here"}'
