@@ -47,7 +47,7 @@ Complete reference for building RocketRide pipelines across any project.
 }
 ```
 
-**Field ordering matters:** `components` must come first. The `project_id`, `viewport`, and `version` fields go at the bottom. The `source` field is optional: the VS Code extension manages it automatically.
+**Field ordering matters:** `components` must come first. The `project_id`, `viewport`, and `version` fields go at the bottom. The `source` field is optional **only when the pipeline has exactly one source-kind component**, in which case it is inferred; the VS Code extension sets it for you. With more than one, it must be set explicitly — see Rule 1.
 
 ---
 
@@ -111,7 +111,8 @@ Complete reference for building RocketRide pipelines across any project.
 
 - ID of the entry point component where data enters the pipeline
 - Managed automatically by the VS Code extension
-- When writing pipelines by hand, you can omit this field, the extension will add it
+- When writing pipelines by hand you can omit it **only if exactly one component is source-kind** — it is then inferred, and the extension will add it
+- With more than one source-kind component, inference raises `Pipeline has multiple source components, please specify one explicitly`, so the field is required
 
 ---
 
@@ -369,9 +370,10 @@ ROCKETRIDE_COLLECTION_NAME=documents
 
 ### Rule 1: Source Components
 
-- Every pipeline must declare exactly one `source` **field**, naming the component where execution starts
+- Every pipeline has exactly one **entry point** — the component where execution starts — named by the `source` field
+- A pipeline may contain more than one source-**kind** component (an ingest branch and a query branch, say). Only the entry point is started; run another by passing `source=` explicitly
+- The `source` field is optional **only when exactly one component is source-kind**, in which case it is inferred. With more than one, `resolve_implied_source` raises `Pipeline has multiple source components, please specify one explicitly` — so `source` must be set
 - The `source` field must reference that component's `id`
-- A pipeline may contain more than one source-kind component (an ingest branch and a query branch, say), but only the one named by `source` is started by `client.use()`. Start the others by passing `source=` explicitly
 - Source components typically don't have an `input` array
 - Examples: webhook, chat, dropper
 
@@ -387,6 +389,7 @@ Example:
 
 ```json
 {
+	"source": "webhook_1",
 	"components": [
 		{ "id": "webhook_1", "provider": "webhook", "config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "webhook" } },
 		{ "id": "parse_1", "provider": "parse", "config": {}, "input": [{ "lane": "tags", "from": "webhook_1" }] },
@@ -746,6 +749,7 @@ Before deploying a pipeline:
 
 ```json
 {
+	"source": "webhook_1",
 	"components": [
 		{
 			"id": "webhook_1",
@@ -769,6 +773,7 @@ Before deploying a pipeline:
 
 ```json
 {
+	"source": "chat_1",
 	"components": [
 		{ "id": "chat_1", "provider": "chat", "config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "chat" } },
 		{ "id": "embedding_1", "provider": "embedding_transformer", "config": { "profile": "miniLM", "parameters": {} }, "input": [{ "lane": "questions", "from": "chat_1" }] },
