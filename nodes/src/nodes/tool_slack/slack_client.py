@@ -440,8 +440,11 @@ class SlackClient:
             latest: Only include messages before this Slack timestamp.
 
         Returns:
-            List of dicts with ``ts``/``user``/``text`` (plus ``thread_ts``
-            for threaded messages).
+            List of dicts with ``ts``/``user``/``text``, plus ``thread_ts`` for
+            threaded messages, ``subtype`` for system events (``channel_join``,
+            ``channel_topic``, …) and ``bot_id`` for messages posted by a bot.
+            The last two are absent on ordinary user messages — use them to
+            filter join/leave noise and to skip your own posts.
 
         Raises:
             ValueError: On a missing/empty ``channel`` or a non-numeric or
