@@ -111,6 +111,7 @@ def test_a_loopback_address_is_not_personal_information():
 
 
 def test_the_unspecified_address_is_not_personal_information():
+    """0.0.0.0 is a bind wildcard, not a host, so it identifies nobody."""
     assert hits('ip_address', 'listening on 0.0.0.0:8080') == []
 
 
@@ -186,6 +187,7 @@ def test_a_timestamp_stays_recognisable_through_the_mask():
 
 
 def test_clean_text_still_passes():
+    """Text with no PII must report passed, with no sample to include."""
     engine = Engine({})
     result = engine.check_pii_leak('the quarterly report is attached')
     assert result['passed'] is True
