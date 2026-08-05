@@ -413,8 +413,8 @@ class IServiceFilterInstance(Protocol):
         """Send a question to the engine."""
         pass
 
-    def sendAnswers(self, answer: List['Answer']) -> None:
-        """Send a list of answers to the engine."""
+    def sendAnswers(self, answer: 'Answer') -> None:
+        """Send a single answer to the engine."""
         pass
 
     def sendDocuments(self, documents: List['Doc']) -> None:
@@ -541,8 +541,8 @@ class IServiceFilterInstance(Protocol):
         """Send a question to the engine."""
         pass
 
-    def writeAnswers(self, answer: List[Answer]) -> None:
-        """Send a list of answers to the engine."""
+    def writeAnswers(self, answer: Answer) -> None:
+        """Send a single answer to the engine."""
         pass
 
     def writeDocuments(self, documents: List[Doc]) -> None:
@@ -981,8 +981,8 @@ class IInstanceBase:
         """Send a question to the engine."""
         pass
 
-    def writeAnswers(self, answer: List[Answer]) -> None:
-        """Send a list of answers to the engine."""
+    def writeAnswers(self, answer: Answer) -> None:
+        """Send a single answer to the engine."""
         pass
 
     def writeDocuments(self, documents: List[Doc]) -> None:
