@@ -1762,9 +1762,14 @@ export class RocketRideClient extends DAPClient {
 			objinfo?: Record<string, unknown>;
 			mimetype?: string;
 		}>,
-		token: string
+		token: string,
+		maxConcurrent = 5
 	): Promise<UPLOAD_RESULT[]> {
 		const results: UPLOAD_RESULT[] = new Array(files.length);
+		if (!Number.isFinite(maxConcurrent) || !Number.isInteger(maxConcurrent) || maxConcurrent < 1) {
+			throw new RangeError('maxConcurrent must be a positive integer');
+		}
+		const concurrency = Math.max(1, Math.floor(maxConcurrent));
 
 		/**
 		 * Helper function to send upload events through the event system.
@@ -1874,16 +1879,20 @@ export class RocketRideClient extends DAPClient {
 			results[index] = finalResult;
 		};
 
-		// Create a promise for every file - let server handle queuing
-		const uploadPromises = files.map((fileData, index) =>
-			uploadFile(fileData, index).catch((err) => {
-				// Ensure errors don't kill the whole batch
-				console.error(`Upload failed for ${fileData.file.name}:`, err);
-			})
-		);
+		let nextIndex = 0;
+		const workers = Array.from({ length: Math.min(concurrency, files.length) }, async () => {
+			while (nextIndex < files.length) {
+				const index = nextIndex;
+				nextIndex += 1;
+				const fileData = files[index]!;
+				await uploadFile(fileData, index).catch((err) => {
+					// Ensure errors don't kill the whole batch
+					console.error(`Upload failed for ${fileData.file.name}:`, err);
+				});
+			}
+		});
 
-		// Wait for all uploads to complete
-		await Promise.all(uploadPromises);
+		await Promise.all(workers);
 
 		return results;
 	}
