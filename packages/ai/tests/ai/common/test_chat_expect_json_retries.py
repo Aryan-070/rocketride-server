@@ -27,13 +27,19 @@ Run with::
 
 from __future__ import annotations
 
-from typing import List
+import json
 
 import pytest
 
 from ai.common.chat import ChatBase
 from ai.common.schema import Question
 from ai.common.util import ThinkTruncatedError
+
+# A reasoning model that hit its output budget before emitting any JSON.
+TRUNCATED = '<think>The user wants a JSON summary. Let me work through the fields one at a'
+
+# The CRITICAL instruction question.py appends once a parse has already failed.
+REPAIR_MARKER = 'previous response returned invalid JSON'
 
 
 def _question() -> Question:
@@ -43,13 +49,13 @@ def _question() -> Question:
     return q
 
 
-def _chat_returning(*responses: str) -> tuple[ChatBase, List[str]]:
+def _chat_returning(*responses: str) -> tuple[ChatBase, list[str]]:
     """A ChatBase whose ``chat_string`` yields ``responses`` in order, recording prompts.
 
     The last response repeats if the loop asks for more than were supplied, so a test
     that expects a single call does not accidentally pass on an IndexError.
     """
-    prompts: List[str] = []
+    prompts: list[str] = []
     chat = ChatBase.__new__(ChatBase)
 
     def _chat_string(prompt: str, **_kwargs) -> str:
@@ -58,9 +64,6 @@ def _chat_returning(*responses: str) -> tuple[ChatBase, List[str]]:
 
     chat.chat_string = _chat_string
     return chat, prompts
-
-
-TRUNCATED = '<think>The user wants a JSON summary. Let me work through the fields one at a'
 
 
 class TestTruncatedThinkBlock:
@@ -93,7 +96,32 @@ class TestTruncatedThinkBlock:
         with pytest.raises(ThinkTruncatedError):
             chat.chat(_question())
 
-        assert not any('previous response returned invalid JSON' in p for p in prompts)
+        assert not any(REPAIR_MARKER in p for p in prompts)
+
+    def test_a_truncation_discovered_on_a_retry_also_fails_fast(self):
+        """The guard is inside the loop, so it holds on attempt 2 as well as attempt 1.
+
+        This is the likelier production shape: the first answer is merely malformed, the
+        repair prompt makes the model reason *harder* about getting the JSON right, and
+        that is what pushes it over the output budget. Stopping here costs two calls
+        rather than three, and still names the budget.
+        """
+        chat, prompts = _chat_returning('not json at all', TRUNCATED)
+
+        with pytest.raises(ThinkTruncatedError, match='modelOutputTokens'):
+            chat.chat(_question())
+
+        assert len(prompts) == 2
+        assert REPAIR_MARKER in prompts[1]
+
+    def test_is_not_reported_as_exhausted_retries(self):
+        """The dedicated arm has to come first — the subclass IS a ValueError."""
+        chat, _ = _chat_returning(TRUNCATED)
+
+        with pytest.raises(ValueError) as excinfo:
+            chat.chat(_question())
+
+        assert 'Failed to get valid JSON response' not in str(excinfo.value)
 
 
 class TestOrdinaryBadJson:
@@ -105,7 +133,7 @@ class TestOrdinaryBadJson:
             chat.chat(_question())
 
         assert len(prompts) == 3
-        assert 'previous response returned invalid JSON' in prompts[1]
+        assert REPAIR_MARKER in prompts[1]
 
     def test_the_final_error_carries_the_parse_failure(self):
         """The exhausted-retries message used to drop what was wrong with the response."""
@@ -115,16 +143,7 @@ class TestOrdinaryBadJson:
             chat.chat(_question())
 
         assert 'Expecting value' in str(excinfo.value)
-        assert excinfo.value.__cause__ is not None
-
-    def test_a_truncated_think_error_is_not_reported_as_exhausted_retries(self):
-        """The dedicated arm has to come first — the subclass IS a ValueError."""
-        chat, _ = _chat_returning(TRUNCATED)
-
-        with pytest.raises(ValueError) as excinfo:
-            chat.chat(_question())
-
-        assert 'Failed to get valid JSON response' not in str(excinfo.value)
+        assert isinstance(excinfo.value.__cause__, json.JSONDecodeError)
 
 
 class TestValidJson:
