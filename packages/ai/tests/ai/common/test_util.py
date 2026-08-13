@@ -14,6 +14,8 @@ Covers the four pure helpers used across the LLM drivers:
 with the engine binary, so the import resolves at test time without mocking.
 """
 
+import json
+
 import pytest
 
 from ai.common import util
@@ -113,14 +115,41 @@ def test_parse_json_names_a_truncated_think_block():
     entirely different fixes -- this one is ``modelOutputTokens``.
     """
     raw = '<think>The user wants a JSON summary. Let me work through the fields one at a'
-    with pytest.raises(ValueError, match='modelOutputTokens'):
+    with pytest.raises(util.ThinkTruncatedError, match='modelOutputTokens'):
         util.parseJson(raw)
 
 
 def test_parse_json_names_a_truncated_think_block_after_a_complete_one():
     """The check runs after the substitution, so a trailing truncated block is caught."""
     raw = '<think>first thought</think><think>second one, cut off mid-'
-    with pytest.raises(ValueError, match='cut off inside a <think> block'):
+    with pytest.raises(util.ThinkTruncatedError, match='cut off inside a <think> block'):
+        util.parseJson(raw)
+
+
+def test_truncated_think_error_is_still_a_value_error():
+    """The dedicated type is what ``chat.py`` branches on; ``ValueError`` is what keeps
+    every other caller working.
+
+    ``ChatBase.chat`` needs to fail fast on a budget truncation without string-matching
+    the message, but the handlers that predate this class catch ``ValueError`` -- so the
+    subclass relationship is part of the contract, not an implementation detail.
+    """
+    assert issubclass(util.ThinkTruncatedError, ValueError)
+    with pytest.raises(ValueError):
+        util.parseJson('<think>cut off mid-')
+
+
+def test_parse_json_does_not_misreport_a_spliced_think_pair():
+    """A ``<think>`` opener the substitution left behind is not automatically a truncation.
+
+    ``re.sub`` is a single left-to-right pass, so deleting an inner pair can splice a new
+    one into text the pass has already moved past. The result opens with ``<think>`` while
+    still carrying its closing tag -- a malformed response, but *not* a budget problem, and
+    naming ``modelOutputTokens`` here would send the reader somewhere useless. The
+    closing-tag half of the guard is what draws that line.
+    """
+    raw = '<thi<think>x</think>nk>a</think>{"a": 1}'
+    with pytest.raises(json.JSONDecodeError):
         util.parseJson(raw)
 
 

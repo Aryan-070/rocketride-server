@@ -34,6 +34,20 @@ def safeString(value: str) -> str:
     return str(value).strip().replace('"', "'")
 
 
+class ThinkTruncatedError(ValueError):
+    """Raised by ``parseJson`` when all that arrived is an unterminated ``<think>`` block.
+
+    The model exhausted its output budget while still reasoning and never reached the
+    JSON, so re-prompting it for "valid JSON" cannot help -- the fix is
+    ``modelOutputTokens``, or turning reasoning off for the call. ``ChatBase.chat``
+    catches this specifically and fails fast rather than spending its repair retries
+    on a budget problem.
+
+    Subclasses ``ValueError`` so callers that already handle a parse failure that way
+    are unaffected.
+    """
+
+
 def parseJson(value: str) -> Any:
     """
     Parse a string and return a json value.
@@ -51,8 +65,14 @@ def parseJson(value: str) -> Any:
         # it, and the generic "Expecting value: line 1 column 1" that follows sends you
         # looking at the schema instead of at modelOutputTokens. Checked after the
         # substitution so a complete block followed by a truncated one is caught too.
+        #
+        # Both clauses carry weight. re.sub is a single left-to-right pass, so deleting an
+        # inner pair can splice a fresh one into the remainder that the pass has already
+        # moved past: '<thi<think>x</think>nk>a</think>{...}' leaves '<think>a</think>{...}',
+        # which opens with <think> but is not a truncation. The closing-tag test is what
+        # keeps that from being reported as a budget problem.
         if value.startswith('<think>') and '</think>' not in value:
-            raise ValueError(
+            raise ThinkTruncatedError(
                 'model was cut off inside a <think> block and never emitted JSON; '
                 'raise modelOutputTokens, or disable reasoning for this call'
             )
