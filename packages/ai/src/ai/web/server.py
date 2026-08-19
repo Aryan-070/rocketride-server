@@ -941,9 +941,36 @@ class WebServer:
 
         Example:
             >>> server.addRoute('/hello', hello_handler, ['GET', 'POST'])
+
+        Raises:
+            ValueError: If any (method, path) pair was already registered.
+                FastAPI accepts duplicates silently and serves whichever
+                route was registered first, so a clash (e.g. a marketing
+                deep link vs. a future API endpoint on the same path) would
+                otherwise shadow one handler without any signal.
         """
+        # (method, path) pairs already registered — FastAPI accepts
+        # duplicates silently, so track them here. Created lazily to keep
+        # the duplicate check self-contained within add_route().
+        if not hasattr(self, '_registered_routes'):
+            self._registered_routes: set = set()
+
+        # Reject duplicate (method, path) registrations before touching the
+        # router so a failed call leaves no partial state behind. Track pairs
+        # seen within this call too, so e.g. methods=['GET', 'get'] is caught.
+        pending_routes: set = set()
+        for method in methods:
+            route_key = (method.upper(), path)
+            if route_key in self._registered_routes or route_key in pending_routes:
+                raise ValueError(f'Route already registered: {method.upper()} {path}')
+            pending_routes.add(route_key)
+
         # Add the route to the FastAPI application's router
         self.app.router.add_api_route(path, routeHandler, methods=methods, deprecated=deprecated)
+
+        # Record the pairs only once the router has accepted them, so a
+        # rejected registration stays retryable.
+        self._registered_routes.update(pending_routes)
 
         # Reset the OpenAPI schema to reflect the new route in documentation
         self.app.openapi_schema = None
