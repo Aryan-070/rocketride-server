@@ -288,6 +288,7 @@ channel; they have no data lanes and **bind to an agent** (see
 | Service         | Data flow (in → out)                                  | Description                                  |
 | --------------- | ----------------------------------------------------- | -------------------------------------------- |
 | `guardrails`    | questions, answers, documents → answers, documents, questions | Input/output safety guardrails       |
+| `authoritative_overlay` | answers, text → answers                         | SEC EDGAR period-scoped number cross-check (abstain on mismatch) |
 | `rerank_cohere` | questions → answers, documents                        | Cohere Rerank for retrieval quality          |
 | `search_exa`    | questions → answers, text                             | Direct Exa web search (non-tool)             |
 
