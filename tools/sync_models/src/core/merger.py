@@ -115,6 +115,71 @@ def _is_reasoning_model(bare_id: str) -> bool:
     return any(fam in low for fam in _REASONING_FAMILIES)
 
 
+def _is_swapped_output(out: Optional[int], ctx: Optional[int]) -> bool:
+    """
+    True when a source reports its max output tokens as the context window.
+
+    Only meaningful for providers that actually cap completions below their
+    window — see ``output_limit_below_context`` in sync_models.config.json.
+    Where a provider has no separate completion limit (its API accepts
+    ``max_tokens`` up to the context window), the two values are legitimately
+    equal and every source reports them that way, so callers must gate this
+    check on the provider rather than applying it everywhere.
+
+    Args:
+        out: Candidate max output tokens from a source.
+        ctx: Context window reported by that same source.
+
+    Returns:
+        True if the pair carries the swap signature.
+    """
+    return out is not None and ctx is not None and out == ctx
+
+
+def find_swapped_output_profiles(
+    profiles: Dict[str, Any],
+    confirmed_models: Optional[set] = None,
+    native_only: bool = False,
+) -> List[Tuple[str, int]]:
+    """
+    Return active profiles whose ``modelOutputTokens`` equals ``modelTotalTokens``.
+
+    On a provider that caps completions below its window, such a profile sends
+    the whole window as ``max_tokens`` and the call is rejected with a 400.
+
+    Deprecated profiles and placeholder profiles (no model ID, e.g. "custom")
+    are never reported: the first are unreachable, the second carry no limits.
+
+    Args:
+        profiles: The "preconfig.profiles" mapping from a services.json.
+        confirmed_models: Model IDs with an explicit entry in
+            ``model_output_tokens.overrides``. A human has stated the value, so
+            equality there is a confirmed limit rather than a suspect one.
+        native_only: Restrict to profiles discovered through the provider's own
+            API (``modelSource: provider``). OpenRouter and LiteLLM aliases are
+            served elsewhere and are not bound by this provider's limit.
+
+    Returns:
+        List of (profile_key, shared_token_value), sorted by key.
+    """
+    confirmed = confirmed_models or set()
+    found: List[Tuple[str, int]] = []
+    for key, profile in profiles.items():
+        if not isinstance(profile, dict):
+            continue
+        if profile.get('deprecated') or not profile.get('model'):
+            continue
+        if profile.get('model') in confirmed:
+            continue
+        if native_only and profile.get('modelSource') != 'provider':
+            continue
+        total = profile.get('modelTotalTokens')
+        output = profile.get('modelOutputTokens')
+        if isinstance(total, int) and total == output:
+            found.append((key, total))
+    return sorted(found)
+
+
 def _source_is_authoritative(source: str, model_source: str) -> bool:
     """
     Return True if the given sync source has authority to deprecate or
@@ -385,6 +450,7 @@ def merge(
     normalize_profile_model_id=None,
     deprecation_source: str = 'provider API',
     derive_title_fn=None,
+    output_limit_below_context: bool = False,
 ) -> tuple[Dict[str, Any], MergeResult]:
     """
     Perform a smart merge of current profiles against the provider API model list.
@@ -591,26 +657,37 @@ def merge(
         else:
             api_output_tokens = -1  # sentinel — replaced below
             output_tokens_src = 'default'
+
+            # On a provider that caps completions below its window, a candidate equal
+            # to its own source's context window is the swap signature — skip it and
+            # try the next source rather than break, so a good value further down the
+            # list still wins. Elsewhere the equality is legitimate and must be kept.
+            def _usable(out: Optional[int], ctx: Optional[int]) -> bool:
+                return not (output_limit_below_context and _is_swapped_output(out, ctx))
+
             for _src in model_sources:
                 if _src == 'provider' and _api_entry_source == 'provider API' and _api_entry_out is not None:
-                    api_output_tokens = _api_entry_out
-                    output_tokens_src = 'provider API'
-                    break
+                    if _usable(_api_entry_out, _api_ctx):
+                        api_output_tokens = _api_entry_out
+                        output_tokens_src = 'provider API'
+                        break
                 if _src == 'openrouter':
                     if _api_entry_source == 'openrouter' and _api_entry_out is not None:
-                        api_output_tokens = _api_entry_out
-                        output_tokens_src = 'openrouter'
-                        break
-                    if _or_out is not None:
+                        if _usable(_api_entry_out, _api_ctx):
+                            api_output_tokens = _api_entry_out
+                            output_tokens_src = 'openrouter'
+                            break
+                    if _or_out is not None and _usable(_or_out, _or_ctx):
                         api_output_tokens = _or_out
                         output_tokens_src = 'openrouter'
                         break
                 if _src == 'litellm':
                     if _api_entry_source == 'litellm' and _api_entry_out is not None:
-                        api_output_tokens = _api_entry_out
-                        output_tokens_src = 'litellm'
-                        break
-                    if _litellm_out is not None:
+                        if _usable(_api_entry_out, _api_ctx):
+                            api_output_tokens = _api_entry_out
+                            output_tokens_src = 'litellm'
+                            break
+                    if _litellm_out is not None and _usable(_litellm_out, _litellm_ctx):
                         api_output_tokens = _litellm_out
                         output_tokens_src = 'litellm'
                         break
@@ -682,7 +759,12 @@ def merge(
                 # any patcher rewrite, even when the value itself hasn't changed.
                 updated_profiles[profile_key]['_src_modelTotalTokens'] = total_tokens_src
 
-            if api_output_tokens > 0:
+            # 'default' means no source produced a usable value (none had one, or the
+            # only candidates carried the swap signature). That is a fallback for new
+            # profiles, not evidence about this model — never let it overwrite a value
+            # already in the catalogue.
+            _output_is_fallback = output_tokens_src == 'default' and existing.get('modelOutputTokens') is not None
+            if api_output_tokens > 0 and not _output_is_fallback:
                 if existing.get('modelOutputTokens') != api_output_tokens:
                     old_val = existing.get('modelOutputTokens')
                     updated_profiles[profile_key]['modelOutputTokens'] = api_output_tokens
