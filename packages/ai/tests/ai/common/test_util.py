@@ -160,8 +160,21 @@ def test_parse_json_does_not_misreport_a_spliced_think_pair():
         '<think>The schema is {title, body}, so I will start with the',
         '<think>Fields {a, b} and options [x, y]; taking them in',
         '<think>I need to emit {"title": ... but first let me check the',
+        '<think>consider {"a": 1}; that shape works, so next I will',
+        '<think>I will return {"title": "X"} and then add the',
+        '<think>I will use option 2',
+        '<think>the flag should be true',
     ],
-    ids=['bracket', 'brace', 'both', 'partial-json'],
+    ids=[
+        'bracket',
+        'brace',
+        'both',
+        'partial-json',
+        'embedded-fragment',
+        'drafted-then-cut',
+        'ends-on-number',
+        'ends-on-keyword',
+    ],
 )
 def test_parse_json_names_a_truncation_whose_reasoning_mentions_brackets(raw):
     """Reasoning that merely MENTIONS a brace is still a truncation.

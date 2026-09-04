@@ -49,21 +49,38 @@ class ThinkTruncatedError(ValueError):
 
 
 def _holdsCompleteJson(value: str) -> bool:
-    """True when a complete JSON value can be decoded somewhere in ``value``.
+    """True when ``value`` ENDS in a complete JSON object or array.
 
     Used to tell a model that never reached its JSON apart from one that emitted it and
-    merely dropped a closing tag. Testing for a bare '{' or '[' is not enough: reasoning
-    about a JSON answer routinely writes one ("the schema is {title, body}"), so the
-    character alone would call almost every real truncation a success.
+    merely dropped a closing tag. Two things this deliberately is not:
+
+    A bare '{' or '[' test is too loose -- reasoning about a JSON answer routinely writes
+    one ("the schema is {title, body}"), so the character alone would call almost every
+    real truncation a success.
+
+    Decoding *anywhere* is also too loose. A model drafting its answer mid-reasoning
+    ('I will return {"title": "X"} and then add the') leaves a fragment that decodes
+    perfectly but is still followed by prose, and it is still a truncation. So the
+    decoded value must run to the end, give or take whitespace and a closing fence.
+
+    Only objects and arrays count as starts. ``parseJson`` accepts a bare scalar, but no
+    model answers an expectJson prompt with one, whereas reasoning that happens to break
+    off on a number or on the word "true" is an ordinary truncation -- honouring scalars
+    would trade a real case for an imaginary one.
     """
+    tail = value.strip()
+    if tail.endswith('```'):
+        tail = tail[:-3].rstrip()
+
     decoder = json.JSONDecoder()
-    for i, ch in enumerate(value):
+    for i, ch in enumerate(tail):
         if ch in '{[':
             try:
-                decoder.raw_decode(value, i)
+                _, end = decoder.raw_decode(tail, i)
             except ValueError:
                 continue
-            return True
+            if not tail[end:].strip():
+                return True
     return False
 
 
