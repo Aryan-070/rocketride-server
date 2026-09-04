@@ -153,6 +153,28 @@ def test_parse_json_does_not_misreport_a_spliced_think_pair():
         util.parseJson(raw)
 
 
+@pytest.mark.parametrize(
+    'raw',
+    [
+        '<think>let me reason about the fields\n{"a": 1}',
+        '<think>reasoning\n```json\n{"a": 1}\n```',
+        '<think>listing them\n[1, 2, 3]',
+    ],
+    ids=['bare-object', 'fenced-object', 'array'],
+)
+def test_parse_json_does_not_blame_budget_when_json_actually_arrived(raw):
+    """A missing ``</think>`` is not by itself a budget overflow.
+
+    A model can finish its reasoning, emit the JSON, and simply drop the closing tag --
+    which happens when the tag is consumed as a stop sequence. The response is still
+    unparseable, but ``modelOutputTokens`` is not the fix, and saying so sends the
+    operator to a setting that cannot help. These fall through to the ordinary parse
+    error instead, exactly as they did before the truncation check existed.
+    """
+    with pytest.raises(json.JSONDecodeError):
+        util.parseJson(raw)
+
+
 def test_parse_json_keeps_inner_backticks_in_string_value():
     """Triple-backticks inside a JSON string value must NOT be treated as fences."""
     raw = '{"answer": "see ```python\\nprint(1)\\n``` here"}'

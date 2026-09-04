@@ -66,12 +66,21 @@ def parseJson(value: str) -> Any:
         # looking at the schema instead of at modelOutputTokens. Checked after the
         # substitution so a complete block followed by a truncated one is caught too.
         #
-        # Both clauses carry weight. re.sub is a single left-to-right pass, so deleting an
-        # inner pair can splice a fresh one into the remainder that the pass has already
-        # moved past: '<thi<think>x</think>nk>a</think>{...}' leaves '<think>a</think>{...}',
-        # which opens with <think> but is not a truncation. The closing-tag test is what
-        # keeps that from being reported as a budget problem.
-        if value.startswith('<think>') and '</think>' not in value:
+        # All three clauses carry weight.
+        #
+        # re.sub is a single left-to-right pass, so deleting an inner pair can splice a
+        # fresh one into the remainder that the pass has already moved past:
+        # '<thi<think>x</think>nk>a</think>{...}' leaves '<think>a</think>{...}', which
+        # opens with <think> but is not a truncation. The closing-tag test excludes that.
+        #
+        # A missing </think> is not by itself proof of a budget overflow -- a model can
+        # emit its JSON and simply drop the closing tag, e.g. when the tag is consumed as
+        # a stop sequence. '<think>reasoning\n{"a": 1}' is that shape. Blaming
+        # modelOutputTokens there sends the operator to a setting that will not help, so
+        # require the remainder to hold no object or array opener before claiming the
+        # model never reached the JSON. When one is present this falls through to the
+        # ordinary parse error, which is what such input got before this check existed.
+        if value.startswith('<think>') and '</think>' not in value and '{' not in value and '[' not in value:
             raise ThinkTruncatedError(
                 'model was cut off inside a <think> block and never emitted JSON; '
                 'raise modelOutputTokens, or disable reasoning for this call'
