@@ -48,6 +48,25 @@ class ThinkTruncatedError(ValueError):
     """
 
 
+def _holdsCompleteJson(value: str) -> bool:
+    """True when a complete JSON value can be decoded somewhere in ``value``.
+
+    Used to tell a model that never reached its JSON apart from one that emitted it and
+    merely dropped a closing tag. Testing for a bare '{' or '[' is not enough: reasoning
+    about a JSON answer routinely writes one ("the schema is {title, body}"), so the
+    character alone would call almost every real truncation a success.
+    """
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(value):
+        if ch in '{[':
+            try:
+                decoder.raw_decode(value, i)
+            except ValueError:
+                continue
+            return True
+    return False
+
+
 def parseJson(value: str) -> Any:
     """
     Parse a string and return a json value.
@@ -75,12 +94,12 @@ def parseJson(value: str) -> Any:
         #
         # A missing </think> is not by itself proof of a budget overflow -- a model can
         # emit its JSON and simply drop the closing tag, e.g. when the tag is consumed as
-        # a stop sequence. '<think>reasoning\n{"a": 1}' is that shape. Blaming
-        # modelOutputTokens there sends the operator to a setting that will not help, so
-        # require the remainder to hold no object or array opener before claiming the
-        # model never reached the JSON. When one is present this falls through to the
-        # ordinary parse error, which is what such input got before this check existed.
-        if value.startswith('<think>') and '</think>' not in value and '{' not in value and '[' not in value:
+        # a stop sequence. '<think>reasoning\n{"a": 1}' is that shape, and blaming
+        # modelOutputTokens there sends the operator to a setting that will not help.
+        # So ask whether a JSON value can actually be DECODED, not merely whether a brace
+        # appears -- reasoning that mentions '{title, body}' or 'compare [A, B]' is a
+        # truncation like any other, and a character test would wave it through.
+        if value.startswith('<think>') and '</think>' not in value and not _holdsCompleteJson(value):
             raise ThinkTruncatedError(
                 'model was cut off inside a <think> block and never emitted JSON; '
                 'raise modelOutputTokens, or disable reasoning for this call'

@@ -156,6 +156,28 @@ def test_parse_json_does_not_misreport_a_spliced_think_pair():
 @pytest.mark.parametrize(
     'raw',
     [
+        '<think>Compare [A, B] and decide which one the user meant',
+        '<think>The schema is {title, body}, so I will start with the',
+        '<think>Fields {a, b} and options [x, y]; taking them in',
+        '<think>I need to emit {"title": ... but first let me check the',
+    ],
+    ids=['bracket', 'brace', 'both', 'partial-json'],
+)
+def test_parse_json_names_a_truncation_whose_reasoning_mentions_brackets(raw):
+    """Reasoning that merely MENTIONS a brace is still a truncation.
+
+    A model reasoning its way toward JSON routinely writes one -- "the schema is
+    {title, body}" is an ordinary sentence in that chain. Testing for the character
+    would wave through most real truncations, which is the exact failure #1822
+    reports. The test is whether a complete JSON value can be *decoded*.
+    """
+    with pytest.raises(util.ThinkTruncatedError, match='modelOutputTokens'):
+        util.parseJson(raw)
+
+
+@pytest.mark.parametrize(
+    'raw',
+    [
         '<think>let me reason about the fields\n{"a": 1}',
         '<think>reasoning\n```json\n{"a": 1}\n```',
         '<think>listing them\n[1, 2, 3]',
